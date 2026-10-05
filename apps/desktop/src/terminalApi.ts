@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import type { AgentId } from "./agents";
+import { parseCollabStatus, type CollabStatus } from "./collabStatus";
 
 type OutputPayload = { terminalId: string; data: number[] };
 type ExitPayload = { terminalId: string };
@@ -60,6 +61,16 @@ export async function openShell(cols: number, rows: number, cwd: string | null =
 /// Subcarpetas de `path`, ya ordenadas por el núcleo.
 export function listSubdirectories(path: string): Promise<string[]> {
   return invoke<string[]>("list_subdirectories", { path });
+}
+
+/// Estado actual de colaboración (relay + colaboradores). Sondea el relay: puede tardar hasta su timeout.
+export async function getCollabStatus(): Promise<CollabStatus> {
+  return parseCollabStatus(await invoke<unknown>("collab_status"));
+}
+
+/// Cambios del estado de colaboración que emite el núcleo. Devuelve la función para dejar de escuchar.
+export function onCollabStatus(handler: (status: CollabStatus) => void): Promise<() => void> {
+  return listen<unknown>("collab-status", ({ payload }) => handler(parseCollabStatus(payload)));
 }
 
 export function closeTerminal(terminalId: string): Promise<void> {

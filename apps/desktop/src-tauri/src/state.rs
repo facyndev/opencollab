@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use application::ports::{ProcessInspector, PtyPort, WorkspaceRepository};
+use application::ports::{ProcessInspector, PtyPort, RelayProbe, WorkspaceRepository};
 use application::{
-    AppError, CloseTerminal, DetectTerminalAgents, LaunchTerminal, ListSubdirectories,
-    ResizeTerminal, SendTerminalInput,
+    AppError, CheckRelay, CloseTerminal, DetectTerminalAgents, LaunchTerminal, ListSubdirectories,
+    ResizeTerminal, SendTerminalInput, SessionCollaborators,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
-    FsDirectoryBrowser, InMemoryWorkspaceRepository, PortablePtyAdapter, SysinfoProcessInspector,
+    FsDirectoryBrowser, HttpRelayProbe, InMemoryWorkspaceRepository, PortablePtyAdapter,
+    SysinfoProcessInspector,
 };
 
 /// Dependencias cableadas de la app. Mientras no haya cuentas ni persistencia,
@@ -21,6 +22,8 @@ pub struct AppState {
     pub close_terminal: CloseTerminal,
     pub detect_agents: DetectTerminalAgents,
     pub list_subdirectories: ListSubdirectories,
+    pub check_relay: CheckRelay,
+    pub session_collaborators: SessionCollaborators,
 }
 
 impl AppState {
@@ -28,6 +31,11 @@ impl AppState {
         let repo: Arc<dyn WorkspaceRepository> = Arc::new(InMemoryWorkspaceRepository::new());
         let pty: Arc<dyn PtyPort> = Arc::new(PortablePtyAdapter::new());
         let inspector: Arc<dyn ProcessInspector> = Arc::new(SysinfoProcessInspector::new());
+
+        // Dirección del relay: `RELAY_ADDR` o la de por defecto del protocolo.
+        let relay_addr = std::env::var("RELAY_ADDR")
+            .unwrap_or_else(|_| protocol::DEFAULT_RELAY_ADDR.to_string());
+        let relay_probe: Arc<dyn RelayProbe> = Arc::new(HttpRelayProbe::new(relay_addr));
 
         let local_user = UserId::new();
         let workspace = Workspace::new(local_user, "Local");
@@ -43,8 +51,10 @@ impl AppState {
             send_input: SendTerminalInput::new(repo.clone(), pty.clone()),
             resize_terminal: ResizeTerminal::new(repo.clone(), pty.clone()),
             close_terminal: CloseTerminal::new(repo.clone(), pty.clone()),
-            detect_agents: DetectTerminalAgents::new(repo, pty, inspector),
+            detect_agents: DetectTerminalAgents::new(repo.clone(), pty, inspector),
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
+            check_relay: CheckRelay::new(relay_probe),
+            session_collaborators: SessionCollaborators::new(repo),
         })
     }
 }

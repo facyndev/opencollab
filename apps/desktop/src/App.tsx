@@ -19,6 +19,7 @@ import {
   type Workspace,
 } from "./model";
 import { isMod } from "./shortcuts";
+import { useCollabStatus } from "./useCollabStatus";
 import { usePaneDrag } from "./usePaneDrag";
 
 function initialWorkspaces(): Workspace[] {
@@ -28,6 +29,7 @@ function initialWorkspaces(): Workspace[] {
 }
 
 export function App() {
+  const collab = useCollabStatus();
   const [workspaces, setWorkspaces] = useState<Workspace[]>(initialWorkspaces);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => workspaces[0].id);
   // Sesión activa recordada por workspace, para volver a la misma al cambiar.
@@ -291,7 +293,7 @@ export function App() {
           )}
         </main>
 
-        <StatusBar />
+        <StatusBar connected={collab.connected} syncMs={collab.syncMs} collaborators={collab.collaborators} />
       </div>
     </div>
   );
