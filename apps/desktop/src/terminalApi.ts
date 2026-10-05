@@ -15,15 +15,12 @@ type ExitPayload = { terminalId: string };
 type AgentPayload = { terminalId: string; agents: AgentId[]; startedAt: number | null };
 /// El núcleo solo lo emite cuando el estado cambia.
 type ActivityPayload = { terminalId: string; state: Activity };
-type AgentSessionPayload = { terminalId: string; title: string | null };
 
 export type TerminalHandlers = {
   onOutput: (data: Uint8Array) => void;
   onExit: () => void;
   /// Agentes conocidos que corren en la terminal (lista vacía = ninguno).
   onAgent: (agents: AgentId[], startedAt: number | null) => void;
-  /// Título de sesión activo del agente en la terminal (`null` si no hay).
-  onSessionTitle?: (title: string | null) => void;
   /// Actividad inferida de la salida del PTY (`working` / `idle`).
   onActivity?: (state: Activity) => void;
 };
@@ -34,7 +31,6 @@ const handlers = new Map<string, TerminalHandlers>();
 const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
 const agentEarly = new Map<string, { agents: AgentId[]; startedAt: number | null }>();
-const sessionTitleEarly = new Map<string, string | null>();
 const activityEarly = new Map<string, Activity>();
 
 let listening: Promise<void> | null = null;
@@ -57,11 +53,6 @@ function ensureListening(): Promise<void> {
       const startedAt = payload.startedAt ?? null;
       if (handler) handler.onAgent(payload.agents, startedAt);
       else agentEarly.set(payload.terminalId, { agents: payload.agents, startedAt });
-    }),
-    listen<AgentSessionPayload>("terminal-agent-session", ({ payload }) => {
-      const handler = handlers.get(payload.terminalId);
-      if (handler?.onSessionTitle) handler.onSessionTitle(payload.title);
-      else sessionTitleEarly.set(payload.terminalId, payload.title);
     }),
     listen<ActivityPayload>("terminal-activity", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
@@ -114,19 +105,11 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
   const agentInfo = agentEarly.get(terminalId);
   if (agentInfo) h.onAgent(agentInfo.agents, agentInfo.startedAt);
   agentEarly.delete(terminalId);
-  if (sessionTitleEarly.has(terminalId)) {
-    h.onSessionTitle?.(sessionTitleEarly.get(terminalId) ?? null);
-    sessionTitleEarly.delete(terminalId);
-  }
   const activity = activityEarly.get(terminalId);
   if (activity) h.onActivity?.(activity);
   activityEarly.delete(terminalId);
   if (exitedEarly.delete(terminalId)) h.onExit();
   return () => handlers.delete(terminalId);
-}
-
-export function getAgentSessionTitle(terminalId: string): Promise<string | null> {
-  return invoke<string | null>("agent_session_title", { terminalId });
 }
 
 export function writeTerminal(terminalId: string, data: string): Promise<void> {

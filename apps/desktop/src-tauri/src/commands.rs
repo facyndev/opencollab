@@ -10,11 +10,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use infrastructure::default_shell_profile;
 
-use application::{ActivityTracker, TrackAgentSessionTitle};
+use application::ActivityTracker;
 
-use crate::agent_session::{
-    forget_terminal, hook_status_dto, parse_agent, HookStatusDto, TERMINAL_AGENT_SESSION_EVENT,
-};
 use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
 
@@ -37,7 +34,6 @@ struct TerminalExitPayload {
 /// Reenvía la salida de los PTY al frontend como eventos.
 struct TauriOutputSink {
     app: AppHandle,
-    agent_sessions: Arc<TrackAgentSessionTitle>,
     activity: Arc<ActivityTracker>,
 }
 
@@ -55,20 +51,12 @@ impl TerminalOutputSink for TauriOutputSink {
 
     fn exited(&self, terminal: TerminalId) {
         self.activity.forget(terminal);
-        emit_forgotten(&self.app, &self.agent_sessions, terminal);
         let _ = self.app.emit(
             TERMINAL_EXIT_EVENT,
             TerminalExitPayload {
                 terminal_id: terminal.to_string(),
             },
         );
-    }
-}
-
-/// La terminal terminó: descarta su sesión de agente y avisa a la UI si tenía.
-fn emit_forgotten(app: &AppHandle, tracker: &TrackAgentSessionTitle, terminal: TerminalId) {
-    if let Some(payload) = forget_terminal(tracker, terminal) {
-        let _ = app.emit(TERMINAL_AGENT_SESSION_EVENT, payload);
     }
 }
 
@@ -97,7 +85,6 @@ pub fn open_shell(
 ) -> Result<OpenedTerminal, String> {
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
         app,
-        agent_sessions: state.agent_sessions.clone(),
         activity: state.activity.clone(),
     });
     let profile = default_shell_profile(cwd.as_deref().map(std::path::Path::new));
@@ -178,60 +165,14 @@ pub fn collab_status(state: State<'_, AppState>) -> Result<CollabStatusPayload, 
 }
 
 #[tauri::command(async)]
-pub fn close_terminal(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    terminal_id: String,
-) -> Result<(), String> {
+pub fn close_terminal(state: State<'_, AppState>, terminal_id: String) -> Result<(), String> {
     let terminal = parse_terminal(&terminal_id)?;
     state
         .close_terminal
         .execute(state.local_user, state.session_id, terminal)
         .map_err(|e| e.to_string())?;
     state.activity.forget(terminal);
-    emit_forgotten(&app, &state.agent_sessions, terminal);
     Ok(())
-}
-
-/// Título de sesión activo de una terminal (los cambios llegan por el
-/// evento `terminal-agent-session`).
-#[tauri::command]
-pub fn agent_session_title(
-    state: State<'_, AppState>,
-    terminal_id: String,
-) -> Result<Option<String>, String> {
-    let terminal = parse_terminal(&terminal_id)?;
-    Ok(state.agent_sessions.title(terminal))
-}
-
-// Los comandos de hooks leen y escriben archivos de configuración: `async`
-// para no bloquear el hilo principal.
-#[tauri::command(async)]
-pub fn hook_status(state: State<'_, AppState>) -> Vec<HookStatusDto> {
-    state
-        .inspect_hooks
-        .execute()
-        .into_iter()
-        .map(|(agent, status)| hook_status_dto(agent, status))
-        .collect()
-}
-
-#[tauri::command(async)]
-pub fn install_agent_hooks(state: State<'_, AppState>, agent: String) -> Result<(), String> {
-    let agent = parse_agent(&agent)?;
-    state
-        .install_hooks
-        .execute(agent)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command(async)]
-pub fn uninstall_agent_hooks(state: State<'_, AppState>, agent: String) -> Result<(), String> {
-    let agent = parse_agent(&agent)?;
-    state
-        .uninstall_hooks
-        .execute(agent)
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

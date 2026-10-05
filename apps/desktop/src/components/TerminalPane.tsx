@@ -66,7 +66,6 @@ export function TerminalPane(props: Props) {
   const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
-  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
   /// El handler de actividad se registra una vez: lee el foco vigente desde acá.
   const focusedRef = useRef(props.focused);
@@ -83,13 +82,12 @@ export function TerminalPane(props: Props) {
         shellName: info?.name ?? null,
         agents,
         cwd,
-        sessionTitle,
         startedAt,
         branch,
         activity: activityState.activity,
         attention: activityState.attention,
       }),
-    [paneId, info?.name, agents, cwd, sessionTitle, startedAt, branch, activityState, onMeta],
+    [paneId, info?.name, agents, cwd, startedAt, branch, activityState, onMeta],
   );
   // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
   useEffect(() => {
@@ -152,16 +150,13 @@ export function TerminalPane(props: Props) {
             setStatus("done");
             setAgents([]);
             setStartedAt(null);
-            setSessionTitle(null);
             setActivityState(initialActivity);
             void closeRef.current();
           },
           onAgent: (newAgents, newStartedAt) => {
             setAgents(newAgents);
             setStartedAt(newStartedAt);
-            if (newAgents.length === 0) setSessionTitle(null);
           },
-          onSessionTitle: setSessionTitle,
           onActivity: (next) =>
             setActivityState((s) => applyActivity(s, next, focusedRef.current)),
         });

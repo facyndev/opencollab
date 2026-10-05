@@ -7,12 +7,9 @@
 //   writes                lo que la UI le escribió a cada terminal
 //   opened                argumentos de cada open_shell
 //   closed                terminalId de cada close_terminal
-//   (eventos del núcleo: terminal-output/exit/agent/agent-session/activity)
-//   agentSessions         terminalId -> título de sesión devuelto por agent_session_title
-//   hooks                 agente -> estado ("installed" | "notInstalled" | ...) de hook_status
+//   (eventos del núcleo: terminal-output/exit/agent/activity)
 //   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
 //   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
-//   hookCalls             { cmd, agent } de cada install/uninstall_agent_hooks
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
@@ -20,16 +17,7 @@ export function installTauriMock() {
   const writes = [];
   const opened = [];
   const closed = [];
-  const agentSessions = {};
-  const hookCalls = [];
   const branches = {};
-  // Estado de los hooks como lo reportaría el núcleo en una máquina limpia.
-  const hooks = {
-    "claude-code": "notInstalled",
-    opencode: "notInstalled",
-    codex: "notInstalled",
-    "antigravity-cli": "unsupported",
-  };
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -47,7 +35,7 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, prompt, writes, opened, closed, agentSessions, branches, hooks, hookCalls };
+  window.__mock = { emit, prompt, writes, opened, closed, branches };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -83,21 +71,9 @@ export function installTauriMock() {
           closed.push(args.terminalId);
           setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
           return null;
-        case "agent_session_title":
-          return agentSessions[args.terminalId] ?? null;
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
           return { connected: false, syncMs: null, collaborators: 1 };
-        case "hook_status":
-          return Object.entries(hooks).map(([agent, status]) => ({ agent, status }));
-        case "install_agent_hooks":
-        case "uninstall_agent_hooks": {
-          hookCalls.push({ cmd, agent: args.agent });
-          if (!(args.agent in hooks)) throw `agente desconocido: ${args.agent}`;
-          if (hooks[args.agent] === "unsupported") throw "Antigravity CLI no expone hooks";
-          hooks[args.agent] = cmd === "install_agent_hooks" ? "installed" : "notInstalled";
-          return null;
-        }
         case "git_branch":
           return branches[args.path] ?? null;
         case "list_subdirectories":

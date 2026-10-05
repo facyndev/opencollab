@@ -1,7 +1,6 @@
 // Evita la consola extra en Windows en builds de release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod agent_session;
 mod agent_watcher;
 mod collab_status;
 mod commands;
@@ -17,7 +16,7 @@ fn main() {
                     let _ = window.set_icon(icon.clone());
                 }
             }
-            app.manage(state::AppState::bootstrap(app.handle())?);
+            app.manage(state::AppState::bootstrap()?);
             agent_watcher::spawn(app.handle().clone());
             collab_status::spawn(app.handle().clone());
             Ok(())
@@ -29,11 +28,7 @@ fn main() {
             commands::close_terminal,
             commands::list_subdirectories,
             commands::git_branch,
-            commands::agent_session_title,
             commands::collab_status,
-            commands::hook_status,
-            commands::install_agent_hooks,
-            commands::uninstall_agent_hooks,
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar OpenCollab");

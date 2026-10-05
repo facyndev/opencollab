@@ -4,9 +4,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::agent_detection::{KnownAgent, ProcessInfo};
+use crate::agent_detection::ProcessInfo;
 use crate::git::Branch;
-use crate::hooks::HookStatus;
 
 use domain::{
     AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId,
@@ -75,30 +74,11 @@ pub trait ProcessInspector: Send + Sync {
     fn snapshot(&self) -> Result<Vec<ProcessInfo>, PortError>;
 }
 
-/// Traduce el payload crudo de un hook de un agente a un título de sesión.
-/// El payload llega como texto: interpretarlo (JSON, etc.) es trabajo de la
-/// infraestructura.
-pub trait SessionTitleTranslator: Send + Sync {
-    fn agent(&self) -> KnownAgent;
-    fn translate(&self, payload: &str) -> Result<Option<String>, PortError>;
-}
-
 /// Sondea al relay de colaboración. Bloquea hasta responder o agotar su timeout,
 /// así que quien lo llame periódicamente debe hacerlo fuera del hilo de la UI.
 pub trait RelayProbe: Send + Sync {
     /// Tiempo de ida y vuelta si el relay respondió bien; error si no.
     fn probe(&self) -> Result<Duration, PortError>;
-}
-
-/// Instala / quita en la configuración de un agente los hooks o el plugin que
-/// reportan el título de su sesión. Uno por agente; solo agrega y quita entradas propias.
-pub trait HookInstaller: Send + Sync {
-    fn agent(&self) -> KnownAgent;
-    fn status(&self) -> Result<HookStatus, PortError>;
-    /// Idempotente: instalar dos veces no duplica entradas.
-    fn install(&self) -> Result<(), PortError>;
-    /// Deja la configuración como estaba antes de instalar.
-    fn uninstall(&self) -> Result<(), PortError>;
 }
 
 pub trait WorkspaceRepository: Send + Sync {

@@ -34,17 +34,11 @@ export default async function cwdAndThread(page, checks) {
       terminalId: "t2",
       agents: ["claude-code", "codex"],
     });
-    window.__mock.emit("terminal-agent-session", {
-      terminalId: "t2",
-      title: "Fix authentication bug",
-    });
   });
   await wait(200);
   const thread = await page.$$eval(".thread-label", (els) => els.map((e) => e.textContent));
   checks["el hilo lista las terminales con su shell/agente"] =
     thread.includes("PowerShell") && thread.includes("Claude Code") && thread.includes("Codex");
-  checks["el hilo muestra el titulo de sesion del agente"] =
-    thread.includes("Fix authentication bug");
   checks["el hilo muestra el logo del agente"] =
     (await page.$$(".thread-item .terminal-icon--logo")).length === 2;
   checks["el agente anidado cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {

@@ -15,7 +15,6 @@ export type PaneMeta = {
   shellName: string | null;
   agents: AgentId[];
   cwd: string | null;
-  sessionTitle?: string | null;
   /// Actividad inferida de la salida; `null` hasta que el núcleo informa algo.
   /// Arranque del agente principal (segundos desde la época Unix); `null` si no hay agente.
   startedAt?: number | null;
@@ -24,7 +23,6 @@ export type PaneMeta = {
   activity?: Activity | null;
   /// Terminó de trabajar sin que su panel estuviera enfocado y aún no se miró.
   attention?: boolean;
-  terminalId?: string | null;
 };
 
 export type Pane = {

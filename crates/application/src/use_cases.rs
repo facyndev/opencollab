@@ -3,7 +3,6 @@ use std::sync::Arc;
 use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace};
 
 use crate::agent_detection::{detect_agents, AgentTree};
-use crate::agent_session::HookEndpoint;
 use crate::error::AppError;
 use crate::git::Branch;
 use crate::ports::{
@@ -28,23 +27,11 @@ fn load(
 pub struct LaunchTerminal {
     repo: Arc<dyn WorkspaceRepository>,
     pty: Arc<dyn PtyPort>,
-    hook_endpoint: Option<HookEndpoint>,
 }
 
 impl LaunchTerminal {
     pub fn new(repo: Arc<dyn WorkspaceRepository>, pty: Arc<dyn PtyPort>) -> Self {
-        Self {
-            repo,
-            pty,
-            hook_endpoint: None,
-        }
-    }
-
-    /// Cada terminal lanzada recibe en su entorno el endpoint de los hooks y su
-    /// propio id, para que los eventos de los agentes vuelvan atados a ella.
-    pub fn with_hook_endpoint(mut self, endpoint: HookEndpoint) -> Self {
-        self.hook_endpoint = Some(endpoint);
-        self
+        Self { repo, pty }
     }
 
     pub fn execute(
@@ -57,13 +44,6 @@ impl LaunchTerminal {
     ) -> Result<TerminalId, AppError> {
         let (workspace, mut session) = load(self.repo.as_ref(), session_id)?;
         let terminal = session.add_terminal(&workspace, actor, profile.clone())?;
-        let profile = match &self.hook_endpoint {
-            Some(endpoint) => profile
-                .with_env(HookEndpoint::ENV_TERMINAL_ID, terminal.to_string())
-                .with_env(HookEndpoint::ENV_URL, endpoint.url.clone())
-                .with_env(HookEndpoint::ENV_TOKEN, endpoint.token.clone()),
-            None => profile,
-        };
         self.pty.spawn(terminal, &profile, size, sink)?;
         self.repo.save_session(session)?;
         Ok(terminal)
@@ -440,53 +420,6 @@ mod tests {
         assert_eq!(*w.pty.spawned.lock().unwrap(), vec![w.terminal]);
         let session = w.repo.find_session(w.session_id).unwrap().unwrap();
         assert!(session.terminal(w.terminal).is_some());
-    }
-
-    fn launch_with(w: &World, launcher: LaunchTerminal) -> (TerminalId, AgentProfile) {
-        let terminal = launcher
-            .execute(
-                w.owner,
-                w.session_id,
-                AgentProfile::new("shell", "sh")
-                    .unwrap()
-                    .with_env("PROPIA", "1"),
-                TerminalSize::default(),
-                Arc::new(NullSink),
-            )
-            .unwrap();
-        let profile = w.pty.profiles.lock().unwrap().last().unwrap().clone();
-        (terminal, profile)
-    }
-
-    #[test]
-    fn launch_injects_hook_env_with_the_terminal_id() {
-        let w = world();
-        let launcher = LaunchTerminal::new(w.repo.clone(), w.pty.clone())
-            .with_hook_endpoint(HookEndpoint::new("http://127.0.0.1:9/hook", "secreto"));
-        let (terminal, profile) = launch_with(&w, launcher);
-        let get = |key: &str| {
-            profile
-                .env
-                .iter()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v.clone())
-        };
-        assert_eq!(get("OPENCOLLAB_TERMINAL_ID"), Some(terminal.to_string()));
-        assert_eq!(
-            get("OPENCOLLAB_HOOK_URL").as_deref(),
-            Some("http://127.0.0.1:9/hook")
-        );
-        assert_eq!(get("OPENCOLLAB_HOOK_TOKEN").as_deref(), Some("secreto"));
-        // Respeta el entorno que ya traía el perfil.
-        assert_eq!(get("PROPIA").as_deref(), Some("1"));
-    }
-
-    #[test]
-    fn launch_without_hook_endpoint_adds_no_env() {
-        let w = world();
-        let launcher = LaunchTerminal::new(w.repo.clone(), w.pty.clone());
-        let (_, profile) = launch_with(&w, launcher);
-        assert_eq!(profile.env, vec![("PROPIA".to_string(), "1".to_string())]);
     }
 
     struct FakeBrowser(Vec<&'static str>);

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import { VscComment, VscTerminal } from "react-icons/vsc";
+import { VscTerminal } from "react-icons/vsc";
 
 import { agentInfo } from "../agents";
 import { opencollabLogoRounded } from "../assets/brand";
-import { Check, ChevronDown, ChevronsUpDown, Plus, Search, Sliders } from "../icons";
+import { Check, ChevronDown, ChevronsUpDown, Plus, Search } from "../icons";
 import {
   localUser,
   sessionSummary,
@@ -13,11 +13,8 @@ import {
   type Workspace,
 } from "../model";
 import { modKey } from "../shortcuts";
-import { buildSubagentTree, type SubagentNode } from "../subagents";
-import type { Subagent } from "../subagentsApi";
 import { IconButton } from "./Button";
 import { Panel } from "./Panel";
-import { SettingsModal } from "./SettingsModal";
 import { TerminalIcon } from "./TerminalIcon";
 import { ThreadMeta } from "./ThreadMeta";
 
@@ -28,7 +25,6 @@ type Props = {
   focusedPaneId: string | null;
   statuses: Record<string, PaneStatus>;
   meta: Record<string, PaneMeta>;
-  subagentsByTerminal?: Record<string, Subagent[]>;
   searchRef: React.RefObject<HTMLInputElement | null>;
   onSelectWorkspace: (id: string) => void;
   onCreateWorkspace: () => void;
@@ -37,58 +33,9 @@ type Props = {
   onCreateSession: () => void;
 };
 
-function SubagentItem({
-  node,
-  sessionId,
-  paneId,
-  onSelectTerminal,
-}: {
-  node: SubagentNode;
-  sessionId: string;
-  paneId: string;
-  onSelectTerminal: (sessionId: string, paneId: string) => void;
-}) {
-  const label = node.label || node.kind || agentInfo(node.agent).name;
-  const dotTone =
-    node.status === "running"
-      ? "running"
-      : node.status === "completed"
-      ? "done"
-      : "failed";
-
-  return (
-    <li key={node.id}>
-      <button
-        type="button"
-        className="thread-item thread-item--sub"
-        title={label}
-        onClick={() => onSelectTerminal(sessionId, paneId)}
-      >
-        <TerminalIcon agent={node.agent} shellName="" size={11} />
-        <span className="thread-label">{label}</span>
-        <span className={`dot dot--${dotTone}`} />
-      </button>
-      {node.children.length > 0 ? (
-        <ul className="thread thread--sub">
-          {node.children.map((child) => (
-            <SubagentItem
-              key={child.id}
-              node={child}
-              sessionId={sessionId}
-              paneId={paneId}
-              onSelectTerminal={onSelectTerminal}
-            />
-          ))}
-        </ul>
-      ) : undefined}
-    </li>
-  );
-}
-
 export function Sidebar(props: Props) {
   const { workspaces, activeWorkspace, activeSessionId, statuses, meta } = props;
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const switcherRef = useRef<HTMLDivElement>(null);
 
@@ -225,11 +172,6 @@ export function Sidebar(props: Props) {
                       : (m?.shellName ?? `Terminal ${i + 1}`);
                     const status = statuses[pane.id] ?? "starting";
                     const focused = isActive && props.focusedPaneId === pane.id;
-                    const paneSubagents =
-                      (m?.terminalId ? props.subagentsByTerminal?.[m.terminalId] : undefined) ??
-                      props.subagentsByTerminal?.[pane.id] ??
-                      [];
-                    const rootSubagents = buildSubagentTree(paneSubagents);
                     return (
                       <li key={pane.id}>
                         <button
@@ -250,23 +192,9 @@ export function Sidebar(props: Props) {
                           startedAt={agent ? (m?.startedAt ?? null) : null}
                           branch={m?.branch ?? null}
                         />
-                        {/* Título de sesión del agente y/o agentes anidados: cuelgan de
-                            su terminal y abren la misma. */}
-                        {m?.sessionTitle || agents.length > 1 ? (
+                        {/* Agentes anidados: cuelgan de su terminal y abren la misma. */}
+                        {agents.length > 1 ? (
                           <ul className="thread thread--sub">
-                            {m?.sessionTitle ? (
-                              <li key="session-title">
-                                <button
-                                  type="button"
-                                  className="thread-item thread-item--sub"
-                                  title={`${label}: ${m.sessionTitle}`}
-                                  onClick={() => props.onSelectTerminal(s.id, pane.id)}
-                                >
-                                  <VscComment size={11} aria-hidden="true" style={{ flexShrink: 0, opacity: 0.7 }} />
-                                  <span className="thread-label">{m.sessionTitle}</span>
-                                </button>
-                              </li>
-                            ) : null}
                             {agents.slice(1).map((sub) => (
                               <li key={sub}>
                                 <button
@@ -279,21 +207,6 @@ export function Sidebar(props: Props) {
                                   <span className="thread-label">{agentInfo(sub).name}</span>
                                 </button>
                               </li>
-                            ))}
-                          </ul>
-                        ) : undefined}
-
-                        {/* Subagentes detectados en vivo vía hooks de los agentes. */}
-                        {rootSubagents.length > 0 ? (
-                          <ul className="thread thread--sub">
-                            {rootSubagents.map((sub) => (
-                              <SubagentItem
-                                key={sub.id}
-                                node={sub}
-                                sessionId={s.id}
-                                paneId={pane.id}
-                                onSelectTerminal={props.onSelectTerminal}
-                              />
                             ))}
                           </ul>
                         ) : undefined}
@@ -317,14 +230,7 @@ export function Sidebar(props: Props) {
           </span>
         </span>
         <ChevronsUpDown />
-        <IconButton
-          icon={<Sliders />}
-          title="Settings"
-          onClick={() => setSettingsOpen(true)}
-        />
       </div>
-
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }
