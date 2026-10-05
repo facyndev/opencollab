@@ -3,6 +3,7 @@
 
 import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
+import type { AgentState } from "./agentState";
 import type { GitBranch } from "./terminalApi";
 
 export type PaneStatus = "starting" | "running" | "done" | "failed";
@@ -15,11 +16,12 @@ export type PaneMeta = {
   shellName: string | null;
   agents: AgentId[];
   cwd: string | null;
-  /// Actividad inferida de la salida; `null` hasta que el núcleo informa algo.
   /// Arranque del agente principal (segundos desde la época Unix); `null` si no hay agente.
   startedAt?: number | null;
   /// Rama de git de la carpeta actual; `null` fuera de un repositorio.
   branch?: GitBranch | null;
+  /// Estado reducido del agente (herramienta, aprobación, error...); `null` hasta que el núcleo informa algo.
+  agentState?: AgentState | null;
   activity?: Activity | null;
   /// Terminó de trabajar sin que su panel estuviera enfocado y aún no se miró.
   attention?: boolean;

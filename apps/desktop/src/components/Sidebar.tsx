@@ -187,7 +187,7 @@ export function Sidebar(props: Props) {
                         {/* Línea secundaria agnóstica: actividad y tiempo (solo con agente
                             detectado) y rama de git (cualquier terminal en un repo). */}
                         <ThreadMeta
-                          activity={agent ? (m?.activity ?? null) : null}
+                          agent={agent ? (m?.agentState ?? null) : null}
                           attention={agent ? !!m?.attention : false}
                           startedAt={agent ? (m?.startedAt ?? null) : null}
                           branch={m?.branch ?? null}

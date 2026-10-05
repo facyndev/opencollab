@@ -1,14 +1,14 @@
-import { VscBell, VscCircleFilled, VscGitBranch } from "react-icons/vsc";
+import { VscBell, VscCircleFilled, VscError, VscGitBranch, VscShield } from "react-icons/vsc";
 
-import type { Activity } from "../activity";
+import { describeAgent, type AgentState } from "../agentState";
 import type { GitBranch } from "../terminalApi";
 import { elapsedSince, formatElapsed } from "../duration";
 import { useNow } from "../useNow";
 import "./ThreadMeta.css";
 
 type Props = {
-  /// `null` = sin dato (o la terminal no corre un agente): no se muestra.
-  activity: Activity | null;
+  /// Estado del agente; `null` = sin dato (o la terminal no corre un agente): no se muestra.
+  agent: AgentState | null;
   attention: boolean;
   /// Arranque del agente (segundos desde la época Unix); `null` = no se muestra.
   startedAt: number | null;
@@ -17,20 +17,23 @@ type Props = {
 };
 
 /// Línea secundaria bajo cada terminal del hilo, con datos que valen para
-/// cualquier agente: actividad, tiempo corriendo y rama de git.
-export function ThreadMeta({ activity, attention, startedAt, branch }: Props) {
-  if (!activity && startedAt === null && !branch) return null;
-  const tone = attention ? "attention" : (activity ?? "none");
+/// cualquier agente (estado, herramienta en curso, aprobación o error cuando el
+/// adaptador los informa), tiempo corriendo y rama de git.
+export function ThreadMeta({ agent, attention, startedAt, branch }: Props) {
+  const { tone, label, detail } = describeAgent(agent, attention);
+  const hasState = tone !== "none";
+  if (!hasState && startedAt === null && !branch) return null;
   return (
     <div className={`thread-meta thread-meta--${tone}`}>
-      {activity && (
-        <span className="thread-meta-part thread-meta-activity">
-          {attention ? (
-            <VscBell size={11} aria-hidden="true" />
-          ) : (
-            <VscCircleFilled size={9} aria-hidden="true" />
-          )}
-          {attention ? "Needs attention" : activity === "working" ? "Working" : "Idle"}
+      {hasState && (
+        <span className="thread-meta-part thread-meta-activity" title={label}>
+          <StateIcon tone={tone} />
+          {label}
+        </span>
+      )}
+      {detail && (
+        <span className="thread-meta-part thread-meta-tool" title={detail}>
+          {detail}
         </span>
       )}
       {startedAt !== null && <Uptime startedAt={startedAt} />}
@@ -45,6 +48,13 @@ export function ThreadMeta({ activity, attention, startedAt, branch }: Props) {
       )}
     </div>
   );
+}
+
+function StateIcon({ tone }: { tone: string }) {
+  if (tone === "attention") return <VscBell size={11} aria-hidden="true" />;
+  if (tone === "approval") return <VscShield size={11} aria-hidden="true" />;
+  if (tone === "error") return <VscError size={11} aria-hidden="true" />;
+  return <VscCircleFilled size={9} aria-hidden="true" />;
 }
 
 /// Suscripto al temporizador compartido: solo este fragmento se re-renderiza.

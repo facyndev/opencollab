@@ -22,8 +22,8 @@ export default async function threadMeta(page, checks) {
     // Arrancó hace 12 minutos (el núcleo informa segundos desde la época Unix).
     const startedAt = Math.floor(Date.now() / 1000) - 12 * 60;
     window.__mock.emit("terminal-agent", { terminalId: "t1", agents: ["claude-code"], startedAt });
-    window.__mock.emit("terminal-activity", { terminalId: "t1", state: "working" });
-    window.__mock.emit("terminal-activity", { terminalId: "t2", state: "working" });
+    window.__mock.agentState("t1", { status: "working" });
+    window.__mock.agentState("t2", { status: "working" });
   });
   await wait(150);
   let lines = await metaLines(page);
@@ -34,7 +34,7 @@ export default async function threadMeta(page, checks) {
   checks["una shell sin agente muestra la rama de su carpeta"] = lines[1]?.includes("main") ?? false;
 
   await page.evaluate(() =>
-    window.__mock.emit("terminal-activity", { terminalId: "t1", state: "idle" }),
+    window.__mock.agentState("t1", { status: "idle" }),
   );
   await wait(150);
   lines = await metaLines(page);
@@ -49,11 +49,11 @@ export default async function threadMeta(page, checks) {
     (lines[0]?.includes("Idle") ?? false) && !lines[0].includes("Needs attention");
 
   await page.evaluate(() => {
-    window.__mock.emit("terminal-activity", { terminalId: "t1", state: "working" });
+    window.__mock.agentState("t1", { status: "working" });
   });
   await wait(100);
   await page.evaluate(() =>
-    window.__mock.emit("terminal-activity", { terminalId: "t1", state: "idle" }),
+    window.__mock.agentState("t1", { status: "idle" }),
   );
   await wait(150);
   lines = await metaLines(page);
@@ -65,6 +65,48 @@ export default async function threadMeta(page, checks) {
   );
   await wait(150);
   checks["el tiempo corriendo sigue visible en idle"] = /12m/.test(lines[0] ?? "");
+
+  // Estado rico (adaptador): herramienta en curso, aprobación pendiente y error.
+  await page.evaluate(() => {
+    window.__mock.emit("terminal-agent", {
+      terminalId: "t1",
+      agents: ["claude-code"],
+      startedAt: Math.floor(Date.now() / 1000) - 12 * 60,
+    });
+    window.__mock.agentState("t1", { status: "working", tool: { name: "Bash", input: "echo hi" } });
+  });
+  await wait(150);
+  lines = await metaLines(page);
+  checks["muestra la herramienta en curso"] = lines[0]?.includes("Bash: echo hi") ?? false;
+
+  await page.evaluate(() =>
+    window.__mock.agentState("t1", {
+      status: "working",
+      tool: { name: "Bash", input: "rm -rf build" },
+      approval: { requestId: "r1", description: "run rm -rf build" },
+    }),
+  );
+  await wait(150);
+  lines = await metaLines(page);
+  checks["muestra la aprobación pendiente con su descripción"] =
+    lines[0]?.includes("Needs approval: run rm -rf build") ?? false;
+  checks["la aprobación se resalta con el acento"] =
+    (await page.$$(".thread-meta--approval")).length === 1;
+
+  await page.evaluate(() =>
+    window.__mock.agentState("t1", { status: "idle", error: "exited with code 2" }),
+  );
+  await wait(150);
+  lines = await metaLines(page);
+  checks["muestra el error"] =
+    (lines[0]?.includes("Error") ?? false) && lines[0].includes("exited with code 2");
+  checks["el error se marca distinto"] = (await page.$$(".thread-meta--error")).length === 1;
+
+  await page.evaluate(() => window.__mock.agentState("t1", { status: "idle", completed: true }));
+  await wait(150);
+  lines = await metaLines(page);
+  checks["tras completar vuelve a Idle y conserva el tiempo"] =
+    (lines[0]?.includes("Idle") ?? false) && /12m/.test(lines[0]);
 
   // El contador avanza solo, sin nuevos eventos del núcleo.
   await page.evaluate(() => {

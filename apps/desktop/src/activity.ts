@@ -1,7 +1,9 @@
-// Actividad de una terminal (la infiere el núcleo de su salida) y "necesita
-// atención": estado de UI, no del núcleo. Es lógica pura para poder testearla.
+// "Necesita atención" a partir del estado (working / idle) de una terminal: es
+// estado de UI, no del núcleo, porque depende del foco. Lógica pura para testearla.
 
-export type Activity = "working" | "idle";
+import type { AgentStatus } from "./agentState";
+
+export type Activity = AgentStatus;
 
 export type ActivityState = {
   /// `null` hasta que el núcleo informa algo.

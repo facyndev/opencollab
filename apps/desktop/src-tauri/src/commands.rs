@@ -10,8 +10,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use infrastructure::default_shell_profile;
 
-use application::ActivityTracker;
+use application::{exit_event, ActivityTracker, AgentEventSink, AgentStates};
 
+use crate::agent_events::TauriAgentEvents;
 use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
 
@@ -35,6 +36,8 @@ struct TerminalExitPayload {
 struct TauriOutputSink {
     app: AppHandle,
     activity: Arc<ActivityTracker>,
+    events: Arc<dyn AgentEventSink>,
+    states: Arc<AgentStates>,
 }
 
 impl TerminalOutputSink for TauriOutputSink {
@@ -51,6 +54,9 @@ impl TerminalOutputSink for TauriOutputSink {
 
     fn exited(&self, terminal: TerminalId) {
         self.activity.forget(terminal);
+        // Sin código de salida disponible en el puerto del PTY: se asume normal.
+        self.events.emit(terminal, exit_event(None));
+        self.states.forget(terminal);
         let _ = self.app.emit(
             TERMINAL_EXIT_EVENT,
             TerminalExitPayload {
@@ -84,8 +90,13 @@ pub fn open_shell(
     cwd: Option<String>,
 ) -> Result<OpenedTerminal, String> {
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
+        events: Arc::new(TauriAgentEvents::new(
+            app.clone(),
+            state.agent_states.clone(),
+        )),
         app,
         activity: state.activity.clone(),
+        states: state.agent_states.clone(),
     });
     let profile = default_shell_profile(cwd.as_deref().map(std::path::Path::new));
     let name = profile.name.clone();
@@ -172,6 +183,7 @@ pub fn close_terminal(state: State<'_, AppState>, terminal_id: String) -> Result
         .execute(state.local_user, state.session_id, terminal)
         .map_err(|e| e.to_string())?;
     state.activity.forget(terminal);
+    state.agent_states.forget(terminal);
     Ok(())
 }
 

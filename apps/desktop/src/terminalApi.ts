@@ -3,8 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
+import type { AgentState } from "./agentState";
 import { parseCollabStatus, type CollabStatus } from "./collabStatus";
 
 type OutputPayload = { terminalId: string; data: number[] };
@@ -13,16 +13,16 @@ type ExitPayload = { terminalId: string };
 /// ese agente tiene anidados. `startedAt`: arranque del principal, en segundos
 /// desde la época Unix (`null` si no corre ninguno).
 type AgentPayload = { terminalId: string; agents: AgentId[]; startedAt: number | null };
-/// El núcleo solo lo emite cuando el estado cambia.
-type ActivityPayload = { terminalId: string; state: Activity };
+/// Estado reducido del agente (ver `agentState.ts`); el núcleo solo lo emite cuando cambia.
+type AgentStatePayload = { terminalId: string; state: AgentState };
 
 export type TerminalHandlers = {
   onOutput: (data: Uint8Array) => void;
   onExit: () => void;
   /// Agentes conocidos que corren en la terminal (lista vacía = ninguno).
   onAgent: (agents: AgentId[], startedAt: number | null) => void;
-  /// Actividad inferida de la salida del PTY (`working` / `idle`).
-  onActivity?: (state: Activity) => void;
+  /// Estado del agente reducido por el núcleo a partir de los `AgentEvent`s de la terminal.
+  onAgentState?: (state: AgentState) => void;
 };
 
 const handlers = new Map<string, TerminalHandlers>();
@@ -31,7 +31,7 @@ const handlers = new Map<string, TerminalHandlers>();
 const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
 const agentEarly = new Map<string, { agents: AgentId[]; startedAt: number | null }>();
-const activityEarly = new Map<string, Activity>();
+const agentStateEarly = new Map<string, AgentState>();
 
 let listening: Promise<void> | null = null;
 
@@ -54,10 +54,10 @@ function ensureListening(): Promise<void> {
       if (handler) handler.onAgent(payload.agents, startedAt);
       else agentEarly.set(payload.terminalId, { agents: payload.agents, startedAt });
     }),
-    listen<ActivityPayload>("terminal-activity", ({ payload }) => {
+    listen<AgentStatePayload>("terminal-agent-state", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
-      if (handler?.onActivity) handler.onActivity(payload.state);
-      else activityEarly.set(payload.terminalId, payload.state);
+      if (handler?.onAgentState) handler.onAgentState(payload.state);
+      else agentStateEarly.set(payload.terminalId, payload.state);
     }),
   ]).then(() => undefined);
   return listening;
@@ -105,9 +105,9 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
   const agentInfo = agentEarly.get(terminalId);
   if (agentInfo) h.onAgent(agentInfo.agents, agentInfo.startedAt);
   agentEarly.delete(terminalId);
-  const activity = activityEarly.get(terminalId);
-  if (activity) h.onActivity?.(activity);
-  activityEarly.delete(terminalId);
+  const agentState = agentStateEarly.get(terminalId);
+  if (agentState) h.onAgentState?.(agentState);
+  agentStateEarly.delete(terminalId);
   if (exitedEarly.delete(terminalId)) h.onExit();
   return () => handlers.delete(terminalId);
 }

@@ -7,7 +7,8 @@
 //   writes                lo que la UI le escribió a cada terminal
 //   opened                argumentos de cada open_shell
 //   closed                terminalId de cada close_terminal
-//   (eventos del núcleo: terminal-output/exit/agent/activity)
+//   (eventos del núcleo: terminal-output/exit/agent/agent-state)
+//   agentState(id, patch) emite terminal-agent-state con el estado completo (patch sobre el vacío)
 //   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
 //   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
 export function installTauriMock() {
@@ -35,7 +36,22 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, prompt, writes, opened, closed, branches };
+  // Estado de agente como lo reduce el núcleo (`AgentState` serializado).
+  const agentState = (terminalId, patch) =>
+    emit("terminal-agent-state", {
+      terminalId,
+      state: {
+        status: null,
+        tool: null,
+        approval: null,
+        lastMessage: null,
+        completed: false,
+        error: null,
+        ...patch,
+      },
+    });
+
+  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {

@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use application::ports::{ProcessInspector, PtyPort, RelayProbe, WorkspaceRepository};
 use application::{
-    ActivityTracker, AppError, CheckRelay, CloseTerminal, DetectTerminalAgents, InspectBranch,
-    LaunchTerminal, ListSubdirectories, ResizeTerminal, SendTerminalInput, SessionCollaborators,
+    ActivityTracker, AgentStates, AppError, CheckRelay, CloseTerminal, DetectTerminalAgents,
+    InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal, SendTerminalInput,
+    SessionCollaborators,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
@@ -29,6 +30,8 @@ pub struct AppState {
     pub inspect_branch: InspectBranch,
     /// Actividad de cada terminal, inferida de su salida (ver `agent_watcher`).
     pub activity: Arc<ActivityTracker>,
+    /// Último estado reducido de cada terminal con agente (ver `agent_events`).
+    pub agent_states: Arc<AgentStates>,
     pub check_relay: CheckRelay,
     pub session_collaborators: SessionCollaborators,
 }
@@ -62,6 +65,7 @@ impl AppState {
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
             inspect_branch: InspectBranch::new(Arc::new(FsRepositoryInspector::new())),
             activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
+            agent_states: Arc::new(AgentStates::new()),
             check_relay: CheckRelay::new(relay_probe),
             session_collaborators: SessionCollaborators::new(repo),
         })

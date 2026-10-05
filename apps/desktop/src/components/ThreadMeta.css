@@ -26,10 +26,25 @@
   animation: thread-meta-pulse 1.4s ease-in-out infinite;
 }
 
-/* Pide que se mire la terminal: resalta con el acento. */
-.thread-meta--attention .thread-meta-activity {
+/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
+.thread-meta--attention .thread-meta-activity,
+.thread-meta--approval .thread-meta-activity {
   color: var(--accent-soft);
   font-weight: 600;
+}
+
+.thread-meta--error .thread-meta-activity {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* Herramienta en curso (`Bash: echo hi`) o detalle del error: una línea, recortada. */
+.thread-meta-tool {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
 }
 
 @keyframes thread-meta-pulse {

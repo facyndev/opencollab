@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { applyActivity, applyFocus, initialActivity, type ActivityState } from "../activity";
 import { agentInfo, type AgentId } from "../agents";
+import type { AgentState } from "../agentState";
 import { useGitBranch } from "../useGitBranch";
 import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
@@ -67,6 +68,7 @@ export function TerminalPane(props: Props) {
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
   const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
+  const [agentState, setAgentState] = useState<AgentState | null>(null);
   /// El handler de actividad se registra una vez: lee el foco vigente desde acá.
   const focusedRef = useRef(props.focused);
   focusedRef.current = props.focused;
@@ -84,10 +86,11 @@ export function TerminalPane(props: Props) {
         cwd,
         startedAt,
         branch,
+        agentState,
         activity: activityState.activity,
         attention: activityState.attention,
       }),
-    [paneId, info?.name, agents, cwd, startedAt, branch, activityState, onMeta],
+    [paneId, info?.name, agents, cwd, startedAt, branch, agentState, activityState, onMeta],
   );
   // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
   useEffect(() => {
@@ -151,14 +154,19 @@ export function TerminalPane(props: Props) {
             setAgents([]);
             setStartedAt(null);
             setActivityState(initialActivity);
+            setAgentState(null);
             void closeRef.current();
           },
           onAgent: (newAgents, newStartedAt) => {
             setAgents(newAgents);
             setStartedAt(newStartedAt);
           },
-          onActivity: (next) =>
-            setActivityState((s) => applyActivity(s, next, focusedRef.current)),
+          onAgentState: (next) => {
+            setAgentState(next);
+            // La "atención" es de UI: depende del foco del panel en este momento.
+            const status = next.status;
+            if (status) setActivityState((s) => applyActivity(s, status, focusedRef.current));
+          },
         });
         setStatus((s) => (s === "done" ? s : "running"));
       })

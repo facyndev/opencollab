@@ -1,6 +1,7 @@
 // Evita la consola extra en Windows en builds de release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_events;
 mod agent_watcher;
 mod collab_status;
 mod commands;
