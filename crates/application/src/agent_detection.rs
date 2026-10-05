@@ -31,6 +31,11 @@ impl KnownAgent {
         }
     }
 
+    /// Inversa de [`KnownAgent::id`].
+    pub fn from_id(id: &str) -> Option<KnownAgent> {
+        KnownAgent::ALL.into_iter().find(|a| a.id() == id)
+    }
+
     /// Nombres de ejecutable (sin extensión) que identifican al agente.
     fn executables(self) -> &'static [&'static str] {
         match self {
@@ -157,6 +162,14 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_id_round_trips_every_known_agent() {
+        for agent in KnownAgent::ALL {
+            assert_eq!(KnownAgent::from_id(agent.id()), Some(agent));
+        }
+        assert_eq!(KnownAgent::from_id("otro"), None);
+    }
 
     fn proc(pid: u32, parent: u32, name: &str, args: &[&str]) -> ProcessInfo {
         ProcessInfo {

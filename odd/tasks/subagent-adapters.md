@@ -77,12 +77,12 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
 
 ## Tareas
 
-- [ ] **T1 — Modelo y hub en `application`.** `SubagentEvent`, `SubagentTree`,
+- [x] **T1 — Modelo y hub en `application`.** `SubagentEvent`, `SubagentTree`,
       puerto `SubagentEventTranslator`, caso de uso `TrackSubagents` con tests
       (inicio, fin, error, anidamiento por `parent_id`, terminal cerrada).
-- [ ] **T2 — Traductores en `infrastructure`.** Claude Code, OpenCode, Codex,
+- [x] **T2 — Traductores en `infrastructure`.** Claude Code, OpenCode, Codex,
       con fixtures de payloads documentados.
-- [ ] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
+- [x] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
 - [ ] **T4 — Sidecar `opencollab-hook`.**
 - [ ] **T5 — Instaladores** (puerto `HookInstaller` + 4 adaptadores) con tests
       sobre directorios temporales (merge sin pisar, idempotencia, uninstall).
@@ -124,8 +124,59 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
 - 2026-10-05: rama `feature/subagent-adapters` creada desde `62ad3ea`
   (`feature/split-terminal`, ya commiteada por el usuario).
 - T1: ruta **delegada** (disparador de escritor: 2+ archivos no triviales en
-  `application`). En curso.
+  `application`). Cerrado y mergeado a `develop` (`def99cc`).
+- T2: ruta **delegada** (disparador de escritor: 2+ archivos no triviales en
+  `infrastructure`). Cerrado en rama `feature/subagent-adapters-t2`: un módulo
+  `crates/infrastructure/src/subagent_translators.rs` (481 líneas) con
+  `ClaudeCodeTranslator`, `OpenCodeTranslator`, `CodexTranslator` + fixtures
+  en `mod fixtures` (9 payloads JSON con suposiciones documentadas) + 19 tests
+  (inicio/fin/error por traductor, anidamiento por `parent_id`, inválido→Err,
+  `tool` irrelevante de OpenCode→`Ok(vec![])`, integración con `TrackSubagents`
+  real). TDD estricto (fuente: este documento): RED→GREEN→REFACTOR observado.
+  Verificación observada por el padre: `cargo test -p infrastructure` → 29
+  pasan, 0 fallan; `cargo fmt --all --check` → limpio (reporte del escritor:
+  clippy limpio y `cargo test --workspace` todo verde). `serde_json` ya estaba
+  en `workspace.dependencies`, solo se referenció desde
+  `crates/infrastructure/Cargo.toml`.
+
+- T3: ruta **delegada** (disparador de escritor: receptor + inyección en 2+
+  archivos no triviales). Rama `feature/subagent-adapters-t3` (apilada sobre
+  T2). `crates/infrastructure/src/hook_receiver.rs` (HTTP/1.1 a mano, sync,
+  `127.0.0.1:0`, hilo por conexión con timeout 2 s, token uuid). Contrato para
+  T4/T5: `POST /hook/<KnownAgent::id>`, `Authorization: Bearer <token>`,
+  `X-OpenCollab-Terminal: <uuid>`, cuerpo crudo ≤ 1 MiB; 204 / 400 / 401 / 404
+  / 405 / 413. Sink `Fn(RawSubagentEvent)`. Inyección en
+  `LaunchTerminal::execute` vía builder `with_hook_endpoint(HookEndpoint)`:
+  solo el perfil que va al PTY lleva las 3 variables (el token no se guarda en
+  la sesión). `KnownAgent::from_id` agregado. TDD: RED observado (errores de
+  compilación E0599/E0433/E0432 por APIs inexistentes) → GREEN. Verificación:
+  escritor reportó fmt/clippy/test limpios; el padre re-corrió `cargo fmt
+  --all --check` (limpio) y `cargo test --workspace` (application 40,
+  infrastructure 38, 0 fallan). Commit `2452d1a`. RDD: riesgo `medium`
+  (`slice_budget_reached`), consentido por el usuario, lente reliability →
+  **aprobado** y acknowledged (`review-4b1093c29501c28a`, autoridad quemada).
+  Hallazgos no bloqueantes, pendientes de decisión: R3-001 hilos por conexión
+  sin límite ni join (el sink puede llamarse tras `shutdown`); R3-002 `Drop`
+  puede colgarse si falla el self-connect; R3-003 faltan tests de cuerpo en
+  varias lecturas, sin `Content-Length`, cuerpo corto y header de terminal
+  ausente; R3-004 404/405 antes de 401 y `Bearer` sensible a mayúsculas.
+- T3 (correcciones R3-001..003, autorizadas por el usuario): ruta **delegada**
+  (un archivo no trivial con diseño de concurrencia). Solo
+  `hook_receiver.rs` (+280/−30). R3-002: listener no bloqueante con sondeo de
+  10 ms, sin self-connect. R3-001: tope de 32 conexiones (`503` inmediato al
+  excederlo, guard `Slot`), compuerta `Mutex<bool>` que llama al sink bajo el
+  lock: tras `shutdown` el sink nunca se invoca (los workers no se joinean
+  para no reintroducir el cuelgue; terminan por timeout). R3-003: 8 tests
+  nuevos; RED observado en `sink_is_never_called_after_shutdown_returns` y
+  `connections_over_the_cap_get_503`, el resto verde al llegar (cubren
+  comportamiento existente). Contrato HTTP sin cambios salvo `503`.
+  Verificación: el padre re-corrió fmt check, clippy y `cargo test
+  --workspace` (infrastructure 46, 0 fallan); el escritor corrió los tests del
+  receptor 3 veces sin intermitencias. R3-004 queda pendiente.
 
 ## Siguiente paso
 
-Cerrar T1 (verificación + commit), después T2.
+T4 (sidecar `opencollab-hook`, siguiendo el contrato HTTP de T3). Nota para T5: los
+formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
+JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
+`application`.
