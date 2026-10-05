@@ -21,7 +21,7 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: check
         shell: pwsh
         run: ./scripts/check-version.ps1 -Tag "${{ github.ref_name }}"
@@ -37,13 +37,13 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: apps/desktop/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -65,13 +65,13 @@ jobs:
         shell: pwsh
         run: ./scripts/package-release.ps1 -Version "${{ env.VERSION }}" -OutDir release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows_${{ env.VERSION }}
           path: release/
 
       - name: Publicar release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: OpenCollab ${{ github.ref_name }}
           body_path: release/release-notes.md
