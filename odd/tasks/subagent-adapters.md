@@ -84,7 +84,7 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
       con fixtures de payloads documentados.
 - [x] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
 - [x] **T4 — Sidecar `opencollab-hook`.**
-- [ ] **T5 — Instaladores** (puerto `HookInstaller` + 4 adaptadores) con tests
+- [x] **T5 — Instaladores** (puerto `HookInstaller` + 4 adaptadores) con tests
       sobre directorios temporales (merge sin pisar, idempotencia, uninstall).
 - [ ] **T6 — Wiring en desktop**: hub, evento `terminal-subagents`, comandos de
       estado/instalación.
@@ -208,12 +208,36 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   GREEN 3/3. T4-001: `run_bin` ignora el error de escritura a stdin (sin RED
   determinista: es una carrera). Verificación del padre: fmt check, clippy
   limpio, `cargo test --workspace` (infrastructure 47, hook-relay 7+8, 0
-  fallan). T4-003..006 siguen pendientes.
+  fallan). T4-003..006 siguen pendientes. Commit `d86c3b2`.
+- 2026-10-05: el usuario **desactivó RDD** (`gentle-ai review mode disable`,
+  global). Desde acá la entrega es `disabled/unmanaged`: sin revisiones, solo
+  checks funcionales.
+- T5: ruta **delegada** (puerto + 4 adaptadores). Rama
+  `feature/subagent-adapters-t5` apilada sobre T4. `application/hooks.rs`
+  (`HookStatus`, `InspectHookInstallation`, `Install/UninstallAgentHooks`,
+  `AppError::NoHookInstaller`) y `infrastructure/hook_installers.rs` (Claude
+  Code → `settings.json`, Codex → `hooks.json` con `async: true`, OpenCode →
+  `plugins/opencollab.ts` con marcador `// opencollab-managed-plugin`,
+  Antigravity → `Unsupported`). Propiedad por comando con `opencollab-hook`;
+  idempotente, preserva lo ajeno, rechaza JSON mal formado sin tocarlo, backup
+  `.opencollab.bak`, escritura atómica. `serde_json` con `preserve_order` para
+  no reordenar las claves del usuario. Esquemas verificados: Claude
+  (code.claude.com/docs/en/hooks), Codex (learn.chatgpt.com/docs/hooks:
+  anidado y eventos; campos de stdin de subagente NO documentados), OpenCode
+  (opencode.ai/docs/plugins: forma del plugin). **Supuestos a verificar en
+  T8**: `session.created` trae `properties.info.{id,parentID}`; el `task`
+  terminado trae el id hijo en `output.metadata.sessionId`; OpenCode nunca
+  reporta error; Claude no trae `description` (sin etiqueta). TDD: RED
+  application 5/5, infrastructure 25 de 32 (los 7 restantes cubren casos que
+  no requieren implementación) → GREEN. Extra: el `.ts` generado se corrió en
+  Node 24 contra un servidor local. Verificación del padre: fmt check y
+  `cargo test --workspace` (application 45, infrastructure 79, 0 fallan);
+  escritor reportó clippy limpio.
 
 ## Siguiente paso
 
-T5 (instaladores de hooks; Claude Code y Codex invocan `opencollab-hook
-<agent-id>`). Nota para T5: los
+T6 (wiring en desktop: raíces reales `~/.claude`, `~/.codex`,
+`~/.config/opencode` y ruta absoluta del binario `opencollab-hook`). Nota: los
 formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
 JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
 `application`.

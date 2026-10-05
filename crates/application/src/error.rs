@@ -17,4 +17,6 @@ pub enum AppError {
     WriteNotAllowed { user: UserId, terminal: TerminalId },
     #[error("no hay traductor de eventos de subagentes para {0:?}")]
     NoSubagentTranslator(KnownAgent),
+    #[error("no hay instalador de hooks para {0:?}")]
+    NoHookInstaller(KnownAgent),
 }

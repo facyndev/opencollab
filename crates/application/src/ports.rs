@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::agent_detection::{KnownAgent, ProcessInfo};
+use crate::hooks::HookStatus;
 use crate::subagents::SubagentChange;
 
 use domain::{
@@ -72,6 +73,17 @@ pub trait ProcessInspector: Send + Sync {
 pub trait SubagentEventTranslator: Send + Sync {
     fn agent(&self) -> KnownAgent;
     fn translate(&self, payload: &str) -> Result<Vec<SubagentChange>, PortError>;
+}
+
+/// Instala / quita en la configuración de un agente los hooks o el plugin que
+/// reportan sus subagentes. Uno por agente; solo agrega y quita entradas propias.
+pub trait HookInstaller: Send + Sync {
+    fn agent(&self) -> KnownAgent;
+    fn status(&self) -> Result<HookStatus, PortError>;
+    /// Idempotente: instalar dos veces no duplica entradas.
+    fn install(&self) -> Result<(), PortError>;
+    /// Deja la configuración como estaba antes de instalar.
+    fn uninstall(&self) -> Result<(), PortError>;
 }
 
 pub trait WorkspaceRepository: Send + Sync {
