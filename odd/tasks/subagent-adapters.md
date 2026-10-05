@@ -200,6 +200,15 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   T4-004 el 503 sin leer el pedido puede llegar como reset; T4-005 sin test de
   receptor que acepta y no responde; T4-006 URL con path vacío aceptada.
   Último límite revisado: `d5f80f1`.
+- T4-001/T4-002 (autorizados por el usuario): ruta **inline** (dos cambios
+  chicos ya entendidos). T4-002: el `Slot` se pasa a `handle_connection` y se
+  suelta antes de `respond`. Test nuevo
+  `slot_is_free_once_the_client_sees_the_response` (200 pedidos con tope 1,
+  verifica `active == 0` al recibir EOF): RED 3/3 corridas (`left: 1`) →
+  GREEN 3/3. T4-001: `run_bin` ignora el error de escritura a stdin (sin RED
+  determinista: es una carrera). Verificación del padre: fmt check, clippy
+  limpio, `cargo test --workspace` (infrastructure 47, hook-relay 7+8, 0
+  fallan). T4-003..006 siguen pendientes.
 
 ## Siguiente paso
 

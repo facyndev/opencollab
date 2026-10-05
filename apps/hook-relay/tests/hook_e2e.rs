@@ -40,7 +40,9 @@ fn run_bin(mut cmd: Command, stdin: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(stdin).unwrap();
+    // Sin entorno o sin argumentos el binario sale sin leer stdin: si ya cerró
+    // la tubería, la escritura falla (broken pipe) y eso no es un error del test.
+    let _ = child.stdin.take().unwrap().write_all(stdin);
     child.wait_with_output().unwrap()
 }
 
