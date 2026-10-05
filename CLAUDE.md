@@ -111,6 +111,15 @@ La versión de la app vive en **tres lugares que tienen que coincidir** (hoy `0.
 
 La versión se sube **solo** en la rama `release/*` o `hotfix/*`, como un commit propio, nunca dentro de una feature. El tag se crea sobre el merge a `main`.
 
+`pwsh scripts/check-version.ps1` verifica que las tres coincidan (y con `-Tag vX.Y.Z`, que coincidan con el tag); el CI lo corre en cada push.
+
+## CI/CD (GitHub Actions)
+
+- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión.
+- **`.github/workflows/release.yml`**: al pushear un tag `vX.Y.Z` (sobre `main`). Verifica tag = versión de la app, corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`v1.0.0-beta.1`) salen como pre-release.
+- **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`<os>_<versión>.<extensión>`** → `windows_0.1.0.exe` (NSIS) y `windows_0.1.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
+- Para publicar una versión: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → merge de vuelta a `develop`.
+
 El **protocolo de red** tiene su propia versión, independiente de la de la app: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
 
 ## Comandos
@@ -128,7 +137,9 @@ Desktop (desde `apps/desktop`, usa pnpm):
 - `pnpm install`
 - `cargo tauri dev`: levanta Vite en `localhost:1420` y abre la ventana.
 - `pnpm build`: typecheck (`tsc --noEmit`) + build de Vite.
-- `cargo tauri build`: instalador.
+- `pnpm test`: tests unitarios del frontend (Vitest, archivos `src/**/*.test.ts`). Uno puntual: `pnpm test -- -t "parseOsc7"`.
+- `pnpm test:e2e`: E2E de la interfaz sobre el build de producción (correr `pnpm build` antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.
+- `cargo tauri build`: instaladores en `target/release/bundle/{nsis,msi}`; `pwsh scripts/package-release.ps1 -Version X.Y.Z` los deja en `release/` con el nombre y los hashes de release.
 
 Relay: `cargo run -p relay` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`).
 

@@ -1,0 +1,96 @@
+# CI: tests unitarios y E2E del frontend y del núcleo Rust.
+# Corre en cada push a las ramas de Git Flow y en cada PR. El workflow de
+# release lo reutiliza (workflow_call) antes de construir: no se publica nada
+# que no haya pasado por acá.
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**", "hotfix/**"]
+  pull_request:
+  workflow_call:
+
+# Un push nuevo a la misma rama cancela la corrida anterior.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Frontend · unit + E2E
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tests unitarios (Vitest)
+        run: pnpm test
+
+      - name: Typecheck + build
+        run: pnpm build
+
+      - name: Tests E2E de la interfaz (Chrome headless, núcleo simulado)
+        run: pnpm test:e2e
+
+      # El crate de la app desktop embebe dist/ al compilar: el job de Rust lo necesita.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/desktop/dist
+          retention-days: 1
+
+  rust:
+    name: Rust · fmt, clippy, unit + E2E
+    needs: frontend
+    # Windows: los PTY (ConPTY), el cierre de procesos y la shell integration
+    # se prueban contra el sistema real.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/desktop/dist
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formato
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests unitarios
+        run: cargo test --workspace
+
+      # Los E2E de procesos reales están #[ignore] para no correr en cada
+      # `cargo test` local. `agent_detection_e2e` no corre acá: necesita los CLIs
+      # de los agentes instalados.
+      - name: Tests E2E (PTY real + shell integration)
+        run: cargo test -p infrastructure --test shell_integration_e2e -- --ignored --test-threads=1
+
+      - name: Versión consistente
+        shell: pwsh
+        run: ./scripts/check-version.ps1
