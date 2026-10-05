@@ -4,13 +4,14 @@
 mod agent_watcher;
 mod commands;
 mod state;
+mod subagents;
 
 use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            app.manage(state::AppState::bootstrap()?);
+            app.manage(state::AppState::bootstrap(app.handle())?);
             agent_watcher::spawn(app.handle().clone());
             Ok(())
         })
@@ -20,6 +21,10 @@ fn main() {
             commands::resize_terminal,
             commands::close_terminal,
             commands::list_subdirectories,
+            commands::subagent_snapshot,
+            commands::hook_status,
+            commands::install_agent_hooks,
+            commands::uninstall_agent_hooks,
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar OpenCollab");

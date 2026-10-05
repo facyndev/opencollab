@@ -86,7 +86,7 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
 - [x] **T4 — Sidecar `opencollab-hook`.**
 - [x] **T5 — Instaladores** (puerto `HookInstaller` + 4 adaptadores) con tests
       sobre directorios temporales (merge sin pisar, idempotencia, uninstall).
-- [ ] **T6 — Wiring en desktop**: hub, evento `terminal-subagents`, comandos de
+- [x] **T6 — Wiring en desktop**: hub, evento `terminal-subagents`, comandos de
       estado/instalación.
 - [ ] **T7 — Frontend**: árbol de subagentes con estado en el sidebar, panel de
       instalación con confirmación, mock y escenario E2E.
@@ -234,10 +234,30 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   `cargo test --workspace` (application 45, infrastructure 79, 0 fallan);
   escritor reportó clippy limpio.
 
+- T5 commit `b16b6bb`.
+- T6: ruta **delegada** (wiring en varios archivos del desktop). Rama
+  `feature/subagent-adapters-t6` apilada sobre T5. `src-tauri/src/subagents.rs`
+  (DTOs camelCase, `apply_hook_event` y `forget_terminal` puros,
+  `hook_binary_path`, decorador `RequireHookBinary`), `state.rs`
+  (`AppState::bootstrap(&AppHandle)` en `setup`: hub con 3 traductores,
+  `HookReceiver` cuyo sink emite `terminal-subagents`; si no arranca, las
+  terminales se lanzan sin endpoint), `commands.rs` (`subagent_snapshot`,
+  `hook_status`, `install_agent_hooks`, `uninstall_agent_hooks`; raíces reales
+  desde `home_dir`), `subagentsApi.ts`, mock de Tauri, `AGENTS.md`.
+  `opencollab-hook` se busca junto a `current_exe()`; **empaquetado
+  (`externalBin`) pendiente para T8**. TDD: RED 11/11 (stubs `todo!()`) →
+  GREEN 11/11, incluye integración receptor real + hub + sink. Sin Vitest
+  (no hay lógica TS pura); ningún E2E usa todavía los comandos nuevos.
+  Verificación del padre: fmt check, `cargo test --workspace` (desktop 11,
+  infrastructure 79, 0 fallan), `pnpm test` 23; escritor: clippy, `pnpm
+  build` y `pnpm test:e2e` en verde. No se corrió la app real.
+
 ## Siguiente paso
 
-T6 (wiring en desktop: raíces reales `~/.claude`, `~/.codex`,
-`~/.config/opencode` y ruta absoluta del binario `opencollab-hook`). Nota: los
+T7 (frontend: árbol de subagentes en el sidebar, panel de instalación con
+confirmación, escenario E2E). Ojo: la pila T4–T6 sale de `2ac32e6` y no
+incluye la status bar de `develop`; `state.rs`/`commands.rs`/`main.rs` pueden
+chocar al integrar. Nota: los
 formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
 JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
 `application`.
