@@ -61,6 +61,7 @@ export function TerminalPane(props: Props) {
   /// El primero es el agente principal de la terminal; los siguientes son los que
   /// ese agente tiene anidados.
   const [agents, setAgents] = useState<AgentId[]>([]);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
   const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
@@ -80,10 +81,11 @@ export function TerminalPane(props: Props) {
         agents,
         cwd,
         sessionTitle,
+        startedAt,
         activity: activityState.activity,
         attention: activityState.attention,
       }),
-    [paneId, info?.name, agents, cwd, sessionTitle, activityState, onMeta],
+    [paneId, info?.name, agents, cwd, sessionTitle, startedAt, activityState, onMeta],
   );
   // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
   useEffect(() => {
@@ -145,12 +147,14 @@ export function TerminalPane(props: Props) {
           onExit: () => {
             setStatus("done");
             setAgents([]);
+            setStartedAt(null);
             setSessionTitle(null);
             setActivityState(initialActivity);
             void closeRef.current();
           },
-          onAgent: (newAgents) => {
+          onAgent: (newAgents, newStartedAt) => {
             setAgents(newAgents);
+            setStartedAt(newStartedAt);
             if (newAgents.length === 0) setSessionTitle(null);
           },
           onSessionTitle: setSessionTitle,

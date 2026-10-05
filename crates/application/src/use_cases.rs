@@ -508,6 +508,7 @@ mod tests {
             parent: Some(1000),
             name: "claude.exe".into(),
             args: vec![],
+            started_at: Some(1_700_000_000),
         }]));
 
         let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
@@ -521,6 +522,7 @@ mod tests {
                     w.terminal,
                     AgentTree {
                         primary: Some(KnownAgent::ClaudeCode),
+                        primary_started_at: Some(1_700_000_000),
                         nested: vec![],
                     }
                 ),
@@ -539,12 +541,14 @@ mod tests {
                 parent: Some(1000),
                 name: "claude.exe".into(),
                 args: vec![],
+                started_at: None,
             },
             crate::agent_detection::ProcessInfo {
                 pid: 2001,
                 parent: Some(2000),
                 name: "codex.exe".into(),
                 args: vec![],
+                started_at: None,
             },
         ]));
 
@@ -558,6 +562,7 @@ mod tests {
                 w.terminal,
                 AgentTree {
                     primary: Some(KnownAgent::ClaudeCode),
+                    primary_started_at: None,
                     nested: vec![KnownAgent::Codex],
                 }
             )]

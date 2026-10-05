@@ -3,7 +3,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 2px 8px;
+  gap: 2px 6px;
   padding: 0 8px 4px;
   font-size: 11px;
   line-height: 1.4;
@@ -42,4 +42,11 @@
   .thread-meta--working .thread-meta-activity svg {
     animation: none;
   }
+}
+
+/* Separador entre partes: "Working · 12m". */
+.thread-meta-part + .thread-meta-part::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--text-faint);
 }

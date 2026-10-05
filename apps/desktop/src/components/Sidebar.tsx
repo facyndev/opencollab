@@ -190,6 +190,7 @@ export function Sidebar(props: Props) {
                         <ThreadMeta
                           activity={agent ? (m?.activity ?? null) : null}
                           attention={agent ? !!m?.attention : false}
+                          startedAt={agent ? (m?.startedAt ?? null) : null}
                         />
                         {/* Título de sesión del agente y/o agentes anidados: cuelgan de
                             su terminal y abren la misma. */}

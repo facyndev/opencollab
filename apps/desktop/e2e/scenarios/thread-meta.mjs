@@ -14,13 +14,16 @@ export default async function threadMeta(page, checks) {
 
   // t1 (sin foco) corre un agente; t2 es solo una shell.
   await page.evaluate(() => {
-    window.__mock.emit("terminal-agent", { terminalId: "t1", agents: ["claude-code"] });
+    // Arrancó hace 12 minutos (el núcleo informa segundos desde la época Unix).
+    const startedAt = Math.floor(Date.now() / 1000) - 12 * 60;
+    window.__mock.emit("terminal-agent", { terminalId: "t1", agents: ["claude-code"], startedAt });
     window.__mock.emit("terminal-activity", { terminalId: "t1", state: "working" });
     window.__mock.emit("terminal-activity", { terminalId: "t2", state: "working" });
   });
   await wait(150);
   let lines = await metaLines(page);
   checks["muestra Working para un agente en actividad"] = lines[0]?.includes("Working") ?? false;
+  checks["muestra el tiempo que lleva corriendo el agente"] = /12m/.test(lines[0] ?? "");
   checks["una shell sin agente no muestra actividad"] = lines[1] === null;
 
   await page.evaluate(() =>
@@ -51,6 +54,24 @@ export default async function threadMeta(page, checks) {
 
   await page.evaluate(() =>
     window.__mock.emit("terminal-agent", { terminalId: "t1", agents: [] }),
+  );
+  await wait(150);
+  checks["el tiempo corriendo sigue visible en idle"] = /12m/.test(lines[0] ?? "");
+
+  // El contador avanza solo, sin nuevos eventos del núcleo.
+  await page.evaluate(() => {
+    const startedAt = Math.floor(Date.now() / 1000) - 58;
+    window.__mock.emit("terminal-agent", { terminalId: "t1", agents: ["claude-code"], startedAt });
+  });
+  await wait(100);
+  const before = (await metaLines(page))[0] ?? "";
+  await wait(3200);
+  const after = (await metaLines(page))[0] ?? "";
+  checks["el tiempo corriendo se actualiza en vivo"] =
+    /5\ds/.test(before) && /1m/.test(after);
+
+  await page.evaluate(() =>
+    window.__mock.emit("terminal-agent", { terminalId: "t1", agents: [], startedAt: null }),
   );
   await wait(150);
   checks["sin agente detectado desaparece la actividad"] = (await metaLines(page))[0] === null;

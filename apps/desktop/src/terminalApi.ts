@@ -9,8 +9,9 @@ import type { AgentId } from "./agents";
 type OutputPayload = { terminalId: string; data: number[] };
 type ExitPayload = { terminalId: string };
 /// El primero es el agente principal de la terminal; los siguientes son los que
-/// ese agente tiene anidados.
-type AgentPayload = { terminalId: string; agents: AgentId[] };
+/// ese agente tiene anidados. `startedAt`: arranque del principal, en segundos
+/// desde la época Unix (`null` si no corre ninguno).
+type AgentPayload = { terminalId: string; agents: AgentId[]; startedAt: number | null };
 /// El núcleo solo lo emite cuando el estado cambia.
 type ActivityPayload = { terminalId: string; state: Activity };
 type AgentSessionPayload = { terminalId: string; title: string | null };
@@ -19,7 +20,7 @@ export type TerminalHandlers = {
   onOutput: (data: Uint8Array) => void;
   onExit: () => void;
   /// Agentes conocidos que corren en la terminal (lista vacía = ninguno).
-  onAgent: (agents: AgentId[]) => void;
+  onAgent: (agents: AgentId[], startedAt: number | null) => void;
   /// Título de sesión activo del agente en la terminal (`null` si no hay).
   onSessionTitle?: (title: string | null) => void;
   /// Actividad inferida de la salida del PTY (`working` / `idle`).
@@ -31,7 +32,7 @@ const handlers = new Map<string, TerminalHandlers>();
 // (el PTY arranca dentro de open_shell), así que se guarda hasta entonces.
 const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
-const agentEarly = new Map<string, AgentId[]>();
+const agentEarly = new Map<string, { agents: AgentId[]; startedAt: number | null }>();
 const sessionTitleEarly = new Map<string, string | null>();
 const activityEarly = new Map<string, Activity>();
 
@@ -52,8 +53,9 @@ function ensureListening(): Promise<void> {
     }),
     listen<AgentPayload>("terminal-agent", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
-      if (handler) handler.onAgent(payload.agents);
-      else agentEarly.set(payload.terminalId, payload.agents);
+      const startedAt = payload.startedAt ?? null;
+      if (handler) handler.onAgent(payload.agents, startedAt);
+      else agentEarly.set(payload.terminalId, { agents: payload.agents, startedAt });
     }),
     listen<AgentSessionPayload>("terminal-agent-session", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
@@ -90,7 +92,8 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
   handlers.set(terminalId, h);
   for (const chunk of pending.get(terminalId) ?? []) h.onOutput(chunk);
   pending.delete(terminalId);
-  if (agentEarly.has(terminalId)) h.onAgent(agentEarly.get(terminalId) ?? []);
+  const agentInfo = agentEarly.get(terminalId);
+  if (agentInfo) h.onAgent(agentInfo.agents, agentInfo.startedAt);
   agentEarly.delete(terminalId);
   if (sessionTitleEarly.has(terminalId)) {
     h.onSessionTitle?.(sessionTitleEarly.get(terminalId) ?? null);

@@ -22,6 +22,9 @@ struct TerminalAgentPayload {
     /// Agentes conocidos corriendo en la terminal, del más cercano a la shell al
     /// más profundo. Vacío cuando en la terminal no corre ningún agente.
     agents: Vec<&'static str>,
+    /// Arranque del proceso del agente principal (segundos desde la época Unix);
+    /// `null` si no corre ninguno.
+    started_at: Option<u64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -34,7 +37,7 @@ struct TerminalActivityPayload {
 
 pub fn spawn(app: AppHandle) {
     thread::spawn(move || {
-        let mut last: HashMap<TerminalId, Vec<&'static str>> = HashMap::new();
+        let mut last: HashMap<TerminalId, (Vec<&'static str>, Option<u64>)> = HashMap::new();
         loop {
             thread::sleep(INTERVAL);
             let state = app.state::<AppState>();
@@ -58,22 +61,25 @@ pub fn spawn(app: AppHandle) {
             let mut current = HashMap::with_capacity(detected.len());
             for (terminal, tree) in detected {
                 // El principal primero, después los que ese agente tiene anidados.
+                let started_at = tree.primary.and(tree.primary_started_at);
                 let agents: Vec<&'static str> = tree
                     .primary
                     .into_iter()
                     .chain(tree.nested)
                     .map(|a| a.id())
                     .collect();
-                if last.get(&terminal) != Some(&agents) {
+                let value = (agents, started_at);
+                if last.get(&terminal) != Some(&value) {
                     let _ = app.emit(
                         TERMINAL_AGENT_EVENT,
                         TerminalAgentPayload {
                             terminal_id: terminal.to_string(),
-                            agents: agents.clone(),
+                            agents: value.0.clone(),
+                            started_at,
                         },
                     );
                 }
-                current.insert(terminal, agents);
+                current.insert(terminal, value);
             }
             // Las terminales cerradas desaparecen solas del mapa.
             last = current;
