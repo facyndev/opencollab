@@ -152,7 +152,14 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   compilación E0599/E0433/E0432 por APIs inexistentes) → GREEN. Verificación:
   escritor reportó fmt/clippy/test limpios; el padre re-corrió `cargo fmt
   --all --check` (limpio) y `cargo test --workspace` (application 40,
-  infrastructure 38, 0 fallan).
+  infrastructure 38, 0 fallan). Commit `2452d1a`. RDD: riesgo `medium`
+  (`slice_budget_reached`), consentido por el usuario, lente reliability →
+  **aprobado** y acknowledged (`review-4b1093c29501c28a`, autoridad quemada).
+  Hallazgos no bloqueantes, pendientes de decisión: R3-001 hilos por conexión
+  sin límite ni join (el sink puede llamarse tras `shutdown`); R3-002 `Drop`
+  puede colgarse si falla el self-connect; R3-003 faltan tests de cuerpo en
+  varias lecturas, sin `Content-Length`, cuerpo corto y header de terminal
+  ausente; R3-004 404/405 antes de 401 y `Bearer` sensible a mayúsculas.
 
 ## Siguiente paso
 
