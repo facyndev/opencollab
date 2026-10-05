@@ -19,6 +19,7 @@ import {
   type Workspace,
 } from "./model";
 import { isMod } from "./shortcuts";
+import { onTerminalSubagents, type Subagent } from "./subagentsApi";
 import { useCollabStatus } from "./useCollabStatus";
 import { usePaneDrag } from "./usePaneDrag";
 
@@ -43,6 +44,7 @@ export function App() {
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, PaneStatus>>({});
   const [meta, setMeta] = useState<Record<string, PaneMeta>>({});
+  const [subagentsByTerminal, setSubagentsByTerminal] = useState<Record<string, Subagent[]>>({});
   const searchRef = useRef<HTMLInputElement>(null);
 
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0];
@@ -87,9 +89,11 @@ export function App() {
   );
 
   const removePane = (sessionId: string, paneId: string) => {
+    const terminalId = meta[paneId]?.terminalId;
     updateSession(sessionId, (s) => ({ ...s, panes: s.panes.filter((p) => p.id !== paneId) }));
     setStatuses(({ [paneId]: _removed, ...rest }) => rest);
     setMeta(({ [paneId]: _removed, ...rest }) => rest);
+    setSubagentsByTerminal(({ [paneId]: _p, [terminalId ?? ""]: _t, ...rest }) => rest);
     if (maximizedPaneId === paneId) setMaximizedPaneId(null);
     if (focusedPaneId === paneId) setFocusedPaneId(null);
   };
@@ -136,6 +140,19 @@ export function App() {
     (paneId: string | null) => setMaximizedPaneId((m) => (m === paneId ? null : paneId)),
     [],
   );
+
+  // Escuchar subagentes emitidos por el núcleo (vía hooks de cada agente).
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onTerminalSubagents(({ terminalId, subagents }) => {
+      setSubagentsByTerminal((m) => ({ ...m, [terminalId]: subagents }));
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   // Atajos globales. En fase de captura para que xterm no se quede con ellos.
   useEffect(() => {
@@ -214,6 +231,7 @@ export function App() {
         focusedPaneId={focusedPaneId}
         statuses={statuses}
         meta={meta}
+        subagentsByTerminal={subagentsByTerminal}
         onSelectTerminal={selectTerminal}
         searchRef={searchRef}
         onSelectWorkspace={(id) => {

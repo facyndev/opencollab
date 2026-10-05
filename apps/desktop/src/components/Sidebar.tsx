@@ -12,8 +12,11 @@ import {
   type Workspace,
 } from "../model";
 import { modKey } from "../shortcuts";
+import { buildSubagentTree, type SubagentNode } from "../subagents";
+import type { Subagent } from "../subagentsApi";
 import { IconButton } from "./Button";
 import { Panel } from "./Panel";
+import { SettingsModal } from "./SettingsModal";
 import { TerminalIcon } from "./TerminalIcon";
 
 type Props = {
@@ -23,6 +26,7 @@ type Props = {
   focusedPaneId: string | null;
   statuses: Record<string, PaneStatus>;
   meta: Record<string, PaneMeta>;
+  subagentsByTerminal?: Record<string, Subagent[]>;
   searchRef: React.RefObject<HTMLInputElement | null>;
   onSelectWorkspace: (id: string) => void;
   onCreateWorkspace: () => void;
@@ -31,9 +35,58 @@ type Props = {
   onCreateSession: () => void;
 };
 
+function SubagentItem({
+  node,
+  sessionId,
+  paneId,
+  onSelectTerminal,
+}: {
+  node: SubagentNode;
+  sessionId: string;
+  paneId: string;
+  onSelectTerminal: (sessionId: string, paneId: string) => void;
+}) {
+  const label = node.label || node.kind || agentInfo(node.agent).name;
+  const dotTone =
+    node.status === "running"
+      ? "running"
+      : node.status === "completed"
+      ? "done"
+      : "failed";
+
+  return (
+    <li key={node.id}>
+      <button
+        type="button"
+        className="thread-item thread-item--sub"
+        title={label}
+        onClick={() => onSelectTerminal(sessionId, paneId)}
+      >
+        <TerminalIcon agent={node.agent} shellName="" size={11} />
+        <span className="thread-label">{label}</span>
+        <span className={`dot dot--${dotTone}`} />
+      </button>
+      {node.children.length > 0 ? (
+        <ul className="thread thread--sub">
+          {node.children.map((child) => (
+            <SubagentItem
+              key={child.id}
+              node={child}
+              sessionId={sessionId}
+              paneId={paneId}
+              onSelectTerminal={onSelectTerminal}
+            />
+          ))}
+        </ul>
+      ) : undefined}
+    </li>
+  );
+}
+
 export function Sidebar(props: Props) {
   const { workspaces, activeWorkspace, activeSessionId, statuses, meta } = props;
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const switcherRef = useRef<HTMLDivElement>(null);
 
@@ -136,12 +189,10 @@ export function Sidebar(props: Props) {
                 type="button"
                 className={`session ${isActive ? "session--active" : ""}`}
                 onClick={() => props.onSelectSession(s.id)}
+                title={summary.text}
               >
                 <span className={`dot dot--${summary.tone}`} />
-                <span className="session-text">
-                  <span className="session-name">{s.name}</span>
-                  <span className="session-meta">{summary.text}</span>
-                </span>
+                <span className="session-name">{s.name}</span>
                 <span className="session-count" title={`${s.panes.length} terminales`}>
                   <VscTerminal className="session-count-icon" aria-hidden="true" />
                   {s.panes.length}
@@ -172,6 +223,11 @@ export function Sidebar(props: Props) {
                       : (m?.shellName ?? `Terminal ${i + 1}`);
                     const status = statuses[pane.id] ?? "starting";
                     const focused = isActive && props.focusedPaneId === pane.id;
+                    const paneSubagents =
+                      (m?.terminalId ? props.subagentsByTerminal?.[m.terminalId] : undefined) ??
+                      props.subagentsByTerminal?.[pane.id] ??
+                      [];
+                    const rootSubagents = buildSubagentTree(paneSubagents);
                     return (
                       <li key={pane.id}>
                         <button
@@ -204,6 +260,21 @@ export function Sidebar(props: Props) {
                             ))}
                           </ul>
                         ) : undefined}
+
+                        {/* Subagentes detectados en vivo vía hooks de los agentes. */}
+                        {rootSubagents.length > 0 ? (
+                          <ul className="thread thread--sub">
+                            {rootSubagents.map((sub) => (
+                              <SubagentItem
+                                key={sub.id}
+                                node={sub}
+                                sessionId={s.id}
+                                paneId={pane.id}
+                                onSelectTerminal={props.onSelectTerminal}
+                              />
+                            ))}
+                          </ul>
+                        ) : undefined}
                       </li>
                     );
                   })}
@@ -224,8 +295,14 @@ export function Sidebar(props: Props) {
           </span>
         </span>
         <ChevronsUpDown />
-        <IconButton icon={<Sliders />} title="Settings" />
+        <IconButton
+          icon={<Sliders />}
+          title="Settings"
+          onClick={() => setSettingsOpen(true)}
+        />
       </div>
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }

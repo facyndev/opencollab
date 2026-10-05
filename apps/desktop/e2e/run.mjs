@@ -16,6 +16,7 @@ import dragSwap from "./scenarios/drag-swap.mjs";
 import exitClosesPane from "./scenarios/exit-closes-pane.mjs";
 import statusBarLive from "./scenarios/status-bar-live.mjs";
 import newTerminalHere from "./scenarios/new-terminal-here.mjs";
+import subagentsAndHooks from "./scenarios/subagents-and-hooks.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
@@ -23,6 +24,7 @@ const scenarios = {
   "nueva terminal desde otra": newTerminalHere,
   "exit en la shell cierra el panel": exitClosesPane,
   "status bar con estado real": statusBarLive,
+  "subagentes en el hilo y panel de hooks": subagentsAndHooks,
 };
 
 function chromePath() {

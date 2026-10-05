@@ -63,13 +63,14 @@ export function TerminalPane(props: Props) {
   const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
+  const [terminalId, setTerminalId] = useState<string | null>(null);
   const [status, setStatus] = useState<PaneStatus>("starting");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => onStatus(paneId, status), [paneId, status, onStatus]);
   useEffect(
-    () => onMeta(paneId, { shellName: info?.name ?? null, agents, cwd }),
-    [paneId, info?.name, agents, cwd, onMeta],
+    () => onMeta(paneId, { shellName: info?.name ?? null, agents, cwd, terminalId }),
+    [paneId, info?.name, agents, cwd, terminalId, onMeta],
   );
 
   useEffect(() => {
@@ -119,6 +120,7 @@ export function TerminalPane(props: Props) {
           return;
         }
         terminalIdRef.current = opened.terminalId;
+        setTerminalId(opened.terminalId);
         setInfo({ name: opened.name, cwd: opened.cwd });
         setCwd((current) => current ?? opened.cwd);
         detach = attachTerminal(opened.terminalId, {

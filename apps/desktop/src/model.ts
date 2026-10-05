@@ -9,7 +9,12 @@ export type PaneStatus = "starting" | "running" | "done" | "failed";
 /// actual. `agents` viene ordenado del más cercano a la shell al más profundo: el
 /// primero es el agente principal de la terminal y los demás son los que este
 /// tiene anidados.
-export type PaneMeta = { shellName: string | null; agents: AgentId[]; cwd: string | null };
+export type PaneMeta = {
+  shellName: string | null;
+  agents: AgentId[];
+  cwd: string | null;
+  terminalId?: string | null;
+};
 
 export type Pane = {
   id: string;
