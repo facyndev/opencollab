@@ -126,7 +126,11 @@ Pronóstico ~500 líneas. Estrategia reutilizada de la feature anterior:
   Verificación del padre: fmt check, clippy limpio, `cargo test --workspace`
   (desktop 10, 0 fallan).
 
+- 2026-10-05: verificación manual del usuario con `cargo run -p relay` +
+  `cargo tauri dev`: la detección de la conexión funciona.
+
 ## Siguiente paso
 
-Verificación manual con `cargo run -p relay` + `cargo tauri dev`. Hallazgos
-menores de S1–S3 quedan pendientes de decisión.
+Integrar `feature/status-bar-live` a `develop`. Hallazgos menores de S1–S3
+quedan pendientes de decisión; `1f5dc03` queda pendiente de revisión RDD
+(`under_budget`).
