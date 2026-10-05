@@ -7,6 +7,7 @@
 //   writes                lo que la UI le escribió a cada terminal
 //   opened                argumentos de cada open_shell
 //   closed                terminalId de cada close_terminal
+//   (eventos del núcleo: terminal-output/exit/agent/agent-session/activity)
 //   agentSessions         terminalId -> título de sesión devuelto por agent_session_title
 //   hooks                 agente -> estado ("installed" | "notInstalled" | ...) de hook_status
 //   hookCalls             { cmd, agent } de cada install/uninstall_agent_hooks

@@ -16,6 +16,7 @@ import { modKey } from "../shortcuts";
 import { IconButton } from "./Button";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
+import { ThreadMeta } from "./ThreadMeta";
 
 type Props = {
   workspaces: Workspace[];
@@ -185,6 +186,11 @@ export function Sidebar(props: Props) {
                           <span className="thread-label">{label}</span>
                           <span className={`dot dot--${status}`} />
                         </button>
+                        {/* Línea secundaria agnóstica: actividad (solo con agente detectado). */}
+                        <ThreadMeta
+                          activity={agent ? (m?.activity ?? null) : null}
+                          attention={agent ? !!m?.attention : false}
+                        />
                         {/* Título de sesión del agente y/o agentes anidados: cuelgan de
                             su terminal y abren la misma. */}
                         {m?.sessionTitle || agents.length > 1 ? (

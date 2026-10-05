@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use application::ports::{
     HookInstaller, ProcessInspector, PtyPort, SessionTitleTranslator, WorkspaceRepository,
 };
 use application::{
-    AppError, CloseTerminal, DetectTerminalAgents, HookEndpoint, InspectHookInstallation,
-    InstallAgentHooks, LaunchTerminal, ListSubdirectories, ResizeTerminal, SendTerminalInput,
-    TrackAgentSessionTitle, UninstallAgentHooks,
+    ActivityTracker, AppError, CloseTerminal, DetectTerminalAgents, HookEndpoint,
+    InspectHookInstallation, InstallAgentHooks, LaunchTerminal, ListSubdirectories, ResizeTerminal,
+    SendTerminalInput, TrackAgentSessionTitle, UninstallAgentHooks,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
@@ -21,6 +22,9 @@ use crate::agent_session::{
     apply_hook_event, hook_binary_path, RequireHookBinary, TERMINAL_AGENT_SESSION_EVENT,
 };
 
+/// Silencio de un PTY a partir del cual se considera inactivo.
+const ACTIVITY_IDLE_AFTER: Duration = Duration::from_secs(3);
+
 /// Dependencias cableadas de la app. Mientras no haya cuentas ni persistencia,
 /// arranca con un usuario local dueño de un workspace y una sesión.
 pub struct AppState {
@@ -33,6 +37,8 @@ pub struct AppState {
     pub detect_agents: DetectTerminalAgents,
     pub list_subdirectories: ListSubdirectories,
     pub agent_sessions: Arc<TrackAgentSessionTitle>,
+    /// Actividad de cada terminal, inferida de su salida (ver `agent_watcher`).
+    pub activity: Arc<ActivityTracker>,
     pub inspect_hooks: InspectHookInstallation,
     pub install_hooks: InstallAgentHooks,
     pub uninstall_hooks: UninstallAgentHooks,
@@ -93,6 +99,7 @@ impl AppState {
             detect_agents: DetectTerminalAgents::new(repo, pty, inspector),
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
             agent_sessions,
+            activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
             inspect_hooks: InspectHookInstallation::new(installers.clone()),
             install_hooks: InstallAgentHooks::new(installers.clone()),
             uninstall_hooks: UninstallAgentHooks::new(installers),

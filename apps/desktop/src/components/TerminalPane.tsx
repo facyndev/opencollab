@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
+import { applyActivity, applyFocus, initialActivity, type ActivityState } from "../activity";
 import { agentInfo, type AgentId } from "../agents";
 import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
@@ -64,14 +65,30 @@ export function TerminalPane(props: Props) {
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
+  /// El handler de actividad se registra una vez: lee el foco vigente desde acá.
+  const focusedRef = useRef(props.focused);
+  focusedRef.current = props.focused;
   const [status, setStatus] = useState<PaneStatus>("starting");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => onStatus(paneId, status), [paneId, status, onStatus]);
   useEffect(
-    () => onMeta(paneId, { shellName: info?.name ?? null, agents, cwd, sessionTitle }),
-    [paneId, info?.name, agents, cwd, sessionTitle, onMeta],
+    () =>
+      onMeta(paneId, {
+        shellName: info?.name ?? null,
+        agents,
+        cwd,
+        sessionTitle,
+        activity: activityState.activity,
+        attention: activityState.attention,
+      }),
+    [paneId, info?.name, agents, cwd, sessionTitle, activityState, onMeta],
   );
+  // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
+  useEffect(() => {
+    if (props.focused) setActivityState(applyFocus);
+  }, [props.focused]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -129,6 +146,7 @@ export function TerminalPane(props: Props) {
             setStatus("done");
             setAgents([]);
             setSessionTitle(null);
+            setActivityState(initialActivity);
             void closeRef.current();
           },
           onAgent: (newAgents) => {
@@ -136,6 +154,8 @@ export function TerminalPane(props: Props) {
             if (newAgents.length === 0) setSessionTitle(null);
           },
           onSessionTitle: setSessionTitle,
+          onActivity: (next) =>
+            setActivityState((s) => applyActivity(s, next, focusedRef.current)),
         });
         setStatus((s) => (s === "done" ? s : "running"));
       })

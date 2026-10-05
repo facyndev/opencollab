@@ -14,11 +14,13 @@ import { installTauriMock } from "./tauri-mock.js";
 import cwdAndThread from "./scenarios/cwd-and-thread.mjs";
 import dragSwap from "./scenarios/drag-swap.mjs";
 import exitClosesPane from "./scenarios/exit-closes-pane.mjs";
+import threadMeta from "./scenarios/thread-meta.mjs";
 import newTerminalHere from "./scenarios/new-terminal-here.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
   "ruta, cambiador e hilo": cwdAndThread,
+  "línea secundaria del hilo": threadMeta,
   "nueva terminal desde otra": newTerminalHere,
   "exit en la shell cierra el panel": exitClosesPane,
 };

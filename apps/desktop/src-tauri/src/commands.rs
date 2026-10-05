@@ -1,6 +1,7 @@
 //! Comandos Tauri: solo traducen entrada/salida y delegan en casos de uso.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use application::ports::{TerminalOutputSink, TerminalSize};
 use domain::TerminalId;
@@ -9,7 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use infrastructure::default_shell_profile;
 
-use application::TrackAgentSessionTitle;
+use application::{ActivityTracker, TrackAgentSessionTitle};
 
 use crate::agent_session::{
     forget_terminal, hook_status_dto, parse_agent, HookStatusDto, TERMINAL_AGENT_SESSION_EVENT,
@@ -36,10 +37,12 @@ struct TerminalExitPayload {
 struct TauriOutputSink {
     app: AppHandle,
     agent_sessions: Arc<TrackAgentSessionTitle>,
+    activity: Arc<ActivityTracker>,
 }
 
 impl TerminalOutputSink for TauriOutputSink {
     fn output(&self, terminal: TerminalId, data: &[u8]) {
+        self.activity.record_output(terminal, Instant::now());
         let _ = self.app.emit(
             TERMINAL_OUTPUT_EVENT,
             TerminalOutputPayload {
@@ -50,6 +53,7 @@ impl TerminalOutputSink for TauriOutputSink {
     }
 
     fn exited(&self, terminal: TerminalId) {
+        self.activity.forget(terminal);
         emit_forgotten(&self.app, &self.agent_sessions, terminal);
         let _ = self.app.emit(
             TERMINAL_EXIT_EVENT,
@@ -93,6 +97,7 @@ pub fn open_shell(
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
         app,
         agent_sessions: state.agent_sessions.clone(),
+        activity: state.activity.clone(),
     });
     let profile = default_shell_profile(cwd.as_deref().map(std::path::Path::new));
     let name = profile.name.clone();
@@ -156,6 +161,7 @@ pub fn close_terminal(
         .close_terminal
         .execute(state.local_user, state.session_id, terminal)
         .map_err(|e| e.to_string())?;
+    state.activity.forget(terminal);
     emit_forgotten(&app, &state.agent_sessions, terminal);
     Ok(())
 }

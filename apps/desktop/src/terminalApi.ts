@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
 
 type OutputPayload = { terminalId: string; data: number[] };
@@ -10,6 +11,8 @@ type ExitPayload = { terminalId: string };
 /// El primero es el agente principal de la terminal; los siguientes son los que
 /// ese agente tiene anidados.
 type AgentPayload = { terminalId: string; agents: AgentId[] };
+/// El núcleo solo lo emite cuando el estado cambia.
+type ActivityPayload = { terminalId: string; state: Activity };
 type AgentSessionPayload = { terminalId: string; title: string | null };
 
 export type TerminalHandlers = {
@@ -19,6 +22,8 @@ export type TerminalHandlers = {
   onAgent: (agents: AgentId[]) => void;
   /// Título de sesión activo del agente en la terminal (`null` si no hay).
   onSessionTitle?: (title: string | null) => void;
+  /// Actividad inferida de la salida del PTY (`working` / `idle`).
+  onActivity?: (state: Activity) => void;
 };
 
 const handlers = new Map<string, TerminalHandlers>();
@@ -28,6 +33,7 @@ const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
 const agentEarly = new Map<string, AgentId[]>();
 const sessionTitleEarly = new Map<string, string | null>();
+const activityEarly = new Map<string, Activity>();
 
 let listening: Promise<void> | null = null;
 
@@ -53,6 +59,11 @@ function ensureListening(): Promise<void> {
       const handler = handlers.get(payload.terminalId);
       if (handler?.onSessionTitle) handler.onSessionTitle(payload.title);
       else sessionTitleEarly.set(payload.terminalId, payload.title);
+    }),
+    listen<ActivityPayload>("terminal-activity", ({ payload }) => {
+      const handler = handlers.get(payload.terminalId);
+      if (handler?.onActivity) handler.onActivity(payload.state);
+      else activityEarly.set(payload.terminalId, payload.state);
     }),
   ]).then(() => undefined);
   return listening;
@@ -85,6 +96,9 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
     h.onSessionTitle?.(sessionTitleEarly.get(terminalId) ?? null);
     sessionTitleEarly.delete(terminalId);
   }
+  const activity = activityEarly.get(terminalId);
+  if (activity) h.onActivity?.(activity);
+  activityEarly.delete(terminalId);
   if (exitedEarly.delete(terminalId)) h.onExit();
   return () => handlers.delete(terminalId);
 }

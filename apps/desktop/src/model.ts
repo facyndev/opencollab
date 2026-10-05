@@ -1,6 +1,7 @@
 // Estado de UI. Workspaces y sesiones viven acá hasta que el núcleo exponga
 // comandos para ellos; las terminales sí son PTYs reales del núcleo.
 
+import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
 
 export type PaneStatus = "starting" | "running" | "done" | "failed";
@@ -14,6 +15,10 @@ export type PaneMeta = {
   agents: AgentId[];
   cwd: string | null;
   sessionTitle?: string | null;
+  /// Actividad inferida de la salida; `null` hasta que el núcleo informa algo.
+  activity?: Activity | null;
+  /// Terminó de trabajar sin que su panel estuviera enfocado y aún no se miró.
+  attention?: boolean;
 };
 
 export type Pane = {

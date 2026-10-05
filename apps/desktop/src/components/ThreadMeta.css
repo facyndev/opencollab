@@ -1,0 +1,45 @@
+/* Línea secundaria bajo cada terminal del hilo del sidebar. */
+.thread-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.thread-meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.thread-meta--working .thread-meta-activity {
+  color: var(--text-muted);
+}
+
+.thread-meta--working .thread-meta-activity svg {
+  color: var(--accent-soft);
+  animation: thread-meta-pulse 1.4s ease-in-out infinite;
+}
+
+/* Pide que se mire la terminal: resalta con el acento. */
+.thread-meta--attention .thread-meta-activity {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+@keyframes thread-meta-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-meta--working .thread-meta-activity svg {
+    animation: none;
+  }
+}
