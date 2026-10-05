@@ -34,6 +34,8 @@ Every signal must work the same for any CLI (domain rule: agents are agnostic):
 - [x] **T1 — Activity (working / idle / needs attention).** Route: delegated writer (multi-file, Rust + frontend). Commit `f7db075`.
 - [x] **T2 — Agent uptime.** Route: delegated writer. Commit `dbbc01f`.
 - [x] **T3 — Git branch of the current folder.** Route: delegated writer. Commit `1250a01`.
+- [ ] **T4 — Bring `develop` into this branch.** `develop` diverged (13 commits: subagent-adapters T4–T7 incl. subagent tree / hooks SettingsModal, and `status-bar-live`). Merge (no rebase), keep `status-bar-live`. Route: delegated writer (multi-file conflicts).
+- [ ] **T5 — Remove subagents, hooks and session titles entirely.** User decision (2026-10-05): agent-specific signals are not universal, drop them. Remove the subagent code that arrives from `develop`, the hook system (`HookReceiver`, `opencollab-hook` sidecar / `apps/hook-relay`, installers, translators, `OPENCOLLAB_*` env injection, hook commands/events, settings UI for hooks) and session titles (`TrackAgentSessionTitle`, `terminal-agent-session`, sidebar title item). Keep agent detection (`KnownAgent`, nested agents) and T1–T3. Route: delegated writer.
 
 ## Acceptance criteria
 
