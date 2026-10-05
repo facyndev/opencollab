@@ -10,7 +10,7 @@ use application::{
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
     ClaudeCodeAdapter, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver, HttpRelayProbe,
-    InMemoryWorkspaceRepository, PortablePtyAdapter, SysinfoProcessInspector,
+    InMemoryWorkspaceRepository, OpenCodeAdapter, PortablePtyAdapter, SysinfoProcessInspector,
 };
 
 /// Silencio de un PTY a partir del cual se considera inactivo.
@@ -47,6 +47,7 @@ fn agent_adapters() -> Vec<Arc<dyn AgentAdapter>> {
         Ok(receiver) => adapters.push(Arc::new(ClaudeCodeAdapter::new(receiver))),
         Err(e) => eprintln!("adaptador de Claude Code deshabilitado: {e}"),
     }
+    adapters.push(Arc::new(OpenCodeAdapter::new()));
     adapters
 }
 
