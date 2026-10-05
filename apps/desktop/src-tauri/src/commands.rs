@@ -150,6 +150,26 @@ pub fn list_subdirectories(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchDto {
+    /// Nombre de la rama, o SHA corto si `HEAD` está desacoplado.
+    name: String,
+    detached: bool,
+}
+
+/// Rama de git de una carpeta (`None` fuera de un repositorio). Lee disco: `async`.
+#[tauri::command(async)]
+pub fn git_branch(state: State<'_, AppState>, path: String) -> Option<BranchDto> {
+    state
+        .inspect_branch
+        .execute(std::path::Path::new(&path))
+        .map(|branch| BranchDto {
+            detached: branch.is_detached(),
+            name: branch.label().to_string(),
+        })
+}
+
 #[tauri::command(async)]
 pub fn close_terminal(
     app: AppHandle,

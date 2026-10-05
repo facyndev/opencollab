@@ -71,6 +71,14 @@ function ensureListening(): Promise<void> {
   return listening;
 }
 
+/// Rama de git de una carpeta; `name` es el SHA corto si `HEAD` está desacoplado.
+export type GitBranch = { name: string; detached: boolean };
+
+/// Rama de la carpeta, o `null` si no está dentro de un repositorio.
+export function gitBranch(path: string): Promise<GitBranch | null> {
+  return invoke<GitBranch | null>("git_branch", { path });
+}
+
 export type OpenedTerminal = { terminalId: string; name: string; cwd: string | null };
 
 /// `cwd`: carpeta inicial; `null` = la por defecto. Si ya no existe, el núcleo usa la por defecto.

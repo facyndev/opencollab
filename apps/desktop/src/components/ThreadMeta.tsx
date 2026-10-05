@@ -1,6 +1,7 @@
-import { VscBell, VscCircleFilled } from "react-icons/vsc";
+import { VscBell, VscCircleFilled, VscGitBranch } from "react-icons/vsc";
 
 import type { Activity } from "../activity";
+import type { GitBranch } from "../terminalApi";
 import { elapsedSince, formatElapsed } from "../duration";
 import { useNow } from "../useNow";
 import "./ThreadMeta.css";
@@ -11,12 +12,14 @@ type Props = {
   attention: boolean;
   /// Arranque del agente (segundos desde la época Unix); `null` = no se muestra.
   startedAt: number | null;
+  /// `null` = fuera de un repositorio: no se muestra.
+  branch: GitBranch | null;
 };
 
 /// Línea secundaria bajo cada terminal del hilo, con datos que valen para
 /// cualquier agente: actividad, tiempo corriendo y rama de git.
-export function ThreadMeta({ activity, attention, startedAt }: Props) {
-  if (!activity && startedAt === null) return null;
+export function ThreadMeta({ activity, attention, startedAt, branch }: Props) {
+  if (!activity && startedAt === null && !branch) return null;
   const tone = attention ? "attention" : (activity ?? "none");
   return (
     <div className={`thread-meta thread-meta--${tone}`}>
@@ -31,6 +34,15 @@ export function ThreadMeta({ activity, attention, startedAt }: Props) {
         </span>
       )}
       {startedAt !== null && <Uptime startedAt={startedAt} />}
+      {branch && (
+        <span
+          className="thread-meta-part thread-meta-branch"
+          title={branch.detached ? `Detached HEAD at ${branch.name}` : `Branch ${branch.name}`}
+        >
+          <VscGitBranch size={11} aria-hidden="true" />
+          <span className="thread-meta-branch-name">{branch.name}</span>
+        </span>
+      )}
     </div>
   );
 }

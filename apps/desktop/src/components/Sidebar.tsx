@@ -186,11 +186,13 @@ export function Sidebar(props: Props) {
                           <span className="thread-label">{label}</span>
                           <span className={`dot dot--${status}`} />
                         </button>
-                        {/* Línea secundaria agnóstica: actividad (solo con agente detectado). */}
+                        {/* Línea secundaria agnóstica: actividad y tiempo (solo con agente
+                            detectado) y rama de git (cualquier terminal en un repo). */}
                         <ThreadMeta
                           activity={agent ? (m?.activity ?? null) : null}
                           attention={agent ? !!m?.attention : false}
                           startedAt={agent ? (m?.startedAt ?? null) : null}
+                          branch={m?.branch ?? null}
                         />
                         {/* Título de sesión del agente y/o agentes anidados: cuelgan de
                             su terminal y abren la misma. */}

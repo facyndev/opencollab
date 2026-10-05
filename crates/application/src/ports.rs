@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::agent_detection::{KnownAgent, ProcessInfo};
+use crate::git::Branch;
 use crate::hooks::HookStatus;
 
 use domain::{
@@ -59,6 +60,13 @@ pub trait PtyPort: Send + Sync {
 pub trait DirectoryBrowser: Send + Sync {
     /// Nombres de las subcarpetas directas de `path` (sin orden garantizado).
     fn subdirectories(&self, path: &std::path::Path) -> Result<Vec<String>, PortError>;
+}
+
+/// Lee el estado de git de una carpeta del disco local.
+pub trait RepositoryInspector: Send + Sync {
+    /// Rama (o commit, si `HEAD` está desacoplado) de la carpeta, buscando hacia
+    /// arriba el repositorio que la contiene. `None` fuera de un repositorio.
+    fn current_branch(&self, path: &std::path::Path) -> Option<Branch>;
 }
 
 /// Foto de los procesos del sistema, para detectar qué corre en cada terminal.

@@ -5,9 +5,10 @@ use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, 
 use crate::agent_detection::{detect_agents, AgentTree};
 use crate::agent_session::HookEndpoint;
 use crate::error::AppError;
+use crate::git::Branch;
 use crate::ports::{
-    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize,
-    WorkspaceRepository,
+    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, RepositoryInspector,
+    TerminalOutputSink, TerminalSize, WorkspaceRepository,
 };
 
 fn load(
@@ -162,6 +163,22 @@ impl ListSubdirectories {
         names.sort_by_key(|name| (name.starts_with('.'), name.to_lowercase()));
         names.truncate(Self::LIMIT);
         Ok(names)
+    }
+}
+
+/// Rama de git de la carpeta en la que está una terminal (`None` fuera de un
+/// repositorio). Vale para cualquier terminal, corra un agente o no.
+pub struct InspectBranch {
+    repositories: Arc<dyn RepositoryInspector>,
+}
+
+impl InspectBranch {
+    pub fn new(repositories: Arc<dyn RepositoryInspector>) -> Self {
+        Self { repositories }
+    }
+
+    pub fn execute(&self, path: &std::path::Path) -> Option<Branch> {
+        self.repositories.current_branch(path)
     }
 }
 
@@ -488,6 +505,30 @@ mod tests {
         .execute(std::path::Path::new("x"))
         .unwrap();
         assert_eq!(list, ["apps", "crates", "Docs", "src", ".cache", ".git"]);
+    }
+
+    struct FakeRepositories;
+
+    impl crate::ports::RepositoryInspector for FakeRepositories {
+        fn current_branch(&self, path: &std::path::Path) -> Option<crate::Branch> {
+            path.starts_with("repo")
+                .then(|| crate::Branch::Named("main".into()))
+        }
+    }
+
+    #[test]
+    fn reports_the_branch_of_a_folder_inside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(
+            inspect.execute(std::path::Path::new("repo/src")),
+            Some(crate::Branch::Named("main".into()))
+        );
+    }
+
+    #[test]
+    fn reports_no_branch_outside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(inspect.execute(std::path::Path::new("elsewhere")), None);
     }
 
     #[test]

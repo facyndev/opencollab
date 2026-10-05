@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { applyActivity, applyFocus, initialActivity, type ActivityState } from "../activity";
 import { agentInfo, type AgentId } from "../agents";
+import { useGitBranch } from "../useGitBranch";
 import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
 import { localUser, statusLabel, type PaneMeta, type PaneStatus } from "../model";
@@ -70,6 +71,8 @@ export function TerminalPane(props: Props) {
   /// El handler de actividad se registra una vez: lee el foco vigente desde acá.
   const focusedRef = useRef(props.focused);
   focusedRef.current = props.focused;
+  // Se vuelve a leer al quedar inactivo: un agente pudo cambiar de rama.
+  const branch = useGitBranch(cwd, activityState.activity === "idle");
   const [status, setStatus] = useState<PaneStatus>("starting");
   const [error, setError] = useState<string | null>(null);
 
@@ -82,10 +85,11 @@ export function TerminalPane(props: Props) {
         cwd,
         sessionTitle,
         startedAt,
+        branch,
         activity: activityState.activity,
         attention: activityState.attention,
       }),
-    [paneId, info?.name, agents, cwd, sessionTitle, startedAt, activityState, onMeta],
+    [paneId, info?.name, agents, cwd, sessionTitle, startedAt, branch, activityState, onMeta],
   );
   // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
   useEffect(() => {

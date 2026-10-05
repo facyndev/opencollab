@@ -10,6 +10,8 @@
 //   (eventos del núcleo: terminal-output/exit/agent/agent-session/activity)
 //   agentSessions         terminalId -> título de sesión devuelto por agent_session_title
 //   hooks                 agente -> estado ("installed" | "notInstalled" | ...) de hook_status
+//   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
+//   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
 //   hookCalls             { cmd, agent } de cada install/uninstall_agent_hooks
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
@@ -20,6 +22,7 @@ export function installTauriMock() {
   const closed = [];
   const agentSessions = {};
   const hookCalls = [];
+  const branches = {};
   // Estado de los hooks como lo reportaría el núcleo en una máquina limpia.
   const hooks = {
     "claude-code": "notInstalled",
@@ -44,7 +47,7 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, writes, opened, closed, agentSessions, hooks, hookCalls };
+  window.__mock = { emit, prompt, writes, opened, closed, agentSessions, branches, hooks, hookCalls };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -92,6 +95,8 @@ export function installTauriMock() {
           hooks[args.agent] = cmd === "install_agent_hooks" ? "installed" : "notInstalled";
           return null;
         }
+        case "git_branch":
+          return branches[args.path] ?? null;
         case "list_subdirectories":
           return tree[args.path] ?? [];
         default:

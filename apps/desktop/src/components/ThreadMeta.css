@@ -50,3 +50,14 @@
   margin-right: 6px;
   color: var(--text-faint);
 }
+
+/* Los nombres de rama largos se cortan; el resto de la línea no se mueve. */
+.thread-meta-branch {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.thread-meta-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -9,6 +9,11 @@ const metaLines = (page) =>
   );
 
 export default async function threadMeta(page, checks) {
+  // El home es un repo en `main`; OneDrive, uno con HEAD desacoplado; el resto, no.
+  await page.evaluate(() => {
+    window.__mock.branches["C:\\Users\\facun"] = { name: "main", detached: false };
+    window.__mock.branches["C:\\Users\\facun\\OneDrive"] = { name: "3f78685", detached: true };
+  });
   await page.click(".topbar .btn--primary"); // t2, queda enfocada
   await wait(400);
 
@@ -24,7 +29,9 @@ export default async function threadMeta(page, checks) {
   let lines = await metaLines(page);
   checks["muestra Working para un agente en actividad"] = lines[0]?.includes("Working") ?? false;
   checks["muestra el tiempo que lleva corriendo el agente"] = /12m/.test(lines[0] ?? "");
-  checks["una shell sin agente no muestra actividad"] = lines[1] === null;
+  checks["una shell sin agente no muestra actividad"] =
+    !!lines[1] && !/Working|Idle|Needs/.test(lines[1]);
+  checks["una shell sin agente muestra la rama de su carpeta"] = lines[1]?.includes("main") ?? false;
 
   await page.evaluate(() =>
     window.__mock.emit("terminal-activity", { terminalId: "t1", state: "idle" }),
@@ -32,6 +39,7 @@ export default async function threadMeta(page, checks) {
   await wait(150);
   lines = await metaLines(page);
   checks["working -> idle sin foco pide atención"] = lines[0]?.includes("Needs attention") ?? false;
+  checks["al quedar inactiva se vuelve a leer la rama"] = lines[0]?.includes("main") ?? false;
   checks["la atención se resalta distinto"] = (await page.$$(".thread-meta--attention")).length === 1;
 
   await page.$$eval(".thread-item:not(.thread-item--sub)", (els) => els[0].click());
@@ -74,5 +82,16 @@ export default async function threadMeta(page, checks) {
     window.__mock.emit("terminal-agent", { terminalId: "t1", agents: [], startedAt: null }),
   );
   await wait(150);
-  checks["sin agente detectado desaparece la actividad"] = (await metaLines(page))[0] === null;
+  lines = await metaLines(page);
+  checks["sin agente detectado desaparece la actividad pero queda la rama"] =
+    !!lines[0] && !/Working|Idle|Needs|\ds/.test(lines[0]) && lines[0].includes("main");
+
+  // Cambiar de carpeta (OSC 7) actualiza la rama: HEAD desacoplado y fuera de un repo.
+  await page.evaluate(() => window.__mock.prompt("t2", "C:\\Users\\facun\\OneDrive"));
+  await wait(200);
+  lines = await metaLines(page);
+  checks["HEAD desacoplado muestra el SHA corto"] = lines[1]?.includes("3f78685") ?? false;
+  await page.evaluate(() => window.__mock.prompt("t2", "C:\\Users"));
+  await wait(200);
+  checks["fuera de un repositorio no se muestra nada"] = (await metaLines(page))[1] === null;
 }

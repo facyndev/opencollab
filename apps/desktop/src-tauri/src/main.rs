@@ -26,6 +26,7 @@ fn main() {
             commands::resize_terminal,
             commands::close_terminal,
             commands::list_subdirectories,
+            commands::git_branch,
             commands::agent_session_title,
             commands::hook_status,
             commands::install_agent_hooks,

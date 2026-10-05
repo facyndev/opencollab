@@ -6,15 +6,16 @@ use application::ports::{
     HookInstaller, ProcessInspector, PtyPort, SessionTitleTranslator, WorkspaceRepository,
 };
 use application::{
-    ActivityTracker, AppError, CloseTerminal, DetectTerminalAgents, HookEndpoint,
+    ActivityTracker, AppError, CloseTerminal, DetectTerminalAgents, HookEndpoint, InspectBranch,
     InspectHookInstallation, InstallAgentHooks, LaunchTerminal, ListSubdirectories, ResizeTerminal,
     SendTerminalInput, TrackAgentSessionTitle, UninstallAgentHooks,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
     AntigravityHookInstaller, ClaudeCodeHookInstaller, ClaudeCodeTranslator, CodexHookInstaller,
-    CodexTranslator, FsDirectoryBrowser, HookReceiver, InMemoryWorkspaceRepository,
-    OpenCodePluginInstaller, OpenCodeTranslator, PortablePtyAdapter, SysinfoProcessInspector,
+    CodexTranslator, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver,
+    InMemoryWorkspaceRepository, OpenCodePluginInstaller, OpenCodeTranslator, PortablePtyAdapter,
+    SysinfoProcessInspector,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -36,6 +37,7 @@ pub struct AppState {
     pub close_terminal: CloseTerminal,
     pub detect_agents: DetectTerminalAgents,
     pub list_subdirectories: ListSubdirectories,
+    pub inspect_branch: InspectBranch,
     pub agent_sessions: Arc<TrackAgentSessionTitle>,
     /// Actividad de cada terminal, inferida de su salida (ver `agent_watcher`).
     pub activity: Arc<ActivityTracker>,
@@ -98,6 +100,7 @@ impl AppState {
             close_terminal: CloseTerminal::new(repo.clone(), pty.clone()),
             detect_agents: DetectTerminalAgents::new(repo, pty, inspector),
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
+            inspect_branch: InspectBranch::new(Arc::new(FsRepositoryInspector::new())),
             agent_sessions,
             activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
             inspect_hooks: InspectHookInstallation::new(installers.clone()),
