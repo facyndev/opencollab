@@ -192,10 +192,7 @@ fn accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc<Shared>
             .name("hook-connection".into())
             .spawn({
                 let shared = shared.clone();
-                move || {
-                    let _slot = slot;
-                    handle_connection(stream, &shared);
-                }
+                move || handle_connection(stream, &shared, slot)
             });
         // Si no hubo hilo, el cierre del closure soltó el `Slot` y el socket.
         drop(spawned);
@@ -208,13 +205,16 @@ fn reject(mut stream: TcpStream, shared: &Shared) {
     respond(&mut stream, 503);
 }
 
-fn handle_connection(mut stream: TcpStream, shared: &Shared) {
+fn handle_connection(mut stream: TcpStream, shared: &Shared, slot: Slot) {
     let _ = stream.set_read_timeout(Some(shared.io_timeout));
     let _ = stream.set_write_timeout(Some(shared.io_timeout));
     let status = match process(&mut stream, shared) {
         Ok(()) => 204,
         Err(status) => status,
     };
+    // El cupo se libera antes de responder: cuando el cliente ve la respuesta
+    // (y abre la siguiente conexión) ya no cuenta como ocupado.
+    drop(slot);
     respond(&mut stream, status);
 }
 
@@ -611,6 +611,24 @@ mod tests {
                 "{}",
             );
             assert_eq!(raw(&receiver, &request), 204);
+            rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+    }
+
+    #[test]
+    fn slot_is_free_once_the_client_sees_the_response() {
+        let (receiver, rx) = start_with(quick(2000, 1));
+        // `raw` lee hasta EOF: para entonces el cupo ya tiene que estar libre,
+        // si no el siguiente cliente recibe un 503 falso.
+        for _ in 0..200 {
+            let request = post(
+                "/hook/codex",
+                receiver.token(),
+                &TerminalId::new().to_string(),
+                "{}",
+            );
+            assert_eq!(raw(&receiver, &request), 204);
+            assert_eq!(receiver.shared.active.load(Ordering::SeqCst), 0);
             rx.recv_timeout(Duration::from_secs(2)).unwrap();
         }
     }

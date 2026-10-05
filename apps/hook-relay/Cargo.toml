@@ -1,0 +1,21 @@
+[package]
+name = "hook-relay"
+description = "Sidecar opencollab-hook: reenvía los hooks de los agentes al receptor local."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "hook_relay"
+
+[[bin]]
+name = "opencollab-hook"
+path = "src/main.rs"
+
+[dependencies]
+application.workspace = true
+
+[dev-dependencies]
+domain.workspace = true
+infrastructure.workspace = true
