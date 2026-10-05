@@ -37,8 +37,8 @@ Rejected: ACP (replaces the TUI; Claude via Agent SDK with claude.ai login is no
 
 ## Tasks
 
-- [ ] **T1 — `AgentEvent` contract, reducer and generic adapter.** Replace the ad-hoc activity event with `AgentEvent`s; sidebar renders `AgentState`. Route: delegated writer.
-- [ ] **T2 — Launch agents as profiles from the app.** New-terminal menu offers detected/known agents; the agent runs inside the default shell so the pane returns to the shell on exit; adapters can augment args/env. Route: delegated writer.
+- [x] **T1 — `AgentEvent` contract, reducer and generic adapter.** Replace the ad-hoc activity event with `AgentEvent`s; sidebar renders `AgentState`. Route: delegated writer. Commit `3fd8057`.
+- [x] **T2 — Launch agents as profiles from the app.** New-terminal menu offers detected/known agents; the agent runs inside the default shell so the pane returns to the shell on exit; adapters can augment args/env. Route: delegated writer. Commit `1e4bc34`.
 - [ ] **T3 — Claude Code adapter (`--settings` HTTP hooks).** Route: delegated writer.
 - [ ] **T4 — OpenCode adapter (`--port` + SSE `/event`).** Route: delegated writer.
 - [ ] **T5 — Codex adapter (app-server + `--remote`).** Deferred until Codex quota renews (2026-10-16) to verify tool/approval events.
@@ -63,3 +63,12 @@ TDD: on (source: user global config). RDD: off (global). Delivery: ask-on-risk; 
 ## Progress
 
 - Branch created; feature document created.
+- T1 `3fd8057`: `AgentEvent`/`AgentStatus` (working | idle only; approval is separate data), `AgentState::reduce` (rules documented in code, 13 tests), `AgentStates` (per-terminal, emits only on change), `AgentEventSink` + `AgentAdapter` (`prepare` -> `LaunchAugmentation{args, env, token}`, `bind(token, terminal, sink)`) + `AgentAdapters` registry. Generic adapter = `activity_event` / `exit_event` (exit code not exposed by `PtyPort`, so terminal exit reports `completed`). Wire: ONE event `terminal-agent-state { terminalId, state }` carrying the reduced state (reducer stays in Rust, frontend only formats: `agentState.ts`, 11 Vitest tests). `terminal-activity` removed. Sidebar shows status, tool (`Bash: echo hi`), `Needs approval: ...` (accent), error.
+- T2 `1e4bc34`: `agent_shell_profile` (infrastructure) chains the agent inside the default shell (PowerShell: `; cmd 'args'` after the OSC 7 integration; Unix: `-c 'cmd; exec $SHELL'`), `command_exists` (PATH + PATHEXT), `KnownAgent::launch_command`, `open_shell(agent?)`, `available_agents`, `AppState.adapters` (empty: T3/T4 implement `AgentAdapter` and register there). Menu `+` lists installed agents; e2e `launch-agent`.
+- Route evidence (T1, T2): delegated writer (multi-file Rust + frontend); `shell.rs` untouched (new module `agent_launch.rs` instead).
+
+## Verification evidence
+
+- RED observed: `cargo test -p application agent_state` (undeclared `AgentState`), `... launch_command` (E0599 no method), Vitest `Cannot find module './agentState'` (suite failed) and `newPane().agent` undefined (2 failures). Not strictly red: `agent_event` and `agent_adapter` tests were written together with their code (the module was not registered at first, 0 tests ran), `agent_launch` tests passed on first run, and the new real-shell e2e passed on first run.
+- After T2: `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` ok; `cargo test --workspace` all pass (application 71, infrastructure 30 + 2 integration); `cargo test -p infrastructure --test shell_integration_e2e -- --ignored` 2 passed (real PowerShell runs the agent command inside the shell and returns to its OSC 7 prompt); `pnpm test` 7 files / 56 tests; `pnpm build` ok; `pnpm test:e2e` all scenarios pass.
+- Not verified: launching a real agent CLI from the app UI (`cargo tauri dev` not run).
