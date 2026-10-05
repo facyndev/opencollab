@@ -104,7 +104,21 @@ Pronóstico ~500 líneas. Estrategia reutilizada de la feature anterior:
     `pnpm test`, `pnpm build`, `pnpm test:e2e` (todo verde); el padre
     re-corrió fmt check, `cargo test --workspace` y `pnpm test` (28).
 
+- RDD por commit (worktree por commit, base = padre), consentido por el
+  usuario en cada uno; los tres **aprobados** y acknowledged:
+  - S1 `bb1f857`: faltan tests de errores de `SessionCollaborators`
+    (workspace inexistente, `PortError`); `as u64` trunca la latencia.
+  - S2 `85003c1`: solo prueba la primera dirección resuelta (`localhost` →
+    IPv6 primero → falso caído); ignora `Content-Length`/chunked; sin test del
+    tope de 4 KiB.
+  - S3 `25f233f` (4 lentes): si falla el conteo de colaboradores, `snapshot`
+    no sondea ni emite y la barra puede quedar en "Connected" con el relay
+    caído (contradice un criterio de aceptación); el E2E inicial no distingue
+    el mock de los defaults; sin tests de carreras de `useCollabStatus`;
+    `syncMs` es en realidad RTT de `/health`; la API collab vive en
+    `terminalApi.ts`.
+
 ## Siguiente paso
 
-Revisión RDD por commit (S1, S2, S3) y verificación manual con
-`cargo run -p relay` + `cargo tauri dev`.
+Decisión del usuario sobre los hallazgos de S3 (sobre todo `snapshot`), y
+verificación manual con `cargo run -p relay` + `cargo tauri dev`.
