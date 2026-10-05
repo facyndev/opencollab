@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use application::{KnownAgent, RawSubagentEvent};
+use application::{KnownAgent, RawSessionEvent};
 use domain::TerminalId;
 use uuid::Uuid;
 
@@ -38,7 +38,7 @@ const MAX_CONNECTIONS: usize = 32;
 /// Cada cuánto el hilo de `accept` mira la bandera de parada.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-type Sink = dyn Fn(RawSubagentEvent) + Send + Sync;
+type Sink = dyn Fn(RawSessionEvent) + Send + Sync;
 
 /// Parámetros internos del servidor; los tests los achican.
 #[derive(Clone, Copy)]
@@ -70,7 +70,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn deliver(&self, event: RawSubagentEvent) -> Result<(), u16> {
+    fn deliver(&self, event: RawSessionEvent) -> Result<(), u16> {
         let open = self.open.lock().unwrap_or_else(|e| e.into_inner());
         if !*open {
             return Err(503);
@@ -106,13 +106,13 @@ pub struct HookReceiver {
 
 impl HookReceiver {
     /// Abre `127.0.0.1:0` y empieza a entregar cada evento aceptado a `sink`.
-    pub fn start(sink: impl Fn(RawSubagentEvent) + Send + Sync + 'static) -> io::Result<Self> {
+    pub fn start(sink: impl Fn(RawSessionEvent) + Send + Sync + 'static) -> io::Result<Self> {
         Self::start_with(Config::default(), sink)
     }
 
     fn start_with(
         config: Config,
-        sink: impl Fn(RawSubagentEvent) + Send + Sync + 'static,
+        sink: impl Fn(RawSessionEvent) + Send + Sync + 'static,
     ) -> io::Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         // Sin `accept` bloqueante: el hilo sondea y siempre ve la bandera.
@@ -289,8 +289,8 @@ fn process(stream: &mut TcpStream, shared: &Shared) -> Result<(), u16> {
         .map_err(|_| 400u16)?;
     let payload = String::from_utf8(body).map_err(|_| 400u16)?;
 
-    shared.deliver(RawSubagentEvent {
-        terminal,
+    shared.deliver(RawSessionEvent {
+        terminal_id: terminal,
         agent,
         payload,
     })
@@ -337,12 +337,12 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use application::{KnownAgent, RawSubagentEvent};
+    use application::{KnownAgent, RawSessionEvent};
     use domain::TerminalId;
 
     use super::*;
 
-    fn start() -> (HookReceiver, Receiver<RawSubagentEvent>) {
+    fn start() -> (HookReceiver, Receiver<RawSessionEvent>) {
         let (tx, rx) = channel();
         let tx = Mutex::new(tx);
         let receiver = HookReceiver::start(move |event| {
@@ -397,7 +397,7 @@ mod tests {
         );
         assert_eq!(raw(&receiver, &request), 204);
         let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(event.terminal, terminal);
+        assert_eq!(event.terminal_id, terminal);
         assert_eq!(event.agent, KnownAgent::ClaudeCode);
         assert_eq!(event.payload, r#"{"a":1}"#);
     }
@@ -483,7 +483,7 @@ mod tests {
         assert_eq!(raw(&receiver, request.as_bytes()), 405);
     }
 
-    fn start_with(config: Config) -> (HookReceiver, Receiver<RawSubagentEvent>) {
+    fn start_with(config: Config) -> (HookReceiver, Receiver<RawSessionEvent>) {
         let (tx, rx) = channel();
         let tx = Mutex::new(tx);
         let receiver = HookReceiver::start_with(config, move |event| {

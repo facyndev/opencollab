@@ -50,7 +50,7 @@ const BACKUP_SUFFIX: &str = ".opencollab.bak";
 const TMP_SUFFIX: &str = ".opencollab.tmp";
 /// Tope del hook, en segundos: nunca debe estorbar al agente.
 const HOOK_TIMEOUT_SECS: u64 = 5;
-const SUBAGENT_EVENTS: [&str; 2] = ["SubagentStart", "SubagentStop"];
+const HOOK_EVENTS: [&str; 1] = ["UserPromptSubmit"];
 
 fn io_error(action: &str, path: &Path, e: &std::io::Error) -> PortError {
     PortError::new(format!("{action} {}: {e}", path.display()))
@@ -198,12 +198,12 @@ fn group_hooks(group: &Value) -> &[Value] {
         .map_or(&[], Vec::as_slice)
 }
 
-/// `true` si cada evento de subagente tiene nuestro hook exactamente igual a `entry`.
+/// `true` si cada evento tiene nuestro hook exactamente igual a `entry`.
 fn has_hooks(doc: &Value, entry: &Value, path: &Path) -> Result<bool, PortError> {
     let Some(hooks) = hooks_object(doc, path)? else {
         return Ok(false);
     };
-    for event in SUBAGENT_EVENTS {
+    for event in HOOK_EVENTS {
         let groups = match hooks.get(event) {
             None => return Ok(false),
             Some(Value::Array(groups)) => groups,
@@ -220,7 +220,7 @@ fn has_hooks(doc: &Value, entry: &Value, path: &Path) -> Result<bool, PortError>
 fn add_hooks(doc: &mut Value, entry: &Value, path: &Path) -> Result<bool, PortError> {
     // Valida la forma antes de mutar nada.
     if let Some(hooks) = hooks_object(doc, path)? {
-        for event in SUBAGENT_EVENTS {
+        for event in HOOK_EVENTS {
             if hooks.get(event).is_some_and(|v| !v.is_array()) {
                 return Err(shape_error(path, &format!("`{event}` no es una lista")));
             }
@@ -233,7 +233,7 @@ fn add_hooks(doc: &mut Value, entry: &Value, path: &Path) -> Result<bool, PortEr
         .as_object_mut()
         .expect("validado arriba");
     let mut changed = false;
-    for event in SUBAGENT_EVENTS {
+    for event in HOOK_EVENTS {
         let groups = hooks
             .entry(event)
             .or_insert_with(|| Value::Array(Vec::new()))
@@ -375,7 +375,7 @@ const PLUGIN_SOURCE: &str = r#"// opencollab-managed-plugin
 // Generado por OpenCollab: se regenera al instalar y se borra al desinstalar.
 // Si lo editas a mano, OpenCollab lo va a considerar desactualizado.
 //
-// Reporta a OpenCollab los subagentes de esta terminal. Fuera de OpenCollab
+// Reporta a OpenCollab el título de sesión de esta terminal. Fuera de OpenCollab
 // (sin las variables de entorno) no hace nada. Nunca bloquea ni falla.
 
 export const OpenCollab = async () => {
@@ -402,23 +402,14 @@ export const OpenCollab = async () => {
   }
 
   return {
-    // Una sesion con padre es un subagente que arranca.
     event: async ({ event }: { event: any }) => {
       try {
-        if (event?.type !== "session.created") return
-        const info = event.properties?.info
-        if (info?.id && info?.parentID) {
-          send({ event: "session.created", sessionID: info.id, parentID: info.parentID })
+        if (event?.type === "session.created" || event?.type === "session.updated") {
+          const title = event.properties?.info?.title
+          if (title) {
+            send({ event: event.type, title })
+          }
         }
-      } catch {}
-    },
-    // El fin de `task` cierra al subagente; su sesion viaja en `metadata`.
-    "tool.execute.after": async (input: any, output: any) => {
-      try {
-        if (input?.tool !== "task") return
-        const child = output?.metadata?.sessionId ?? output?.metadata?.sessionID
-        if (!child) return
-        send({ event: "tool.execute.after", tool: "task", sessionID: child })
       } catch {}
     },
   }
@@ -526,7 +517,7 @@ fn unsupported() -> PortError {
 mod tests {
     use std::sync::Arc;
 
-    use application::{HookEndpoint, SubagentStatus, TrackSubagents};
+    use application::{HookEndpoint, TrackAgentSessionTitle};
     use uuid::Uuid;
 
     use super::*;
@@ -563,7 +554,7 @@ mod tests {
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "echo pre" }] }
     ],
-    "SubagentStart": [
+    "UserPromptSubmit": [
       { "matcher": "Explore", "hooks": [{ "type": "command", "command": "echo mio" }] }
     ]
   }
@@ -597,14 +588,14 @@ mod tests {
                 }
 
                 #[test]
-                fn install_creates_the_file_with_both_events() {
+                fn install_creates_the_file_with_event() {
                     let tmp = TempDir::new();
                     let installer = make(tmp.path());
                     assert_eq!(installer.status(), Ok(HookStatus::NotInstalled));
                     installer.install().unwrap();
                     assert_eq!(installer.status(), Ok(HookStatus::Installed));
                     let doc = parse(&tmp.path().join($file));
-                    for event in ["SubagentStart", "SubagentStop"] {
+                    for event in HOOK_EVENTS {
                         let hooks = ours(&doc, event);
                         assert_eq!(hooks.len(), 1, "{event}");
                         assert_eq!(hooks[0]["type"], "command");
@@ -636,12 +627,12 @@ mod tests {
                     assert_eq!(doc["model"], "opus");
                     assert_eq!(doc["permissions"], original["permissions"]);
                     assert_eq!(doc["hooks"]["PreToolUse"], original["hooks"]["PreToolUse"]);
-                    // El grupo ajeno de SubagentStart sigue, y el nuestro se sumó.
+                    // El grupo ajeno de UserPromptSubmit sigue, y el nuestro se sumó.
                     assert_eq!(
-                        doc["hooks"]["SubagentStart"][0],
-                        original["hooks"]["SubagentStart"][0]
+                        doc["hooks"]["UserPromptSubmit"][0],
+                        original["hooks"]["UserPromptSubmit"][0]
                     );
-                    assert_eq!(ours(&doc, "SubagentStart").len(), 1);
+                    assert_eq!(ours(&doc, "UserPromptSubmit").len(), 1);
 
                     installer.uninstall().unwrap();
                     assert_eq!(parse(&file), original);
@@ -670,8 +661,7 @@ mod tests {
                     installer.install().unwrap();
                     assert_eq!(fs::read_to_string(&file).unwrap(), first);
                     let doc = parse(&file);
-                    assert_eq!(ours(&doc, "SubagentStart").len(), 1);
-                    assert_eq!(ours(&doc, "SubagentStop").len(), 1);
+                    assert_eq!(ours(&doc, "UserPromptSubmit").len(), 1);
                 }
 
                 #[test]
@@ -703,7 +693,7 @@ mod tests {
                     for body in [
                         "[]",
                         r#"{"hooks": []}"#,
-                        r#"{"hooks": {"SubagentStart": {}}}"#,
+                        r#"{"hooks": {"UserPromptSubmit": {}}}"#,
                     ] {
                         let tmp = TempDir::new();
                         let file = tmp.path().join($file);
@@ -724,7 +714,7 @@ mod tests {
                     installer.install().unwrap();
                     assert_eq!(installer.status(), Ok(HookStatus::Installed));
                     let doc = parse(&tmp.path().join($file));
-                    let hooks = ours(&doc, "SubagentStop");
+                    let hooks = ours(&doc, "UserPromptSubmit");
                     assert_eq!(hooks.len(), 1);
                     assert_eq!(hooks[0]["command"], command());
                 }
@@ -747,7 +737,7 @@ mod tests {
                     .unwrap();
                     let doc = parse(&tmp.path().join($file));
                     assert_eq!(
-                        ours(&doc, "SubagentStart")[0]["command"],
+                        ours(&doc, "UserPromptSubmit")[0]["command"],
                         format!(
                             "\"C:/Program Files/OpenCollab/opencollab-hook.exe\" {}",
                             $agent_id
@@ -802,7 +792,8 @@ mod tests {
             "Bearer",
             "X-OpenCollab-Terminal",
             "AbortController",
-            "\"tool.execute.after\"",
+            "session.created",
+            "session.updated",
         ] {
             assert!(PLUGIN_SOURCE.contains(needle), "falta {needle}");
         }
@@ -812,35 +803,23 @@ mod tests {
     #[test]
     fn plugin_bodies_are_accepted_by_the_translator() {
         for needle in [
-            "event: \"session.created\"",
-            "event: \"tool.execute.after\"",
-            "tool: \"task\"",
-            "sessionID:",
-            "parentID:",
+            "event?.type === \"session.created\"",
+            "event?.type === \"session.updated\"",
+            "title",
         ] {
             assert!(PLUGIN_SOURCE.contains(needle), "falta {needle}");
         }
-        let hub = TrackSubagents::new(vec![Arc::new(OpenCodeTranslator)]);
+        let tracker = TrackAgentSessionTitle::new(vec![Arc::new(OpenCodeTranslator)]);
         let terminal = domain::TerminalId::new();
-        let start = json!({"event": "session.created", "sessionID": "hija", "parentID": "padre"});
-        hub.handle(application::RawSubagentEvent {
-            terminal,
+        let payload = json!({"event": "session.created", "title": "Refactor de auth"});
+        let result = tracker.handle(application::RawSessionEvent {
+            terminal_id: terminal,
             agent: KnownAgent::OpenCode,
-            payload: start.to_string(),
+            payload: payload.to_string(),
         })
         .unwrap();
-        let end = json!({"event": "tool.execute.after", "tool": "task", "sessionID": "hija"});
-        hub.handle(application::RawSubagentEvent {
-            terminal,
-            agent: KnownAgent::OpenCode,
-            payload: end.to_string(),
-        })
-        .unwrap();
-        let tree = hub.snapshot(terminal);
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].id, "hija");
-        assert_eq!(tree[0].status, SubagentStatus::Completed);
-        assert_eq!(tree[0].parent_id.as_deref(), Some("padre"));
+        assert_eq!(result, Some("Refactor de auth".to_string()));
+        assert_eq!(tracker.title(terminal), Some("Refactor de auth".to_string()));
     }
 
     #[test]

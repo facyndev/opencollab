@@ -7,11 +7,11 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use application::{HookEndpoint, KnownAgent, RawSubagentEvent};
+use application::{HookEndpoint, KnownAgent, RawSessionEvent};
 use domain::TerminalId;
 use infrastructure::HookReceiver;
 
-fn start() -> (HookReceiver, Receiver<RawSubagentEvent>) {
+fn start() -> (HookReceiver, Receiver<RawSessionEvent>) {
     let (tx, rx) = channel();
     let tx = Mutex::new(tx);
     let receiver = HookReceiver::start(move |event| {
@@ -73,7 +73,7 @@ fn lib_delivers_event_to_receiver() {
     };
     hook_relay::run(Some("claude-code".into()), lookup, &b"{\"x\":1}"[..]);
     let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    assert_eq!(event.terminal, terminal);
+    assert_eq!(event.terminal_id, terminal);
     assert_eq!(event.agent, KnownAgent::ClaudeCode);
     assert_eq!(event.payload, "{\"x\":1}");
 }
@@ -87,7 +87,7 @@ fn binary_delivers_event_and_exits_zero() {
     let out = run_bin(cmd, b"{\"hook\":\"SubagentStart\"}");
     assert_silent_success(&out);
     let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    assert_eq!(event.terminal, terminal);
+    assert_eq!(event.terminal_id, terminal);
     assert_eq!(event.agent, KnownAgent::Codex);
     assert_eq!(event.payload, "{\"hook\":\"SubagentStart\"}");
 }
