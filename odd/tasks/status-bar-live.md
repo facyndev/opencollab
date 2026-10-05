@@ -118,7 +118,15 @@ Pronóstico ~500 líneas. Estrategia reutilizada de la feature anterior:
     `syncMs` es en realidad RTT de `/health`; la API collab vive en
     `terminalApi.ts`.
 
+- S3 corrección (autorizada por el usuario): ruta **inline** (un archivo
+  entendido + una línea en `commands.rs`). `snapshot` ya no falla: un error del
+  conteo se loguea y se usa el último conteo conocido (o 1), así el estado del
+  relay se sigue sondeando y emitiendo. Lógica en `compose` (pura). TDD: 3
+  tests nuevos, RED observado (E0425 `compose` inexistente) → GREEN.
+  Verificación del padre: fmt check, clippy limpio, `cargo test --workspace`
+  (desktop 10, 0 fallan).
+
 ## Siguiente paso
 
-Decisión del usuario sobre los hallazgos de S3 (sobre todo `snapshot`), y
-verificación manual con `cargo run -p relay` + `cargo tauri dev`.
+Verificación manual con `cargo run -p relay` + `cargo tauri dev`. Hallazgos
+menores de S1–S3 quedan pendientes de decisión.

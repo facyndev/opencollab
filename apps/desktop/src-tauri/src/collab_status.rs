@@ -43,13 +43,30 @@ impl CollabStatusPayload {
     }
 }
 
-/// Foto actual: sondea el relay (bloquea hasta el timeout) y cuenta colaboradores.
-pub fn snapshot(state: &AppState) -> Result<CollabStatusPayload, AppError> {
-    let collaborators = state.session_collaborators.execute(state.session_id)?;
-    Ok(CollabStatusPayload::new(
+/// Foto actual: sondea el relay (bloquea hasta el timeout) y cuenta
+/// colaboradores. No falla: si el conteo da error, el estado del relay se
+/// sigue reportando con el último conteo conocido (`last_collaborators`).
+pub fn snapshot(state: &AppState, last_collaborators: Option<usize>) -> CollabStatusPayload {
+    let collaborators = state.session_collaborators.execute(state.session_id);
+    if let Err(e) = &collaborators {
+        eprintln!("estado de colaboración: {e}");
+    }
+    compose(
         state.check_relay.execute(),
         collaborators,
-    ))
+        last_collaborators,
+    )
+}
+
+/// Arma el estado sin dejar que un error del conteo tape el del relay: usa el
+/// último conteo conocido o, si no hay, 1 (el usuario local).
+fn compose(
+    relay: RelayStatus,
+    collaborators: Result<usize, AppError>,
+    last_collaborators: Option<usize>,
+) -> CollabStatusPayload {
+    let collaborators = collaborators.unwrap_or(last_collaborators.unwrap_or(1));
+    CollabStatusPayload::new(relay, collaborators)
 }
 
 /// Regla de emisión: siempre que cambie conectado/colaboradores; la latencia
@@ -74,14 +91,10 @@ pub fn spawn(app: AppHandle) {
         let mut last: Option<CollabStatusPayload> = None;
         loop {
             let state = app.state::<AppState>();
-            match snapshot(&state) {
-                Ok(current) => {
-                    if should_emit(last.as_ref(), &current) {
-                        let _ = app.emit(COLLAB_STATUS_EVENT, current.clone());
-                        last = Some(current);
-                    }
-                }
-                Err(e) => eprintln!("estado de colaboración: {e}"),
+            let current = snapshot(&state, last.as_ref().map(|l| l.collaborators));
+            if should_emit(last.as_ref(), &current) {
+                let _ = app.emit(COLLAB_STATUS_EVENT, current.clone());
+                last = Some(current);
             }
             thread::sleep(INTERVAL);
         }
@@ -131,6 +144,34 @@ mod tests {
     fn large_latency_change_is_emitted() {
         assert!(should_emit(Some(&connected(40, 1)), &connected(55, 1)));
         assert!(should_emit(Some(&connected(200, 1)), &connected(100, 1)));
+    }
+
+    #[test]
+    fn collaborator_count_error_keeps_the_relay_status() {
+        let failed: Result<usize, AppError> =
+            Err(AppError::SessionNotFound(domain::SessionId::new()));
+        assert_eq!(
+            compose(RelayStatus::Disconnected, failed, Some(3)),
+            disconnected(3)
+        );
+    }
+
+    #[test]
+    fn collaborator_count_error_without_history_falls_back_to_one() {
+        let failed: Result<usize, AppError> =
+            Err(AppError::SessionNotFound(domain::SessionId::new()));
+        assert_eq!(
+            compose(RelayStatus::Connected { latency_ms: 9 }, failed, None),
+            connected(9, 1)
+        );
+    }
+
+    #[test]
+    fn collaborator_count_ok_wins_over_history() {
+        assert_eq!(
+            compose(RelayStatus::Disconnected, Ok(2), Some(3)),
+            disconnected(2)
+        );
     }
 
     #[test]

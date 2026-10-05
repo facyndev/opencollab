@@ -132,7 +132,7 @@ pub fn list_subdirectories(
 // `async`: sondear el relay bloquea hasta su timeout y no debe frenar la UI.
 #[tauri::command(async)]
 pub fn collab_status(state: State<'_, AppState>) -> Result<CollabStatusPayload, String> {
-    collab_status::snapshot(&state).map_err(|e| e.to_string())
+    Ok(collab_status::snapshot(&state, None))
 }
 
 #[tauri::command(async)]
