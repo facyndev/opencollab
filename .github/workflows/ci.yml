@@ -56,6 +56,36 @@ jobs:
           path: apps/desktop/dist
           retention-days: 1
 
+  server:
+    name: Server · unit + build
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/server
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: apps/server/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/server/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tests unitarios (Vitest)
+        run: pnpm test
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
   rust:
     name: Rust · fmt, clippy, unit + E2E
     needs: frontend

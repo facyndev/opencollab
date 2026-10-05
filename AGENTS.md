@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, OpenCode, Codex, e
 
 ## Estado del proyecto
 
-Scaffolding inicial. Implementado: modelo de dominio completo con permisos y tests, casos de uso de lanzar / escribir / redimensionar / cerrar terminal y cambiar permisos, adaptador PTY real, y app desktop con la UI de referencia (shells locales reales), con agentes que se lanzan como perfil desde el menú `+` (corren dentro de la shell) y estado de agente como `AgentEvent`s. Pendiente: cliente WebSocket (`CollabTransport` real), lógica del relay (hoy `/ws` es un stub), persistencia, autenticación, comandos del núcleo para workspaces/sesiones, UI de permisos e invitaciones, y los adaptadores ricos por agente (Claude Code, OpenCode: hoy solo rige el genérico). La sesión del desktop es por ahora una sesión local fija creada en `apps/desktop/src-tauri/src/state.rs`.
+Scaffolding inicial. Implementado: modelo de dominio completo con permisos y tests, casos de uso de lanzar / escribir / redimensionar / cerrar terminal y cambiar permisos, adaptador PTY real, y app desktop con la UI de referencia (shells locales reales), con agentes que se lanzan como perfil desde el menú `+` (corren dentro de la shell) y estado de agente como `AgentEvent`s. Pendiente: cliente WebSocket (`CollabTransport` real), lógica del server (hoy `/ws` es un stub en NestJS con paridad de wire), persistencia, autenticación, comandos del núcleo para workspaces/sesiones, UI de permisos e invitaciones, y los adaptadores ricos por agente (Claude Code, OpenCode: hoy solo rige el genérico). La sesión del desktop es por ahora una sesión local fija creada en `apps/desktop/src-tauri/src/state.rs`.
 
 ## Producto
 
@@ -47,8 +47,8 @@ Los agentes son **agnósticos**: el sistema no debe tener lógica específica de
 
 - **Desktop:** Tauri 2, backend en Rust (PTYs con `portable-pty`).
 - **Frontend:** React + TypeScript, terminales con `xterm.js`.
-- **Colaboración:** servidor relay propio en Rust sobre WebSockets (autenticación, sesiones compartidas, invitaciones y retransmisión de streams de PTY).
-- **Monorepo:** Cargo workspace para todo el código Rust; el dominio y los casos de uso se comparten entre la app desktop y el relay.
+- **Colaboración:** servidor relay en NestJS sobre WebSockets (autenticación, sesiones compartidas, invitaciones y retransmisión de streams de PTY).
+- **Monorepo:** Cargo workspace para el core Rust del desktop + paquetes pnpm para el server Nest y los frontends; desktop y server comparten el wire como contrato versionado, no como código.
 
 ## Arquitectura (Clean Architecture)
 
@@ -66,14 +66,14 @@ apps/
   desktop/
     src-tauri/     # Composition root de la app: wiring de dependencias + comandos/eventos Tauri (adaptadores de entrada delgados).
     src/           # Frontend React: grilla de terminales, xterm.js, UI de workspaces.
-  relay/           # Servidor de colaboración: composition root + adaptadores WebSocket/HTTP sobre los mismos casos de uso.
+  server/          # Servidor NestJS: auth, sesiones compartidas, invitaciones y fan-out WebSocket (paridad de wire con protocol/).
 ```
 
 Principios clave:
 
-- Los comandos Tauri y los handlers del relay solo traducen entrada/salida y delegan en casos de uso; no contienen lógica de negocio.
+- Los comandos Tauri solo traducen entrada/salida y delegan en casos de uso; no contienen lógica de negocio. Los handlers del server Nest traducen el wire y obedecen las reglas del dominio (definidas en Rust).
 - El frontend no conoce detalles de PTY ni del relay: habla con el backend vía comandos/eventos Tauri.
-- Todo lo que cruza la red se define en `protocol`; desktop y relay nunca serializan tipos de dominio directamente.
+- Todo lo que cruza la red se define en `protocol`; desktop y server nunca serializan tipos de dominio directamente.
 
 ### Flujos principales
 
@@ -115,12 +115,12 @@ La versión se sube **solo** en la rama `release/*` o `hotfix/*`, como un commit
 
 ## CI/CD (GitHub Actions)
 
-- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión.
+- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión. Job `server`: Vitest + typecheck + build del relay Nest.
 - **`.github/workflows/release.yml`**: al pushear un tag `vX.Y.Z` (sobre `main`). Verifica tag = versión de la app, corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`v1.0.0-beta.1`) salen como pre-release.
 - **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`<os>_<versión>.<extensión>`** → `windows_0.1.0.exe` (NSIS) y `windows_0.1.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
 - Para publicar una versión: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → merge de vuelta a `develop`.
 
-El **protocolo de red** tiene su propia versión, independiente de la de la app: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
+El **protocolo de red** tiene su propia versión, independiente de la de la app: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y server rechazan mensajes de otra versión).
 
 ## Comandos
 
@@ -141,7 +141,7 @@ Desktop (desde `apps/desktop`, usa pnpm):
 - `pnpm test:e2e`: E2E de la interfaz sobre el build de producción (correr `pnpm build` antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.
 - `cargo tauri build`: instaladores en `target/release/bundle/{nsis,msi}`; `pwsh scripts/package-release.ps1 -Version X.Y.Z` los deja en `release/` con el nombre y los hashes de release.
 
-Relay: `cargo run -p relay` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`).
+Server: `pnpm --dir apps/server start:dev` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`). Tests: `pnpm --dir apps/server test` (Vitest).
 
 ### Particularidades
 
@@ -152,7 +152,7 @@ Relay: `cargo run -p relay` (escucha en `127.0.0.1:8787`, configurable con `RELA
   - **Actividad** (`working` / `idle` / `needs attention`): sale del adaptador genérico. `ActivityTracker` (`application/src/activity.rs`, puro, con instante inyectado) registra cuándo emitió bytes cada terminal (`TauriOutputSink::output`); `agent_watcher.rs` hace `tick` cada 1 s y lo traduce a un `AgentEvent::StatusChanged` (sin salida por 3 s = `idle`). "Needs attention" es estado de UI (`src/activity.ts`, testeado): working -> idle sin que el usuario esté mirando el panel, hasta que lo mira. "Enfocado" significa `isWatching`: panel enfocado, visible (su sesión activa, sin minimizar) y con la ventana de la app en primer plano (`useWindowFocus`); volver a la ventana, a su sesión o restaurarlo también lo limpia. Solo se muestra si la terminal tiene un agente detectado (junto al título). El genérico no distingue "terminó" de "pide aprobación": eso lo informan los adaptadores ricos (ver abajo).
   - **Tiempo corriendo del agente**: `ProcessInspector` expone el arranque de cada proceso (`ProcessInfo.started_at`, de `sysinfo::Process::start_time`, segundos Unix; `None` si no se conoce) y `detect_agents` lo copia del proceso del agente principal a `AgentTree.primary_started_at`. El evento `terminal-agent` lleva `startedAt` (`null` sin agente). El frontend lo formatea con `src/duration.ts` (`45s`, `12m`, `1h 05m`) y se actualiza con un único temporizador compartido (`src/useNow.ts`) que solo re-renderiza el fragmento de uptime.
   - **Rama de git de la carpeta actual** (cualquier terminal, con o sin agente): puerto `RepositoryInspector` (`application/src/ports.rs`), caso de uso `InspectBranch`, y adaptador `FsRepositoryInspector` (`infrastructure/src/repository_inspector.rs`) que sube desde la carpeta hasta el primer `.git` (carpeta, o archivo `gitdir: <ruta>` de worktrees/submódulos) y lee `HEAD` sin el binario `git`. `application::git::parse_head` (puro): `ref: refs/heads/<rama>` es la rama; un SHA crudo es HEAD desacoplado y se muestra con 7 caracteres. Comando `git_branch(path)` -> `{ name, detached }` o `null` fuera de un repo. El frontend (`useGitBranch.ts` + `branchWatch.ts`, puro y testeado con timers falsos) lo consulta al cambiar el cwd (OSC 7 o carpeta inicial), al pasar a `idle` y **cada 3 s** (`BRANCH_POLL_MS`): OSC 7 solo se emite en el prompt, así que un cambio de rama mientras corre un agente, o hecho desde otra terminal en la misma carpeta, no avisa por otro lado. Las consultas pueden superponerse, así que una respuesta más vieja que la última aplicada se ignora; si una consulta falla se conserva la última rama conocida (solo se informa `null` si todavía no se conoce ninguna), para que un error transitorio no la haga parpadear. Mock de e2e: `window.__mock.branches`.
-- **Status bar con estado real:** nada está hardcodeado. El núcleo sondea al relay (`HttpRelayProbe`, `GET /health` con `std::net`, timeout total de 1 s, éxito solo con `200` y cuerpo `ok`; caso de uso `CheckRelay`) y cuenta los participantes de la sesión con acceso (`SessionCollaborators`, `Session::participants` filtrado por `can_view`). `collab_status.rs` (desktop) lo expone como comando `collab_status` y como evento `collab-status` (`{ connected, syncMs, collaborators }`), emitido por un hilo propio que sondea cada 3 s. Regla de emisión (`should_emit`): siempre que cambie conectado o colaboradores; la latencia solo si se movió más de 5 ms y más de 25 % respecto de la última emitida, para no emitir en cada sondeo. La dirección sale de `RELAY_ADDR` o de `protocol::DEFAULT_RELAY_ADDR` (la misma constante que usa el relay). En el frontend, `useCollabStatus` alimenta `StatusBar`; el valor inicial y los defaults son honestos (`DEFAULT_COLLAB_STATUS`: desconectado, sin latencia, 1 colaborador). Es la única señal real hasta que exista el `CollabTransport` WebSocket, que la reemplazará. El mock de Tauri responde `collab_status` desconectado; los E2E emiten `collab-status` con `window.__mock.emit`.
+- **Status bar con estado real:** nada está hardcodeado. El núcleo sondea al relay (`HttpRelayProbe`, `GET /health` con `std::net`, timeout total de 1 s, éxito solo con `200` y cuerpo `ok`; caso de uso `CheckRelay`) y cuenta los participantes de la sesión con acceso (`SessionCollaborators`, `Session::participants` filtrado por `can_view`). `collab_status.rs` (desktop) lo expone como comando `collab_status` y como evento `collab-status` (`{ connected, syncMs, collaborators }`), emitido por un hilo propio que sondea cada 3 s. Regla de emisión (`should_emit`): siempre que cambie conectado o colaboradores; la latencia solo si se movió más de 5 ms y más de 25 % respecto de la última emitida, para no emitir en cada sondeo. La dirección sale de `RELAY_ADDR` o de `protocol::DEFAULT_RELAY_ADDR` (el server Nest usa el mismo default). En el frontend, `useCollabStatus` alimenta `StatusBar`; el valor inicial y los defaults son honestos (`DEFAULT_COLLAB_STATUS`: desconectado, sin latencia, 1 colaborador). Es la única señal real hasta que exista el `CollabTransport` WebSocket, que la reemplazará. El mock de Tauri responde `collab_status` desconectado; los E2E emiten `collab-status` con `window.__mock.emit`.
 - **Directorio actual de cada terminal (shell integration):** la shell por defecto (`crates/infrastructure/src/shell.rs`) arranca PowerShell con `-NoExit -Command` envolviendo su `prompt` para emitir `OSC 7` (`ESC]7;file://localhost/C:/ruta ESC\`) antes de cada prompt; xterm lo lee (`registerOscHandler(7)`) y el header muestra la carpeta real en vivo. No se puede leer desde afuera porque PowerShell no cambia el cwd del proceso al hacer `cd`. Test real: `cargo test -p infrastructure --test shell_integration_e2e -- --ignored`. En Unix todavía no hay integración (solo se muestra la carpeta inicial).
 - **Cambiador de ruta** (`CwdSwitcher.tsx`): menú con subcarpetas (adelante, vía `list_subdirectories` → `ListSubdirectories` → `DirectoryBrowser`), `..` y directorios padre (atrás). Navegar = escribirle un `cd` a la shell (`cdCommand` en `src/cwd.ts`, según la shell), así que se desactiva mientras corre un agente: el texto le llegaría al agente. El menú va en un portal con posición fija porque el panel tiene `overflow: hidden`, y se cierra con `resize`.
 - **Nueva terminal desde otra** (`NewTerminalMenu.tsx`, botón `+` del header): abre otra al lado de la de origen, en su carpeta actual (la última que reportó OSC 7) o en la por defecto; `Ctrl/⌘+Shift+T` hace lo primero con la terminal enfocada. La carpeta viaja como `cwd` opcional de `open_shell` → `default_shell_profile(cwd)`, que cae al home si la carpeta ya no existe. Cada panel guarda su carpeta inicial en `Pane.initialCwd` y reporta la actual en `PaneMeta.cwd`.
