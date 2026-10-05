@@ -1,7 +1,10 @@
 // Estado de UI. Workspaces y sesiones viven acá hasta que el núcleo exponga
 // comandos para ellos; las terminales sí son PTYs reales del núcleo.
 
+import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
+import type { AgentState } from "./agentState";
+import type { GitBranch } from "./terminalApi";
 
 export type PaneStatus = "starting" | "running" | "done" | "failed";
 
@@ -13,7 +16,15 @@ export type PaneMeta = {
   shellName: string | null;
   agents: AgentId[];
   cwd: string | null;
-  terminalId?: string | null;
+  /// Arranque del agente principal (segundos desde la época Unix); `null` si no hay agente.
+  startedAt?: number | null;
+  /// Rama de git de la carpeta actual; `null` fuera de un repositorio.
+  branch?: GitBranch | null;
+  /// Estado reducido del agente (herramienta, aprobación, error...); `null` hasta que el núcleo informa algo.
+  agentState?: AgentState | null;
+  activity?: Activity | null;
+  /// Terminó de trabajar sin que su panel estuviera enfocado y aún no se miró.
+  attention?: boolean;
 };
 
 export type Pane = {
@@ -25,6 +36,8 @@ export type Pane = {
   minimized: boolean;
   /// Carpeta en la que arranca la shell (`null` = la por defecto del núcleo).
   initialCwd: string | null;
+  /// Agente que se lanza dentro de la shell al abrir la terminal (`null` = solo la shell).
+  agent: AgentId | null;
 };
 
 export type Session = {
@@ -51,8 +64,8 @@ let counter = 0;
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${counter++}`;
 
 let paneSeq = 0;
-export function newPane(initialCwd: string | null = null): Pane {
-  return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd };
+export function newPane(initialCwd: string | null = null, agent: AgentId | null = null): Pane {
+  return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd, agent };
 }
 
 /// Agrega `pane` justo después de `afterId` (o al final si no está).

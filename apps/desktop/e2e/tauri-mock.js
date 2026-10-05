@@ -5,11 +5,12 @@
 // Controles para los tests en `window.__mock`:
 //   emit(event, payload)  emite un evento como el núcleo
 //   writes                lo que la UI le escribió a cada terminal
-//   opened                argumentos de cada open_shell
+//   opened                argumentos de cada open_shell (cols, rows, cwd, agent)
 //   closed                terminalId de cada close_terminal
-//   subagents             terminalId -> subagentes devueltos por subagent_snapshot
-//   hooks                 agente -> estado ("installed" | "notInstalled" | ...) de hook_status
-//   hookCalls             { cmd, agent } de cada install/uninstall_agent_hooks
+//   (eventos del núcleo: terminal-output/exit/agent/agent-state)
+//   agentState(id, patch) emite terminal-agent-state con el estado completo (patch sobre el vacío)
+//   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
+//   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
@@ -17,15 +18,7 @@ export function installTauriMock() {
   const writes = [];
   const opened = [];
   const closed = [];
-  const subagents = {};
-  const hookCalls = [];
-  // Estado de los hooks como lo reportaría el núcleo en una máquina limpia.
-  const hooks = {
-    "claude-code": "notInstalled",
-    opencode: "notInstalled",
-    codex: "notInstalled",
-    "antigravity-cli": "unsupported",
-  };
+  const branches = {};
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -43,7 +36,22 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, writes, opened, closed, subagents, hooks, hookCalls };
+  // Estado de agente como lo reduce el núcleo (`AgentState` serializado).
+  const agentState = (terminalId, patch) =>
+    emit("terminal-agent-state", {
+      terminalId,
+      state: {
+        status: null,
+        tool: null,
+        approval: null,
+        lastMessage: null,
+        completed: false,
+        error: null,
+        ...patch,
+      },
+    });
+
+  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -68,6 +76,9 @@ export function installTauriMock() {
           setTimeout(() => prompt(terminalId, cwd), 50);
           return { terminalId, name: "PowerShell", cwd };
         }
+        case "available_agents":
+          // Como el núcleo: solo los agentes cuyo comando está en el PATH.
+          return ["claude-code", "opencode", "codex"];
         case "write_terminal": {
           writes.push(args);
           const cd = /^Set-Location -LiteralPath '(.*)'\r$/.exec(args.data);
@@ -82,18 +93,8 @@ export function installTauriMock() {
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
           return { connected: false, syncMs: null, collaborators: 1 };
-        case "subagent_snapshot":
-          return { terminalId: args.terminalId, subagents: subagents[args.terminalId] ?? [] };
-        case "hook_status":
-          return Object.entries(hooks).map(([agent, status]) => ({ agent, status }));
-        case "install_agent_hooks":
-        case "uninstall_agent_hooks": {
-          hookCalls.push({ cmd, agent: args.agent });
-          if (!(args.agent in hooks)) throw `agente desconocido: ${args.agent}`;
-          if (hooks[args.agent] === "unsupported") throw "Antigravity CLI no expone eventos de subagente";
-          hooks[args.agent] = cmd === "install_agent_hooks" ? "installed" : "notInstalled";
-          return null;
-        }
+        case "git_branch":
+          return branches[args.path] ?? null;
         case "list_subdirectories":
           return tree[args.path] ?? [];
         default:

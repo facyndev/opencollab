@@ -98,6 +98,7 @@ fn detects_installed_agents_in_a_real_pty() {
         ("opencode", KnownAgent::OpenCode),
         ("codex", KnownAgent::Codex),
         ("agy", KnownAgent::AntigravityCli),
+        ("grok", KnownAgent::Grok),
     ];
     let mut checked = 0;
     for (command, expected) in cases {

@@ -1,0 +1,78 @@
+/* Línea secundaria bajo cada terminal del hilo del sidebar. */
+.thread-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.thread-meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.thread-meta--working .thread-meta-activity {
+  color: var(--text-muted);
+}
+
+.thread-meta--working .thread-meta-activity svg {
+  color: var(--accent-soft);
+  animation: thread-meta-pulse 1.4s ease-in-out infinite;
+}
+
+/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
+.thread-meta--attention .thread-meta-activity,
+.thread-meta--approval .thread-meta-activity {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.thread-meta--error .thread-meta-activity {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* Herramienta en curso (`Bash: echo hi`) o detalle del error: una línea, recortada. */
+.thread-meta-tool {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+
+@keyframes thread-meta-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-meta--working .thread-meta-activity svg {
+    animation: none;
+  }
+}
+
+/* Separador entre partes: "Working · 12m". */
+.thread-meta-part + .thread-meta-part::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--text-faint);
+}
+
+/* Los nombres de rama largos se cortan; el resto de la línea no se mueve. */
+.thread-meta-branch {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.thread-meta-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

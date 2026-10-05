@@ -1,652 +1,342 @@
-//! Receptor HTTP local de los hooks de los agentes.
+//! Receptor local de los hooks HTTP de Claude Code.
 //!
-//! Esquema (lo siguen el sidecar `opencollab-hook` y el plugin de OpenCode):
-//!
-//! ```text
-//! POST /hook/<agente>            <agente> = KnownAgent::id (claude-code, opencode, codex…)
-//! Authorization: Bearer <token>  el de OPENCOLLAB_HOOK_TOKEN
-//! X-OpenCollab-Terminal: <uuid>  el de OPENCOLLAB_TERMINAL_ID
-//! Content-Length: <n>            cuerpo = payload crudo del agente (máx. 1 MiB)
-//! ```
-//!
-//! Respuestas: `204` aceptado; `400` pedido malformado o terminal inválida;
-//! `401` token ausente o incorrecto; `404` ruta o agente desconocido; `405`
-//! método distinto de POST; `413` cuerpo demasiado grande; `503` receptor
-//! detenido o tope de 32 conexiones simultáneas alcanzado. Escucha solo en
-//! `127.0.0.1` con puerto aleatorio; el `accept` es no bloqueante (así
-//! `shutdown` nunca se cuelga) y tras `shutdown` el `sink` no se invoca más. Solo parsea HTTP y reenvía al `sink`:
-//! la interpretación del payload es de `application`.
+//! Un solo listener por app, en `127.0.0.1` y puerto aleatorio. Cada lanzamiento
+//! de Claude Code tiene su propio secreto (`token`) metido en la URL de sus
+//! hooks (`/hook/<token>`): sin un token registrado la respuesta es 401, así que
+//! otro proceso local que adivine el puerto no puede inyectar estado. Sin
+//! runtime async: un hilo por conexión, con plazos de lectura/escritura y tope de
+//! conexiones simultáneas. Nunca se hace esperar al agente: la respuesta es `{}`.
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 
-use application::{KnownAgent, RawSubagentEvent};
+use application::ports::PortError;
+use application::AgentEventSink;
 use domain::TerminalId;
-use uuid::Uuid;
+use serde_json::Value;
 
-const MAX_BODY: usize = 1024 * 1024;
-const MAX_HEAD: usize = 16 * 1024;
-/// Un cliente lento o mudo no debe retener su hilo indefinidamente.
-const IO_TIMEOUT: Duration = Duration::from_secs(2);
+use crate::claude_hooks::ClaudeHookTranslator;
 
-/// Tope de conexiones atendidas a la vez; las que sobran reciben `503`.
-const MAX_CONNECTIONS: usize = 32;
-/// Cada cuánto el hilo de `accept` mira la bandera de parada.
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Tope del encabezado HTTP.
+const MAX_HEADER: usize = 16 * 1024;
+/// Tope del cuerpo: los payloads de hooks son pequeños (el más grande trae el
+/// último mensaje del asistente o la entrada de una herramienta).
+const MAX_BODY: usize = 256 * 1024;
+/// Conexiones atendidas a la vez; el resto se rechaza con 503.
+const MAX_CONNECTIONS: usize = 16;
+const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
-type Sink = dyn Fn(RawSubagentEvent) + Send + Sync;
-
-/// Parámetros internos del servidor; los tests los achican.
-#[derive(Clone, Copy)]
-struct Config {
-    io_timeout: Duration,
-    max_connections: usize,
+struct Route {
+    /// `None` entre `register` y `bind`: los eventos se aceptan pero se descartan.
+    target: Option<(TerminalId, Arc<dyn AgentEventSink>)>,
+    translator: ClaudeHookTranslator,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            io_timeout: IO_TIMEOUT,
-            max_connections: MAX_CONNECTIONS,
-        }
-    }
-}
+type Routes = Arc<Mutex<HashMap<String, Route>>>;
 
-/// Estado compartido entre el hilo de `accept` y los de cada conexión.
-struct Shared {
-    token: String,
-    sink: Arc<Sink>,
-    io_timeout: Duration,
-    max_connections: usize,
-    /// Conexiones en curso (las cuenta el `accept`, las libera cada hilo).
-    active: AtomicUsize,
-    /// Compuerta del `sink`: se mira y se usa bajo el mismo candado, así que
-    /// una vez cerrada por `shutdown` ya no hay entrega posible ni en vuelo.
-    open: Mutex<bool>,
-}
-
-impl Shared {
-    fn deliver(&self, event: RawSubagentEvent) -> Result<(), u16> {
-        let open = self.open.lock().unwrap_or_else(|e| e.into_inner());
-        if !*open {
-            return Err(503);
-        }
-        (self.sink)(event);
-        Ok(())
-    }
-
-    fn close(&self) {
-        // Espera a una entrega en curso (si la hay) y cierra la compuerta.
-        *self.open.lock().unwrap_or_else(|e| e.into_inner()) = false;
-    }
-}
-
-/// Libera el cupo de la conexión al terminar su hilo, pase lo que pase.
-struct Slot(Arc<Shared>);
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        self.0.active.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// Servidor en un hilo propio; se detiene con [`HookReceiver::shutdown`] o al
-/// soltarlo.
 pub struct HookReceiver {
-    url: String,
-    token: String,
-    shared: Arc<Shared>,
-    stop: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    port: u16,
+    routes: Routes,
 }
 
 impl HookReceiver {
-    /// Abre `127.0.0.1:0` y empieza a entregar cada evento aceptado a `sink`.
-    pub fn start(sink: impl Fn(RawSubagentEvent) + Send + Sync + 'static) -> io::Result<Self> {
-        Self::start_with(Config::default(), sink)
-    }
-
-    fn start_with(
-        config: Config,
-        sink: impl Fn(RawSubagentEvent) + Send + Sync + 'static,
-    ) -> io::Result<Self> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
-        // Sin `accept` bloqueante: el hilo sondea y siempre ve la bandera.
-        listener.set_nonblocking(true)?;
-        let addr = listener.local_addr()?;
-        let token = Uuid::new_v4().simple().to_string();
-        let stop = Arc::new(AtomicBool::new(false));
-        let shared = Arc::new(Shared {
-            token: token.clone(),
-            sink: Arc::new(sink),
-            io_timeout: config.io_timeout,
-            max_connections: config.max_connections,
-            active: AtomicUsize::new(0),
-            open: Mutex::new(true),
-        });
-
-        let thread = {
-            let (stop, shared) = (stop.clone(), shared.clone());
-            thread::Builder::new()
-                .name("hook-receiver".into())
-                .spawn(move || accept_loop(listener, stop, shared))?
-        };
-        Ok(Self {
-            url: format!("http://{addr}/hook"),
-            token,
-            shared,
-            stop,
-            thread: Some(thread),
-        })
-    }
-
-    pub fn url(&self) -> &str {
-        &self.url
-    }
-
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
-    /// Detiene el hilo y libera el puerto. Al volver, el `sink` no se invoca
-    /// más; las conexiones en vuelo terminan solas por su timeout de E/S.
-    pub fn shutdown(self) {}
-}
-
-impl Drop for HookReceiver {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        self.shared.close();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-fn accept_loop(listener: TcpListener, stop: Arc<AtomicBool>, shared: Arc<Shared>) {
-    while !stop.load(Ordering::SeqCst) {
-        let stream = match listener.accept() {
-            Ok((stream, _)) => stream,
-            Err(_) => {
-                thread::sleep(POLL_INTERVAL);
-                continue;
+    /// Abre el listener y lanza el hilo que acepta conexiones.
+    pub fn start() -> Result<Arc<Self>, PortError> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .map_err(|e| PortError::new(format!("no se pudo abrir el receptor de hooks: {e}")))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| PortError::new(e.to_string()))?
+            .port();
+        let routes: Routes = Arc::default();
+        let accept_routes = routes.clone();
+        thread::spawn(move || {
+            let active = Arc::new(AtomicUsize::new(0));
+            for stream in listener.incoming().flatten() {
+                if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    let _ = respond(&stream, 503, "Service Unavailable");
+                    continue;
+                }
+                let (routes, active) = (accept_routes.clone(), active.clone());
+                thread::spawn(move || {
+                    let _ = handle(stream, &routes);
+                    active.fetch_sub(1, Ordering::SeqCst);
+                });
             }
-        };
-        // El socket aceptado hereda el modo no bloqueante en algunas
-        // plataformas: se vuelve a bloqueante con los timeouts de E/S.
-        if stream.set_nonblocking(false).is_err() {
-            continue;
+        });
+        Ok(Arc::new(Self { port, routes }))
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Da de alta un lanzamiento: desde ahora su token se acepta.
+    pub fn register(&self, token: &str) {
+        if let Ok(mut routes) = self.routes.lock() {
+            routes.insert(
+                token.to_string(),
+                Route {
+                    target: None,
+                    translator: ClaudeHookTranslator::new(),
+                },
+            );
         }
-        if shared.active.fetch_add(1, Ordering::SeqCst) >= shared.max_connections {
-            shared.active.fetch_sub(1, Ordering::SeqCst);
-            reject(stream, &shared);
-            continue;
+    }
+
+    /// Con la terminal creada: los eventos de ese token van a `sink`.
+    pub fn bind(&self, token: &str, terminal: TerminalId, sink: Arc<dyn AgentEventSink>) {
+        if let Ok(mut routes) = self.routes.lock() {
+            if let Some(route) = routes.get_mut(token) {
+                route.target = Some((terminal, sink));
+            }
         }
-        let slot = Slot(shared.clone());
-        // Un hilo por conexión: un cliente lento no frena a los demás.
-        let spawned = thread::Builder::new()
-            .name("hook-connection".into())
-            .spawn({
-                let shared = shared.clone();
-                move || handle_connection(stream, &shared, slot)
-            });
-        // Si no hubo hilo, el cierre del closure soltó el `Slot` y el socket.
-        drop(spawned);
+    }
+
+    /// Da de baja el token (la terminal se cerró): vuelve a responder 401.
+    pub fn unregister(&self, token: &str) {
+        if let Ok(mut routes) = self.routes.lock() {
+            routes.remove(token);
+        }
     }
 }
 
-/// Sobrecarga: responde `503` sin leer el pedido y cierra.
-fn reject(mut stream: TcpStream, shared: &Shared) {
-    let _ = stream.set_write_timeout(Some(shared.io_timeout));
-    respond(&mut stream, 503);
-}
-
-fn handle_connection(mut stream: TcpStream, shared: &Shared, slot: Slot) {
-    let _ = stream.set_read_timeout(Some(shared.io_timeout));
-    let _ = stream.set_write_timeout(Some(shared.io_timeout));
-    let status = match process(&mut stream, shared) {
-        Ok(()) => 204,
-        Err(status) => status,
-    };
-    // El cupo se libera antes de responder: cuando el cliente ve la respuesta
-    // (y abre la siguiente conexión) ya no cuenta como ocupado.
-    drop(slot);
-    respond(&mut stream, status);
-}
-
-fn respond(stream: &mut TcpStream, status: u16) {
-    let reason = match status {
-        204 => "No Content",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        503 => "Service Unavailable",
-        _ => "Payload Too Large",
-    };
-    let _ = write!(
-        stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+fn respond(mut stream: &TcpStream, status: u16, reason: &str) -> io::Result<()> {
+    let body = if status == 200 { "{}" } else { "" };
+    let response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
     );
-    let _ = stream.flush();
+    stream.write_all(response.as_bytes())
 }
 
-/// Valida el pedido y entrega el evento. `Err` lleva el código HTTP a responder.
-fn process(stream: &mut TcpStream, shared: &Shared) -> Result<(), u16> {
-    let (head, mut body) = read_head(stream)?;
-    let head = std::str::from_utf8(&head).map_err(|_| 400u16)?;
-    let mut lines = head.split("\r\n");
-    let mut request_line = lines.next().unwrap_or_default().split(' ');
-    let (Some(method), Some(path), Some(_version)) = (
-        request_line.next(),
-        request_line.next(),
-        request_line.next(),
-    ) else {
-        return Err(400);
-    };
-
-    let agent = path
-        .strip_prefix("/hook/")
-        .and_then(KnownAgent::from_id)
-        .ok_or(404u16)?;
-    if method != "POST" {
-        return Err(405);
-    }
-
-    let (mut bearer, mut terminal, mut length) = (None, None, None);
-    for line in lines {
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(400);
-        };
-        let value = value.trim();
-        match name.trim().to_ascii_lowercase().as_str() {
-            "authorization" => bearer = value.strip_prefix("Bearer ").map(str::to_owned),
-            "x-opencollab-terminal" => terminal = Some(value.to_owned()),
-            "content-length" => length = Some(value.parse::<usize>().map_err(|_| 400u16)?),
-            _ => {}
-        }
-    }
-
-    if !bearer.is_some_and(|given| same_token(&given, &shared.token)) {
-        return Err(401);
-    }
-    let terminal: TerminalId = terminal.ok_or(400u16)?.parse().map_err(|_| 400u16)?;
-    let length = length.ok_or(400u16)?;
-    if length > MAX_BODY {
-        return Err(413);
-    }
-
-    // Lo que ya llegó junto al encabezado cuenta; el resto se lee del socket.
-    body.truncate(length);
-    let already = body.len();
-    body.resize(length, 0);
-    stream
-        .read_exact(&mut body[already..])
-        .map_err(|_| 400u16)?;
-    let payload = String::from_utf8(body).map_err(|_| 400u16)?;
-
-    shared.deliver(RawSubagentEvent {
-        terminal,
-        agent,
-        payload,
-    })
-}
-
-/// Lee hasta el fin de los encabezados. Devuelve (encabezados, bytes de cuerpo
-/// ya leídos).
-fn read_head(stream: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>), u16> {
-    const END: &[u8] = b"\r\n\r\n";
+/// Lee hasta el fin del encabezado. Devuelve el encabezado y los bytes del
+/// cuerpo que ya llegaron en la misma lectura.
+fn read_head(stream: &mut TcpStream) -> io::Result<(String, Vec<u8>)> {
     let mut buf = Vec::new();
-    let mut chunk = [0u8; 1024];
+    let mut chunk = [0u8; 2048];
     loop {
-        if let Some(pos) = buf.windows(END.len()).position(|w| w == END) {
-            let body = buf.split_off(pos + END.len());
-            buf.truncate(pos);
-            return Ok((buf, body));
+        if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&buf[..end]).into_owned();
+            return Ok((head, buf[end + 4..].to_vec()));
         }
-        if buf.len() > MAX_HEAD {
-            return Err(400);
+        if buf.len() > MAX_HEADER {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "encabezado largo",
+            ));
         }
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return Err(400),
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
         }
+        buf.extend_from_slice(&chunk[..n]);
     }
 }
 
-/// Comparación sin cortocircuito para no filtrar el token por tiempos.
-fn same_token(given: &str, expected: &str) -> bool {
-    given.len() == expected.len()
-        && given
-            .bytes()
-            .zip(expected.bytes())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            == 0
+fn handle(mut stream: TcpStream, routes: &Routes) -> io::Result<()> {
+    stream.set_read_timeout(Some(IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    let (head, mut body) = read_head(&mut stream)?;
+    let mut lines = head.split("\r\n");
+    let mut request_line = lines.next().unwrap_or("").split_whitespace();
+    let (method, path) = (request_line.next(), request_line.next());
+    if method != Some("POST") {
+        return respond(&stream, 405, "Method Not Allowed");
+    }
+    let Some(token) = path.and_then(|p| p.strip_prefix("/hook/")) else {
+        return respond(&stream, 404, "Not Found");
+    };
+    // Autenticación antes de leer el cuerpo.
+    let known = routes.lock().is_ok_and(|r| r.contains_key(token));
+    if !known {
+        return respond(&stream, 401, "Unauthorized");
+    }
+    let length = lines.find_map(|l| {
+        let (name, value) = l.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())?
+    });
+    let Some(length) = length else {
+        return respond(&stream, 411, "Length Required");
+    };
+    if length > MAX_BODY {
+        return respond(&stream, 413, "Payload Too Large");
+    }
+    let mut chunk = [0u8; 4096];
+    while body.len() < length {
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        body.extend_from_slice(&chunk[..n]);
+    }
+    body.truncate(length);
+    let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
+        return respond(&stream, 400, "Bad Request");
+    };
+    dispatch(routes, token, &payload);
+    respond(&stream, 200, "OK")
+}
+
+/// Traduce el payload y lo entrega fuera del candado de las rutas.
+fn dispatch(routes: &Routes, token: &str, payload: &Value) {
+    let delivery = {
+        let Ok(mut routes) = routes.lock() else {
+            return;
+        };
+        let Some(route) = routes.get_mut(token) else {
+            return;
+        };
+        let events = route.translator.translate(payload);
+        route
+            .target
+            .as_ref()
+            .map(|(terminal, sink)| (*terminal, sink.clone(), events))
+    };
+    if let Some((terminal, sink, events)) = delivery {
+        for event in events {
+            sink.emit(terminal, event);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-    use std::sync::mpsc::{channel, Receiver};
-    use std::sync::Mutex;
-    use std::thread;
-    use std::time::Duration;
-
-    use application::{KnownAgent, RawSubagentEvent};
-    use domain::TerminalId;
+    use application::{AgentEvent, AgentStatus};
+    use serde_json::json;
 
     use super::*;
 
-    fn start() -> (HookReceiver, Receiver<RawSubagentEvent>) {
-        let (tx, rx) = channel();
-        let tx = Mutex::new(tx);
-        let receiver = HookReceiver::start(move |event| {
-            let _ = tx.lock().unwrap().send(event);
-        })
-        .unwrap();
-        (receiver, rx)
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<(TerminalId, AgentEvent)>>);
+    impl AgentEventSink for Recorder {
+        fn emit(&self, terminal: TerminalId, event: AgentEvent) {
+            self.0.lock().unwrap().push((terminal, event));
+        }
     }
 
-    fn addr(receiver: &HookReceiver) -> String {
-        receiver
-            .url()
-            .trim_start_matches("http://")
-            .trim_end_matches("/hook")
-            .to_string()
-    }
-
-    /// Manda bytes crudos y devuelve el código de estado de la respuesta.
-    fn raw(receiver: &HookReceiver, request: &[u8]) -> u16 {
-        let mut stream = TcpStream::connect(addr(receiver)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream.write_all(request).unwrap();
+    /// Manda un pedido crudo y devuelve el código de estado y el cuerpo.
+    fn request(port: u16, raw: &str) -> (u16, String) {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream.write_all(raw.as_bytes()).unwrap();
         let mut response = String::new();
-        let _ = stream.read_to_string(&mut response);
-        response
-            .split_whitespace()
-            .nth(1)
-            .and_then(|code| code.parse().ok())
-            .unwrap_or(0)
+        stream.read_to_string(&mut response).unwrap();
+        let status = response.split_whitespace().nth(1).unwrap().parse().unwrap();
+        let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+        (status, body)
     }
 
-    fn post(path: &str, token: &str, terminal: &str, body: &str) -> Vec<u8> {
-        format!(
-            "POST {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\n\
-             X-OpenCollab-Terminal: {terminal}\r\nContent-Length: {}\r\n\r\n{body}",
-            body.len()
+    fn post(port: u16, path: &str, body: &str) -> (u16, String) {
+        request(
+            port,
+            &format!(
+                "POST {path} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
         )
-        .into_bytes()
     }
 
-    #[test]
-    fn valid_event_reaches_the_sink() {
-        let (receiver, rx) = start();
+    fn bound() -> (Arc<HookReceiver>, Arc<Recorder>, TerminalId) {
+        let receiver = HookReceiver::start().unwrap();
+        let sink = Arc::new(Recorder::default());
         let terminal = TerminalId::new();
-        let request = post(
-            "/hook/claude-code",
-            receiver.token(),
-            &terminal.to_string(),
-            r#"{"a":1}"#,
-        );
-        assert_eq!(raw(&receiver, &request), 204);
-        let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(event.terminal, terminal);
-        assert_eq!(event.agent, KnownAgent::ClaudeCode);
-        assert_eq!(event.payload, r#"{"a":1}"#);
+        receiver.register("tok");
+        receiver.bind("tok", terminal, sink.clone());
+        (receiver, sink, terminal)
     }
 
     #[test]
-    fn url_points_to_the_bound_loopback_port() {
-        let (receiver, _rx) = start();
-        assert!(receiver.url().starts_with("http://127.0.0.1:"));
-        assert!(receiver.url().ends_with("/hook"));
-        assert!(!receiver.token().is_empty());
-    }
-
-    #[test]
-    fn wrong_or_missing_token_is_401_and_delivers_nothing() {
-        let (receiver, rx) = start();
-        let t = TerminalId::new().to_string();
-        assert_eq!(raw(&receiver, &post("/hook/codex", "malo", &t, "{}")), 401);
-        let no_auth = format!(
-            "POST /hook/codex HTTP/1.1\r\nX-OpenCollab-Terminal: {t}\r\nContent-Length: 2\r\n\r\n{{}}"
-        );
-        assert_eq!(raw(&receiver, no_auth.as_bytes()), 401);
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
-    }
-
-    #[test]
-    fn unknown_path_or_agent_is_404() {
-        let (receiver, rx) = start();
-        let t = TerminalId::new().to_string();
-        let token = receiver.token().to_string();
-        assert_eq!(raw(&receiver, &post("/otra", &token, &t, "{}")), 404);
+    fn a_registered_token_delivers_translated_events_and_answers_empty_json() {
+        let (receiver, sink, terminal) = bound();
+        let body = json!({ "hook_event_name": "UserPromptSubmit", "prompt": "hi" }).to_string();
+        let (status, response) = post(receiver.port(), "/hook/tok", &body);
+        assert_eq!((status, response.as_str()), (200, "{}"));
         assert_eq!(
-            raw(&receiver, &post("/hook/desconocido", &token, &t, "{}")),
-            404
+            *sink.0.lock().unwrap(),
+            vec![(
+                terminal,
+                AgentEvent::StatusChanged {
+                    status: AgentStatus::Working
+                }
+            )]
         );
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
     }
 
     #[test]
-    fn missing_or_invalid_terminal_header_is_400() {
-        let (receiver, _rx) = start();
-        let token = receiver.token().to_string();
+    fn an_unknown_token_is_rejected_and_delivers_nothing() {
+        let (receiver, sink, _) = bound();
+        let body = json!({ "hook_event_name": "UserPromptSubmit" }).to_string();
+        assert_eq!(post(receiver.port(), "/hook/wrong", &body).0, 401);
+        assert_eq!(post(receiver.port(), "/hook/", &body).0, 401);
+        assert!(sink.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unregistered_token_stops_working() {
+        let (receiver, sink, _) = bound();
+        receiver.unregister("tok");
+        let body = json!({ "hook_event_name": "UserPromptSubmit" }).to_string();
+        assert_eq!(post(receiver.port(), "/hook/tok", &body).0, 401);
+        assert!(sink.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn events_before_bind_are_accepted_but_dropped() {
+        let receiver = HookReceiver::start().unwrap();
+        receiver.register("tok");
+        let body = json!({ "hook_event_name": "UserPromptSubmit" }).to_string();
+        assert_eq!(post(receiver.port(), "/hook/tok", &body).0, 200);
+    }
+
+    #[test]
+    fn oversized_bodies_are_rejected_before_being_read() {
+        let (receiver, sink, _) = bound();
+        let raw = format!(
+            "POST /hook/tok HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY + 1
+        );
+        assert_eq!(request(receiver.port(), &raw).0, 413);
+        assert!(sink.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn other_methods_paths_and_bad_bodies_are_refused() {
+        let (receiver, _, _) = bound();
+        let port = receiver.port();
+        assert_eq!(request(port, "GET /hook/tok HTTP/1.1\r\n\r\n").0, 405);
+        assert_eq!(post(port, "/other/tok", "{}").0, 404);
+        assert_eq!(post(port, "/hook/tok", "not json").0, 400);
         assert_eq!(
-            raw(&receiver, &post("/hook/codex", &token, "no-es-uuid", "{}")),
-            400
+            request(port, "POST /hook/tok HTTP/1.1\r\n\r\n").0,
+            411,
+            "sin Content-Length"
         );
     }
 
     #[test]
-    fn oversized_body_is_413() {
-        let (receiver, rx) = start();
+    fn a_body_split_across_writes_is_reassembled() {
+        let (receiver, sink, _) = bound();
+        let body = json!({ "hook_event_name": "Stop" }).to_string();
         let head = format!(
-            "POST /hook/codex HTTP/1.1\r\nAuthorization: Bearer {}\r\n\
-             X-OpenCollab-Terminal: {}\r\nContent-Length: 5000000\r\n\r\nxx",
-            receiver.token(),
-            TerminalId::new()
+            "POST /hook/tok HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            body.len()
         );
-        assert_eq!(raw(&receiver, head.as_bytes()), 413);
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
-    }
-
-    #[test]
-    fn garbage_is_400_and_server_keeps_working() {
-        let (receiver, rx) = start();
-        assert_eq!(raw(&receiver, b"\x00\xff basura sin sentido\r\n\r\n"), 400);
-        assert_eq!(raw(&receiver, b"GET\r\n\r\n"), 400);
-        let request = post(
-            "/hook/opencode",
-            receiver.token(),
-            &TerminalId::new().to_string(),
-            "{}",
-        );
-        assert_eq!(raw(&receiver, &request), 204);
-        assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok());
-    }
-
-    #[test]
-    fn non_post_method_is_405() {
-        let (receiver, _rx) = start();
-        let request = format!(
-            "GET /hook/codex HTTP/1.1\r\nAuthorization: Bearer {}\r\n\r\n",
-            receiver.token()
-        );
-        assert_eq!(raw(&receiver, request.as_bytes()), 405);
-    }
-
-    fn start_with(config: Config) -> (HookReceiver, Receiver<RawSubagentEvent>) {
-        let (tx, rx) = channel();
-        let tx = Mutex::new(tx);
-        let receiver = HookReceiver::start_with(config, move |event| {
-            let _ = tx.lock().unwrap().send(event);
-        })
-        .unwrap();
-        (receiver, rx)
-    }
-
-    fn quick(io_timeout_ms: u64, max_connections: usize) -> Config {
-        Config {
-            io_timeout: Duration::from_millis(io_timeout_ms),
-            max_connections,
-        }
-    }
-
-    fn status_of(stream: &mut TcpStream) -> u16 {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, receiver.port())).unwrap();
+        stream.write_all(head.as_bytes()).unwrap();
+        stream.flush().unwrap();
+        thread::sleep(Duration::from_millis(50));
+        stream.write_all(body.as_bytes()).unwrap();
         let mut response = String::new();
-        let _ = stream.read_to_string(&mut response);
-        response
-            .split_whitespace()
-            .nth(1)
-            .and_then(|code| code.parse().ok())
-            .unwrap_or(0)
-    }
-
-    fn connect(receiver: &HookReceiver) -> TcpStream {
-        let stream = TcpStream::connect(addr(receiver)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-    }
-
-    fn head(receiver: &HookReceiver, length: usize) -> String {
-        format!(
-            "POST /hook/codex HTTP/1.1\r\nAuthorization: Bearer {}\r\n\
-             X-OpenCollab-Terminal: {}\r\nContent-Length: {length}\r\n\r\n",
-            receiver.token(),
-            TerminalId::new()
-        )
-    }
-
-    #[test]
-    fn body_split_across_writes_is_delivered_whole() {
-        let (receiver, rx) = start();
-        let mut stream = connect(&receiver);
-        stream.write_all(head(&receiver, 9).as_bytes()).unwrap();
-        for part in ["abc", "def", "ghi"] {
-            thread::sleep(Duration::from_millis(30));
-            stream.write_all(part.as_bytes()).unwrap();
-        }
-        assert_eq!(status_of(&mut stream), 204);
-        let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert_eq!(event.payload, "abcdefghi");
-    }
-
-    #[test]
-    fn missing_content_length_is_400() {
-        let (receiver, rx) = start();
-        let request = format!(
-            "POST /hook/codex HTTP/1.1\r\nAuthorization: Bearer {}\r\n\
-             X-OpenCollab-Terminal: {}\r\n\r\n{{}}",
-            receiver.token(),
-            TerminalId::new()
-        );
-        assert_eq!(raw(&receiver, request.as_bytes()), 400);
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
-    }
-
-    #[test]
-    fn body_shorter_than_declared_is_400() {
-        let (receiver, rx) = start_with(quick(150, 8));
-        // El cliente no cierra: la respuesta llega por el timeout de lectura.
-        let mut stream = connect(&receiver);
-        let request = format!("{}abc", head(&receiver, 10));
-        stream.write_all(request.as_bytes()).unwrap();
-        assert_eq!(status_of(&mut stream), 400);
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
-    }
-
-    #[test]
-    fn missing_terminal_header_is_400() {
-        let (receiver, rx) = start();
-        let request = format!(
-            "POST /hook/codex HTTP/1.1\r\nAuthorization: Bearer {}\r\n\
-             Content-Length: 2\r\n\r\n{{}}",
-            receiver.token()
-        );
-        assert_eq!(raw(&receiver, request.as_bytes()), 400);
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
-    }
-
-    #[test]
-    fn sink_is_never_called_after_shutdown_returns() {
-        let (receiver, rx) = start();
-        let mut stream = connect(&receiver);
-        stream.write_all(head(&receiver, 2).as_bytes()).unwrap();
-        // Dejar que el hilo de la conexión tome el pedido antes de cerrar.
-        thread::sleep(Duration::from_millis(100));
-        receiver.shutdown();
-        // El cuerpo llega con el receptor ya detenido.
-        let _ = stream.write_all(b"{}");
-        let _ = status_of(&mut stream);
-        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
-    }
-
-    #[test]
-    fn connections_over_the_cap_get_503() {
-        let (receiver, rx) = start_with(quick(2000, 2));
-        let (_idle1, _idle2) = (connect(&receiver), connect(&receiver));
-        let mut third = connect(&receiver);
-        assert_eq!(status_of(&mut third), 503);
-        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
-    }
-
-    #[test]
-    fn slots_are_released_when_connections_finish() {
-        let (receiver, rx) = start_with(quick(2000, 1));
-        for _ in 0..3 {
-            let request = post(
-                "/hook/codex",
-                receiver.token(),
-                &TerminalId::new().to_string(),
-                "{}",
-            );
-            assert_eq!(raw(&receiver, &request), 204);
-            rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        }
-    }
-
-    #[test]
-    fn slot_is_free_once_the_client_sees_the_response() {
-        let (receiver, rx) = start_with(quick(2000, 1));
-        // `raw` lee hasta EOF: para entonces el cupo ya tiene que estar libre,
-        // si no el siguiente cliente recibe un 503 falso.
-        for _ in 0..200 {
-            let request = post(
-                "/hook/codex",
-                receiver.token(),
-                &TerminalId::new().to_string(),
-                "{}",
-            );
-            assert_eq!(raw(&receiver, &request), 204);
-            assert_eq!(receiver.shared.active.load(Ordering::SeqCst), 0);
-            rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        }
-    }
-
-    #[test]
-    fn shutdown_is_prompt_with_an_idle_connection_open() {
-        let (receiver, _rx) = start();
-        let _idle = connect(&receiver);
-        let started = std::time::Instant::now();
-        receiver.shutdown();
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-
-    #[test]
-    fn shutdown_stops_accepting_connections() {
-        let (receiver, _rx) = start();
-        let address = addr(&receiver);
-        receiver.shutdown();
-        assert!(TcpStream::connect(address).is_err());
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
     }
 }

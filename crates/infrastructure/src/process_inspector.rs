@@ -48,6 +48,8 @@ impl ProcessInspector for SysinfoProcessInspector {
                     .iter()
                     .map(|a| a.to_string_lossy().into_owned())
                     .collect(),
+                // sysinfo informa 0 cuando no pudo leerlo.
+                started_at: Some(p.start_time()).filter(|&t| t > 0),
             })
             .collect())
     }
@@ -65,5 +67,12 @@ mod tests {
             .find(|p| p.pid == std::process::id())
             .expect("el proceso del test debería aparecer");
         assert!(me.parent.is_some());
+        // El proceso del test arrancó hace poco, pero ya.
+        let started = me.started_at.expect("sysinfo debería informar el arranque");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(started > 0 && started <= now);
     }
 }

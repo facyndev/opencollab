@@ -1,3 +1,5 @@
+> Status: superseded/removed on 2026-10-05 by agent-status-info T5 (agent-specific signals are not universal). Kept as history only.
+
 # Subagentes en el hilo del sidebar
 
 ## Objetivo

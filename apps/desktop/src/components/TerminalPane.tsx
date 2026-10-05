@@ -3,7 +3,10 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
+import { applyActivity, applyFocus, initialActivity, type ActivityState } from "../activity";
 import { agentInfo, type AgentId } from "../agents";
+import type { AgentState } from "../agentState";
+import { useGitBranch } from "../useGitBranch";
 import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
 import { localUser, statusLabel, type PaneMeta, type PaneStatus } from "../model";
@@ -24,6 +27,8 @@ type Props = {
   paneId: string;
   /// Carpeta en la que arranca la shell (`null` = la por defecto).
   initialCwd: string | null;
+  /// Agente a ejecutar dentro de la shell al abrir (`null` = solo la shell).
+  initialAgent: AgentId | null;
   focused: boolean;
   minimized: boolean;
   maximized: boolean;
@@ -42,13 +47,14 @@ type Props = {
   onToggleMinimize: () => void;
   onToggleMaximize: () => void;
   onClosed: () => void;
-  /// Abrir otra terminal al lado de esta (`cwd` = carpeta inicial, `null` = la por defecto).
-  onNewTerminal: (cwd: string | null) => void;
+  /// Abrir otra terminal al lado de esta (`cwd` = carpeta inicial, `null` = la por defecto;
+  /// `agent` = agente a lanzar, omitido = solo la shell).
+  onNewTerminal: (cwd: string | null, agent?: AgentId) => void;
 };
 
 /// Una celda de la grilla: una instancia de xterm.js conectada a un PTY del núcleo.
 export function TerminalPane(props: Props) {
-  const { paneId, initialCwd, onStatus, onMeta } = props;
+  const { paneId, initialCwd, initialAgent, onStatus, onMeta } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
@@ -60,18 +66,39 @@ export function TerminalPane(props: Props) {
   /// El primero es el agente principal de la terminal; los siguientes son los que
   /// ese agente tiene anidados.
   const [agents, setAgents] = useState<AgentId[]>([]);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
   const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
-  const [terminalId, setTerminalId] = useState<string | null>(null);
+  const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
+  const [agentState, setAgentState] = useState<AgentState | null>(null);
+  /// El handler de actividad se registra una vez: lee el foco vigente desde acá.
+  const focusedRef = useRef(props.focused);
+  focusedRef.current = props.focused;
+  // Se vuelve a leer al quedar inactivo: un agente pudo cambiar de rama.
+  const branch = useGitBranch(cwd, activityState.activity === "idle");
   const [status, setStatus] = useState<PaneStatus>("starting");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => onStatus(paneId, status), [paneId, status, onStatus]);
   useEffect(
-    () => onMeta(paneId, { shellName: info?.name ?? null, agents, cwd, terminalId }),
-    [paneId, info?.name, agents, cwd, terminalId, onMeta],
+    () =>
+      onMeta(paneId, {
+        shellName: info?.name ?? null,
+        agents,
+        cwd,
+        startedAt,
+        branch,
+        agentState,
+        activity: activityState.activity,
+        attention: activityState.attention,
+      }),
+    [paneId, info?.name, agents, cwd, startedAt, branch, agentState, activityState, onMeta],
   );
+  // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
+  useEffect(() => {
+    if (props.focused) setActivityState(applyFocus);
+  }, [props.focused]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -113,14 +140,13 @@ export function TerminalPane(props: Props) {
     let detach: (() => void) | null = null;
 
     // La carpeta inicial solo importa al crear el PTY: no se reabre si cambia.
-    openShell(term.cols, term.rows, initialCwd)
+    openShell(term.cols, term.rows, initialCwd, initialAgent)
       .then((opened) => {
         if (disposed) {
           void closeTerminal(opened.terminalId);
           return;
         }
         terminalIdRef.current = opened.terminalId;
-        setTerminalId(opened.terminalId);
         setInfo({ name: opened.name, cwd: opened.cwd });
         setCwd((current) => current ?? opened.cwd);
         detach = attachTerminal(opened.terminalId, {
@@ -129,9 +155,21 @@ export function TerminalPane(props: Props) {
           onExit: () => {
             setStatus("done");
             setAgents([]);
+            setStartedAt(null);
+            setActivityState(initialActivity);
+            setAgentState(null);
             void closeRef.current();
           },
-          onAgent: setAgents,
+          onAgent: (newAgents, newStartedAt) => {
+            setAgents(newAgents);
+            setStartedAt(newStartedAt);
+          },
+          onAgentState: (next) => {
+            setAgentState(next);
+            // La "atención" es de UI: depende del foco del panel en este momento.
+            const status = next.status;
+            if (status) setActivityState((s) => applyActivity(s, status, focusedRef.current));
+          },
         });
         setStatus((s) => (s === "done" ? s : "running"));
       })

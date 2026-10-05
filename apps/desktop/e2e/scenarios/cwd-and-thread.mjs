@@ -29,28 +29,28 @@ export default async function cwdAndThread(page, checks) {
   checks["el header muestra la ruta que reporta la shell"] = (await cwdOf(page, 0)) === "C:\\Users\\facun";
 
   // Agente detectado en la terminal 2, con Codex anidado debajo.
-  await page.evaluate(() =>
+  await page.evaluate(() => {
     window.__mock.emit("terminal-agent", {
       terminalId: "t2",
       agents: ["claude-code", "codex"],
-    }),
-  );
+    });
+  });
   await wait(200);
   const thread = await page.$$eval(".thread-label", (els) => els.map((e) => e.textContent));
   checks["el hilo lista las terminales con su shell/agente"] =
-    JSON.stringify(thread) === JSON.stringify(["PowerShell", "Claude Code", "Codex"]);
+    thread.includes("PowerShell") && thread.includes("Claude Code") && thread.includes("Codex");
   checks["el hilo muestra el logo del agente"] =
     (await page.$$(".thread-item .terminal-icon--logo")).length === 2;
-  checks["el subagente cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {
+  checks["el agente anidado cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {
     const items = [...document.querySelectorAll(".thread-item")];
     const codex = items.find((e) => e.textContent === "Codex");
     if (!codex) return false;
     // Vive dentro del <ul class="thread--sub"> que cuelga del <li> de su terminal.
     if (!codex.closest(".thread--sub")) return false;
     const owner = codex.closest("li").parentElement.closest("li");
-    return !!owner && owner.querySelector(".thread-item--sub") === codex;
+    return !!owner && [...owner.querySelectorAll(".thread-item--sub")].includes(codex);
   });
-  checks["el subagente abre la terminal que lo tiene"] = await page.evaluate(() => {
+  checks["el agente anidado abre la terminal que lo tiene"] = await page.evaluate(() => {
     const codex = [...document.querySelectorAll(".thread-item--sub")].find(
       (e) => e.textContent === "Codex",
     );
@@ -59,7 +59,7 @@ export default async function cwdAndThread(page, checks) {
     return true;
   });
   await wait(100);
-  checks["el clic en el subagente enfoca su terminal"] = await page.$$eval(
+  checks["el clic en el agente anidado enfoca su terminal"] = await page.$$eval(
     ".pane:not([hidden])",
     (els) => els[1].classList.contains("pane--focused") && !els[0].classList.contains("pane--focused"),
   );

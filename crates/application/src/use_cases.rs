@@ -4,11 +4,11 @@ use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, 
 
 use crate::agent_detection::{detect_agents, AgentTree};
 use crate::error::AppError;
+use crate::git::Branch;
 use crate::ports::{
-    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize,
-    WorkspaceRepository,
+    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, RepositoryInspector,
+    TerminalOutputSink, TerminalSize, WorkspaceRepository,
 };
-use crate::subagents::HookEndpoint;
 
 fn load(
     repo: &dyn WorkspaceRepository,
@@ -27,23 +27,11 @@ fn load(
 pub struct LaunchTerminal {
     repo: Arc<dyn WorkspaceRepository>,
     pty: Arc<dyn PtyPort>,
-    hook_endpoint: Option<HookEndpoint>,
 }
 
 impl LaunchTerminal {
     pub fn new(repo: Arc<dyn WorkspaceRepository>, pty: Arc<dyn PtyPort>) -> Self {
-        Self {
-            repo,
-            pty,
-            hook_endpoint: None,
-        }
-    }
-
-    /// Cada terminal lanzada recibe en su entorno el endpoint de los hooks y su
-    /// propio id, para que los eventos de los agentes vuelvan atados a ella.
-    pub fn with_hook_endpoint(mut self, endpoint: HookEndpoint) -> Self {
-        self.hook_endpoint = Some(endpoint);
-        self
+        Self { repo, pty }
     }
 
     pub fn execute(
@@ -56,13 +44,6 @@ impl LaunchTerminal {
     ) -> Result<TerminalId, AppError> {
         let (workspace, mut session) = load(self.repo.as_ref(), session_id)?;
         let terminal = session.add_terminal(&workspace, actor, profile.clone())?;
-        let profile = match &self.hook_endpoint {
-            Some(endpoint) => profile
-                .with_env(HookEndpoint::ENV_TERMINAL_ID, terminal.to_string())
-                .with_env(HookEndpoint::ENV_URL, endpoint.url.clone())
-                .with_env(HookEndpoint::ENV_TOKEN, endpoint.token.clone()),
-            None => profile,
-        };
         self.pty.spawn(terminal, &profile, size, sink)?;
         self.repo.save_session(session)?;
         Ok(terminal)
@@ -162,6 +143,22 @@ impl ListSubdirectories {
         names.sort_by_key(|name| (name.starts_with('.'), name.to_lowercase()));
         names.truncate(Self::LIMIT);
         Ok(names)
+    }
+}
+
+/// Rama de git de la carpeta en la que está una terminal (`None` fuera de un
+/// repositorio). Vale para cualquier terminal, corra un agente o no.
+pub struct InspectBranch {
+    repositories: Arc<dyn RepositoryInspector>,
+}
+
+impl InspectBranch {
+    pub fn new(repositories: Arc<dyn RepositoryInspector>) -> Self {
+        Self { repositories }
+    }
+
+    pub fn execute(&self, path: &std::path::Path) -> Option<Branch> {
+        self.repositories.current_branch(path)
     }
 }
 
@@ -425,53 +422,6 @@ mod tests {
         assert!(session.terminal(w.terminal).is_some());
     }
 
-    fn launch_with(w: &World, launcher: LaunchTerminal) -> (TerminalId, AgentProfile) {
-        let terminal = launcher
-            .execute(
-                w.owner,
-                w.session_id,
-                AgentProfile::new("shell", "sh")
-                    .unwrap()
-                    .with_env("PROPIA", "1"),
-                TerminalSize::default(),
-                Arc::new(NullSink),
-            )
-            .unwrap();
-        let profile = w.pty.profiles.lock().unwrap().last().unwrap().clone();
-        (terminal, profile)
-    }
-
-    #[test]
-    fn launch_injects_hook_env_with_the_terminal_id() {
-        let w = world();
-        let launcher = LaunchTerminal::new(w.repo.clone(), w.pty.clone())
-            .with_hook_endpoint(HookEndpoint::new("http://127.0.0.1:9/hook", "secreto"));
-        let (terminal, profile) = launch_with(&w, launcher);
-        let get = |key: &str| {
-            profile
-                .env
-                .iter()
-                .find(|(k, _)| k == key)
-                .map(|(_, v)| v.clone())
-        };
-        assert_eq!(get("OPENCOLLAB_TERMINAL_ID"), Some(terminal.to_string()));
-        assert_eq!(
-            get("OPENCOLLAB_HOOK_URL").as_deref(),
-            Some("http://127.0.0.1:9/hook")
-        );
-        assert_eq!(get("OPENCOLLAB_HOOK_TOKEN").as_deref(), Some("secreto"));
-        // Respeta el entorno que ya traía el perfil.
-        assert_eq!(get("PROPIA").as_deref(), Some("1"));
-    }
-
-    #[test]
-    fn launch_without_hook_endpoint_adds_no_env() {
-        let w = world();
-        let launcher = LaunchTerminal::new(w.repo.clone(), w.pty.clone());
-        let (_, profile) = launch_with(&w, launcher);
-        assert_eq!(profile.env, vec![("PROPIA".to_string(), "1".to_string())]);
-    }
-
     struct FakeBrowser(Vec<&'static str>);
 
     impl DirectoryBrowser for FakeBrowser {
@@ -488,6 +438,30 @@ mod tests {
         .execute(std::path::Path::new("x"))
         .unwrap();
         assert_eq!(list, ["apps", "crates", "Docs", "src", ".cache", ".git"]);
+    }
+
+    struct FakeRepositories;
+
+    impl crate::ports::RepositoryInspector for FakeRepositories {
+        fn current_branch(&self, path: &std::path::Path) -> Option<crate::Branch> {
+            path.starts_with("repo")
+                .then(|| crate::Branch::Named("main".into()))
+        }
+    }
+
+    #[test]
+    fn reports_the_branch_of_a_folder_inside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(
+            inspect.execute(std::path::Path::new("repo/src")),
+            Some(crate::Branch::Named("main".into()))
+        );
+    }
+
+    #[test]
+    fn reports_no_branch_outside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(inspect.execute(std::path::Path::new("elsewhere")), None);
     }
 
     #[test]
@@ -508,6 +482,7 @@ mod tests {
             parent: Some(1000),
             name: "claude.exe".into(),
             args: vec![],
+            started_at: Some(1_700_000_000),
         }]));
 
         let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
@@ -521,6 +496,7 @@ mod tests {
                     w.terminal,
                     AgentTree {
                         primary: Some(KnownAgent::ClaudeCode),
+                        primary_started_at: Some(1_700_000_000),
                         nested: vec![],
                     }
                 ),
@@ -539,12 +515,14 @@ mod tests {
                 parent: Some(1000),
                 name: "claude.exe".into(),
                 args: vec![],
+                started_at: None,
             },
             crate::agent_detection::ProcessInfo {
                 pid: 2001,
                 parent: Some(2000),
                 name: "codex.exe".into(),
                 args: vec![],
+                started_at: None,
             },
         ]));
 
@@ -558,6 +536,7 @@ mod tests {
                 w.terminal,
                 AgentTree {
                     primary: Some(KnownAgent::ClaudeCode),
+                    primary_started_at: None,
                     nested: vec![KnownAgent::Codex],
                 }
             )]

@@ -11,14 +11,16 @@ pub enum KnownAgent {
     OpenCode,
     Codex,
     AntigravityCli,
+    Grok,
 }
 
 impl KnownAgent {
-    pub const ALL: [KnownAgent; 4] = [
+    pub const ALL: [KnownAgent; 5] = [
         KnownAgent::ClaudeCode,
         KnownAgent::OpenCode,
         KnownAgent::Codex,
         KnownAgent::AntigravityCli,
+        KnownAgent::Grok,
     ];
 
     /// Identificador estable que viaja al frontend.
@@ -28,12 +30,19 @@ impl KnownAgent {
             KnownAgent::OpenCode => "opencode",
             KnownAgent::Codex => "codex",
             KnownAgent::AntigravityCli => "antigravity-cli",
+            KnownAgent::Grok => "grok",
         }
     }
 
     /// Inversa de [`KnownAgent::id`].
     pub fn from_id(id: &str) -> Option<KnownAgent> {
         KnownAgent::ALL.into_iter().find(|a| a.id() == id)
+    }
+
+    /// Comando con el que se lanza el agente desde una shell (el primer nombre
+    /// de ejecutable: es el mismo por el que se lo detecta después).
+    pub fn launch_command(self) -> &'static str {
+        self.executables()[0]
     }
 
     /// Nombres de ejecutable (sin extensión) que identifican al agente.
@@ -43,6 +52,7 @@ impl KnownAgent {
             KnownAgent::OpenCode => &["opencode"],
             KnownAgent::Codex => &["codex"],
             KnownAgent::AntigravityCli => &["agy", "antigravity"],
+            KnownAgent::Grok => &["grok", "grok-cli"],
         }
     }
 
@@ -54,6 +64,7 @@ impl KnownAgent {
             KnownAgent::OpenCode => &["opencode-ai"],
             KnownAgent::Codex => &["@openai/codex"],
             KnownAgent::AntigravityCli => &[],
+            KnownAgent::Grok => &["@xai-official/grok"],
         }
     }
 }
@@ -66,6 +77,8 @@ pub struct ProcessInfo {
     /// Nombre del ejecutable, con o sin extensión (`claude.exe`, `node`).
     pub name: String,
     pub args: Vec<String>,
+    /// Instante de arranque, en segundos desde la época Unix (`None` si no se conoce).
+    pub started_at: Option<u64>,
 }
 
 const SCRIPT_RUNTIMES: [&str; 3] = ["node", "bun", "deno"];
@@ -111,6 +124,8 @@ fn identify(process: &ProcessInfo) -> Option<KnownAgent> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentTree {
     pub primary: Option<KnownAgent>,
+    /// Arranque del proceso del agente principal (segundos desde la época Unix).
+    pub primary_started_at: Option<u64>,
     /// Agentes conocidos por debajo del principal, del más cercano al shell al
     /// más profundo, sin repetir.
     pub nested: Vec<KnownAgent>,
@@ -132,6 +147,7 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
 
     // Acumula en orden de anchura (menor profundidad primero) y sin repetir.
     let mut found: Vec<KnownAgent> = Vec::new();
+    let mut primary_started_at = None;
     let mut level = vec![root];
     let mut visited = std::collections::HashSet::from([root]);
     while !level.is_empty() {
@@ -140,6 +156,9 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
             for child in children.get(&pid).into_iter().flatten() {
                 if let Some(agent) = identify(child) {
                     if !found.contains(&agent) {
+                        if found.is_empty() {
+                            primary_started_at = child.started_at;
+                        }
                         found.push(agent);
                     }
                 }
@@ -155,6 +174,7 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
     let mut found = found.into_iter();
     AgentTree {
         primary: found.next(),
+        primary_started_at,
         nested: found.collect(),
     }
 }
@@ -162,6 +182,15 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_known_agent_has_a_launch_command_that_it_also_detects_by() {
+        for agent in KnownAgent::ALL {
+            let command = agent.launch_command();
+            assert!(agent.executables().contains(&command), "{command}");
+        }
+        assert_eq!(KnownAgent::ClaudeCode.launch_command(), "claude");
+    }
 
     #[test]
     fn from_id_round_trips_every_known_agent() {
@@ -177,7 +206,13 @@ mod tests {
             parent: Some(parent),
             name: name.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
+            started_at: None,
         }
+    }
+
+    fn started(mut process: ProcessInfo, at: u64) -> ProcessInfo {
+        process.started_at = Some(at);
+        process
     }
 
     const SHELL: u32 = 100;
@@ -201,6 +236,9 @@ mod tests {
             ("codex.exe", KnownAgent::Codex),
             ("agy.exe", KnownAgent::AntigravityCli),
             ("claude", KnownAgent::ClaudeCode),
+            ("grok.exe", KnownAgent::Grok),
+            ("grok", KnownAgent::Grok),
+            ("grok-cli", KnownAgent::Grok),
         ] {
             let list = tree(vec![proc(200, SHELL, exe, &[])]);
             assert_eq!(detect_agents(&list, SHELL).primary, Some(agent), "{exe}");
@@ -219,6 +257,20 @@ mod tests {
             ],
         )]);
         assert_eq!(detect_agents(&list, SHELL).primary, Some(KnownAgent::Codex));
+
+        let list_grok = tree(vec![proc(
+            200,
+            SHELL,
+            "node.exe",
+            &[
+                "node",
+                r"C:\Users\u\AppData\Roaming\npm\node_modules\@xai-official\grok\bin\grok.js",
+            ],
+        )]);
+        assert_eq!(
+            detect_agents(&list_grok, SHELL).primary,
+            Some(KnownAgent::Grok)
+        );
     }
 
     #[test]
@@ -261,6 +313,7 @@ mod tests {
             detect_agents(&list, SHELL),
             AgentTree {
                 primary: Some(KnownAgent::ClaudeCode),
+                primary_started_at: None,
                 nested: vec![KnownAgent::Codex],
             }
         );
@@ -279,6 +332,7 @@ mod tests {
             detect_agents(&list, SHELL),
             AgentTree {
                 primary: Some(KnownAgent::ClaudeCode),
+                primary_started_at: None,
                 // Orden de anchura: Codex y OpenCode cuelgan del mismo nivel, y el
                 // Antigravity cuelga de OpenCode.
                 nested: vec![
@@ -303,6 +357,7 @@ mod tests {
             detect_agents(&list, SHELL),
             AgentTree {
                 primary: Some(KnownAgent::ClaudeCode),
+                primary_started_at: None,
                 nested: vec![KnownAgent::Codex],
             }
         );
@@ -335,5 +390,30 @@ mod tests {
             proc(300, 200, "cmd.exe", &[]),
         ];
         assert_eq!(detect_agents(&list, SHELL).primary, None);
+    }
+
+    #[test]
+    fn reports_when_the_primary_agent_started() {
+        // El que cuenta es el proceso del agente principal, no el de la shell ni el de un anidado.
+        let list = vec![
+            started(proc(SHELL, 1, "powershell.exe", &[]), 1_000),
+            started(proc(200, SHELL, "claude.exe", &[]), 2_000),
+            started(proc(300, 200, "codex.exe", &[]), 3_000),
+        ];
+        let detected = detect_agents(&list, SHELL);
+        assert_eq!(detected.primary, Some(KnownAgent::ClaudeCode));
+        assert_eq!(detected.primary_started_at, Some(2_000));
+    }
+
+    #[test]
+    fn start_time_is_unknown_when_the_process_does_not_report_it() {
+        let list = tree(vec![proc(200, SHELL, "claude.exe", &[])]);
+        assert_eq!(detect_agents(&list, SHELL).primary_started_at, None);
+    }
+
+    #[test]
+    fn no_agent_means_no_start_time() {
+        let list = vec![started(proc(SHELL, 1, "powershell.exe", &[]), 1_000)];
+        assert_eq!(detect_agents(&list, SHELL).primary_started_at, None);
     }
 }

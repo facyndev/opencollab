@@ -60,3 +60,15 @@ describe("sessionSummary", () => {
     expect(sessionSummary(panes, statuses(["done", "done"])).tone).toBe("done");
   });
 });
+
+describe("newPane", () => {
+  it("opens a plain shell by default", () => {
+    expect(newPane().agent).toBeNull();
+  });
+
+  it("remembers the agent to launch and the folder", () => {
+    const pane = newPane("C:\work", "claude-code");
+    expect(pane.agent).toBe("claude-code");
+    expect(pane.initialCwd).toBe("C:\work");
+  });
+});

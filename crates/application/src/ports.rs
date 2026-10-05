@@ -4,9 +4,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::agent_detection::{KnownAgent, ProcessInfo};
-use crate::hooks::HookStatus;
-use crate::subagents::SubagentChange;
+use crate::agent_detection::ProcessInfo;
+use crate::git::Branch;
 
 use domain::{
     AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId,
@@ -63,17 +62,16 @@ pub trait DirectoryBrowser: Send + Sync {
     fn subdirectories(&self, path: &std::path::Path) -> Result<Vec<String>, PortError>;
 }
 
+/// Lee el estado de git de una carpeta del disco local.
+pub trait RepositoryInspector: Send + Sync {
+    /// Rama (o commit, si `HEAD` está desacoplado) de la carpeta, buscando hacia
+    /// arriba el repositorio que la contiene. `None` fuera de un repositorio.
+    fn current_branch(&self, path: &std::path::Path) -> Option<Branch>;
+}
+
 /// Foto de los procesos del sistema, para detectar qué corre en cada terminal.
 pub trait ProcessInspector: Send + Sync {
     fn snapshot(&self) -> Result<Vec<ProcessInfo>, PortError>;
-}
-
-/// Traduce el payload crudo de un hook de un agente a cambios de subagentes.
-/// El payload llega como texto: interpretarlo (JSON, etc.) es trabajo de la
-/// infraestructura.
-pub trait SubagentEventTranslator: Send + Sync {
-    fn agent(&self) -> KnownAgent;
-    fn translate(&self, payload: &str) -> Result<Vec<SubagentChange>, PortError>;
 }
 
 /// Sondea al relay de colaboración. Bloquea hasta responder o agotar su timeout,
@@ -81,17 +79,6 @@ pub trait SubagentEventTranslator: Send + Sync {
 pub trait RelayProbe: Send + Sync {
     /// Tiempo de ida y vuelta si el relay respondió bien; error si no.
     fn probe(&self) -> Result<Duration, PortError>;
-}
-
-/// Instala / quita en la configuración de un agente los hooks o el plugin que
-/// reportan sus subagentes. Uno por agente; solo agrega y quita entradas propias.
-pub trait HookInstaller: Send + Sync {
-    fn agent(&self) -> KnownAgent;
-    fn status(&self) -> Result<HookStatus, PortError>;
-    /// Idempotente: instalar dos veces no duplica entradas.
-    fn install(&self) -> Result<(), PortError>;
-    /// Deja la configuración como estaba antes de instalar.
-    fn uninstall(&self) -> Result<(), PortError>;
 }
 
 pub trait WorkspaceRepository: Send + Sync {
