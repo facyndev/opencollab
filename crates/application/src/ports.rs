@@ -2,6 +2,7 @@
 //! capa de aplicación no depende de un runtime async.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::agent_detection::{KnownAgent, ProcessInfo};
 use crate::subagents::SubagentChange;
@@ -72,6 +73,13 @@ pub trait ProcessInspector: Send + Sync {
 pub trait SubagentEventTranslator: Send + Sync {
     fn agent(&self) -> KnownAgent;
     fn translate(&self, payload: &str) -> Result<Vec<SubagentChange>, PortError>;
+}
+
+/// Sondea al relay de colaboración. Bloquea hasta responder o agotar su timeout,
+/// así que quien lo llame periódicamente debe hacerlo fuera del hilo de la UI.
+pub trait RelayProbe: Send + Sync {
+    /// Tiempo de ida y vuelta si el relay respondió bien; error si no.
+    fn probe(&self) -> Result<Duration, PortError>;
 }
 
 pub trait WorkspaceRepository: Send + Sync {
