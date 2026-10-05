@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod agent_watcher;
+mod collab_status;
 mod commands;
 mod state;
 
@@ -12,6 +13,7 @@ fn main() {
         .setup(|app| {
             app.manage(state::AppState::bootstrap()?);
             agent_watcher::spawn(app.handle().clone());
+            collab_status::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -20,6 +22,7 @@ fn main() {
             commands::resize_terminal,
             commands::close_terminal,
             commands::list_subdirectories,
+            commands::collab_status,
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar OpenCollab");

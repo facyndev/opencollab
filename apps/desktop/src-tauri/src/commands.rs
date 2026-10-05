@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use infrastructure::default_shell_profile;
 
+use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
 
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal-output";
@@ -126,6 +127,12 @@ pub fn list_subdirectories(
         .list_subdirectories
         .execute(std::path::Path::new(&path))
         .map_err(|e| e.to_string())
+}
+
+// `async`: sondear el relay bloquea hasta su timeout y no debe frenar la UI.
+#[tauri::command(async)]
+pub fn collab_status(state: State<'_, AppState>) -> Result<CollabStatusPayload, String> {
+    Ok(collab_status::snapshot(&state, None))
 }
 
 #[tauri::command(async)]

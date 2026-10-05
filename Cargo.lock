@@ -648,6 +648,7 @@ dependencies = [
  "application",
  "domain",
  "infrastructure",
+ "protocol",
  "serde",
  "serde_json",
  "tauri",

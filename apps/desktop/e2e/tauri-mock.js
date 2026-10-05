@@ -67,6 +67,9 @@ export function installTauriMock() {
           closed.push(args.terminalId);
           setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
           return null;
+        case "collab_status":
+          // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
+          return { connected: false, syncMs: null, collaborators: 1 };
         case "list_subdirectories":
           return tree[args.path] ?? [];
         default:
