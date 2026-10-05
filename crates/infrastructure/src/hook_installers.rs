@@ -812,14 +812,18 @@ mod tests {
         let tracker = TrackAgentSessionTitle::new(vec![Arc::new(OpenCodeTranslator)]);
         let terminal = domain::TerminalId::new();
         let payload = json!({"event": "session.created", "title": "Refactor de auth"});
-        let result = tracker.handle(application::RawSessionEvent {
-            terminal_id: terminal,
-            agent: KnownAgent::OpenCode,
-            payload: payload.to_string(),
-        })
-        .unwrap();
+        let result = tracker
+            .handle(application::RawSessionEvent {
+                terminal_id: terminal,
+                agent: KnownAgent::OpenCode,
+                payload: payload.to_string(),
+            })
+            .unwrap();
         assert_eq!(result, Some("Refactor de auth".to_string()));
-        assert_eq!(tracker.title(terminal), Some("Refactor de auth".to_string()));
+        assert_eq!(
+            tracker.title(terminal),
+            Some("Refactor de auth".to_string())
+        );
     }
 
     #[test]

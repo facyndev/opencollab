@@ -1,10 +1,10 @@
 // Evita la consola extra en Windows en builds de release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_session;
 mod agent_watcher;
 mod commands;
 mod state;
-mod agent_session;
 
 use tauri::Manager;
 

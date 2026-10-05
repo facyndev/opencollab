@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import { VscTerminal } from "react-icons/vsc";
+import { VscComment, VscTerminal } from "react-icons/vsc";
 
 import { agentInfo } from "../agents";
-import { Check, ChevronDown, ChevronsUpDown, Logo, Plus, Search, Sliders } from "../icons";
+import { opencollabLogoRounded } from "../assets/brand";
+import { Check, ChevronDown, ChevronsUpDown, Plus, Search, Sliders } from "../icons";
 import {
   localUser,
   sessionSummary,
@@ -60,7 +61,7 @@ export function Sidebar(props: Props) {
           onClick={() => setSwitcherOpen((o) => !o)}
         >
           <span className="ws-logo">
-            <Logo />
+            <img src={opencollabLogoRounded} alt="OpenCollab" className="ws-logo-img" />
           </span>
           <span className="ws-text">
             <span className="ws-name">{activeWorkspace.name}</span>
@@ -184,11 +185,23 @@ export function Sidebar(props: Props) {
                           <span className="thread-label">{label}</span>
                           <span className={`dot dot--${status}`} />
                         </button>
-                        {/* Agentes que el de arriba tiene corriendo debajo: cuelgan de
-                            su terminal y abren la misma. Sin punto de estado, porque
-                            el estado es el de la terminal. */}
-                        {agents.length > 1 ? (
+                        {/* Título de sesión del agente y/o agentes anidados: cuelgan de
+                            su terminal y abren la misma. */}
+                        {m?.sessionTitle || agents.length > 1 ? (
                           <ul className="thread thread--sub">
+                            {m?.sessionTitle ? (
+                              <li key="session-title">
+                                <button
+                                  type="button"
+                                  className="thread-item thread-item--sub"
+                                  title={`${label}: ${m.sessionTitle}`}
+                                  onClick={() => props.onSelectTerminal(s.id, pane.id)}
+                                >
+                                  <VscComment size={11} aria-hidden="true" style={{ flexShrink: 0, opacity: 0.7 }} />
+                                  <span className="thread-label">{m.sessionTitle}</span>
+                                </button>
+                              </li>
+                            ) : null}
                             {agents.slice(1).map((sub) => (
                               <li key={sub}>
                                 <button

@@ -88,10 +88,12 @@ pub fn forget_terminal(
     tracker: &TrackAgentSessionTitle,
     terminal: TerminalId,
 ) -> Option<TerminalAgentSessionPayload> {
-    tracker.forget(terminal).then(|| TerminalAgentSessionPayload {
-        terminal_id: terminal.to_string(),
-        title: None,
-    })
+    tracker
+        .forget(terminal)
+        .then(|| TerminalAgentSessionPayload {
+            terminal_id: terminal.to_string(),
+            title: None,
+        })
 }
 
 /// Decorador: `install` falla con un mensaje claro si falta el binario del

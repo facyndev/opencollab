@@ -3,12 +3,12 @@ use std::sync::Arc;
 use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace};
 
 use crate::agent_detection::{detect_agents, AgentTree};
+use crate::agent_session::HookEndpoint;
 use crate::error::AppError;
 use crate::ports::{
     CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize,
     WorkspaceRepository,
 };
-use crate::agent_session::HookEndpoint;
 
 fn load(
     repo: &dyn WorkspaceRepository,

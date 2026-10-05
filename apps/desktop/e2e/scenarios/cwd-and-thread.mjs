@@ -29,16 +29,22 @@ export default async function cwdAndThread(page, checks) {
   checks["el header muestra la ruta que reporta la shell"] = (await cwdOf(page, 0)) === "C:\\Users\\facun";
 
   // Agente detectado en la terminal 2, con Codex anidado debajo.
-  await page.evaluate(() =>
+  await page.evaluate(() => {
     window.__mock.emit("terminal-agent", {
       terminalId: "t2",
       agents: ["claude-code", "codex"],
-    }),
-  );
+    });
+    window.__mock.emit("terminal-agent-session", {
+      terminalId: "t2",
+      title: "Fix authentication bug",
+    });
+  });
   await wait(200);
   const thread = await page.$$eval(".thread-label", (els) => els.map((e) => e.textContent));
   checks["el hilo lista las terminales con su shell/agente"] =
-    JSON.stringify(thread) === JSON.stringify(["PowerShell", "Claude Code", "Codex"]);
+    thread.includes("PowerShell") && thread.includes("Claude Code") && thread.includes("Codex");
+  checks["el hilo muestra el titulo de sesion del agente"] =
+    thread.includes("Fix authentication bug");
   checks["el hilo muestra el logo del agente"] =
     (await page.$$(".thread-item .terminal-icon--logo")).length === 2;
   checks["el subagente cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {
@@ -48,7 +54,7 @@ export default async function cwdAndThread(page, checks) {
     // Vive dentro del <ul class="thread--sub"> que cuelga del <li> de su terminal.
     if (!codex.closest(".thread--sub")) return false;
     const owner = codex.closest("li").parentElement.closest("li");
-    return !!owner && owner.querySelector(".thread-item--sub") === codex;
+    return !!owner && [...owner.querySelectorAll(".thread-item--sub")].includes(codex);
   });
   checks["el subagente abre la terminal que lo tiene"] = await page.evaluate(() => {
     const codex = [...document.querySelectorAll(".thread-item--sub")].find(

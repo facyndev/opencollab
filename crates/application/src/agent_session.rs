@@ -193,7 +193,8 @@ mod tests {
 
     #[test]
     fn handle_surfaces_translator_error() {
-        let tracker = TrackAgentSessionTitle::new(vec![FakeTranslator::failing(KnownAgent::OpenCode)]);
+        let tracker =
+            TrackAgentSessionTitle::new(vec![FakeTranslator::failing(KnownAgent::OpenCode)]);
         let err = tracker
             .handle(event(TerminalId::new(), KnownAgent::OpenCode, "{}"))
             .unwrap_err();
@@ -202,7 +203,8 @@ mod tests {
 
     #[test]
     fn handle_returns_none_when_translator_returns_none() {
-        let tracker = TrackAgentSessionTitle::new(vec![FakeTranslator::ignore(KnownAgent::OpenCode)]);
+        let tracker =
+            TrackAgentSessionTitle::new(vec![FakeTranslator::ignore(KnownAgent::OpenCode)]);
         let result = tracker
             .handle(event(TerminalId::new(), KnownAgent::OpenCode, "{}"))
             .unwrap();

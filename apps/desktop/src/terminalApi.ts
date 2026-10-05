@@ -10,12 +10,15 @@ type ExitPayload = { terminalId: string };
 /// El primero es el agente principal de la terminal; los siguientes son los que
 /// ese agente tiene anidados.
 type AgentPayload = { terminalId: string; agents: AgentId[] };
+type AgentSessionPayload = { terminalId: string; title: string | null };
 
 export type TerminalHandlers = {
   onOutput: (data: Uint8Array) => void;
   onExit: () => void;
   /// Agentes conocidos que corren en la terminal (lista vacía = ninguno).
   onAgent: (agents: AgentId[]) => void;
+  /// Título de sesión activo del agente en la terminal (`null` si no hay).
+  onSessionTitle?: (title: string | null) => void;
 };
 
 const handlers = new Map<string, TerminalHandlers>();
@@ -24,6 +27,7 @@ const handlers = new Map<string, TerminalHandlers>();
 const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
 const agentEarly = new Map<string, AgentId[]>();
+const sessionTitleEarly = new Map<string, string | null>();
 
 let listening: Promise<void> | null = null;
 
@@ -44,6 +48,11 @@ function ensureListening(): Promise<void> {
       const handler = handlers.get(payload.terminalId);
       if (handler) handler.onAgent(payload.agents);
       else agentEarly.set(payload.terminalId, payload.agents);
+    }),
+    listen<AgentSessionPayload>("terminal-agent-session", ({ payload }) => {
+      const handler = handlers.get(payload.terminalId);
+      if (handler?.onSessionTitle) handler.onSessionTitle(payload.title);
+      else sessionTitleEarly.set(payload.terminalId, payload.title);
     }),
   ]).then(() => undefined);
   return listening;
@@ -72,8 +81,16 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
   pending.delete(terminalId);
   if (agentEarly.has(terminalId)) h.onAgent(agentEarly.get(terminalId) ?? []);
   agentEarly.delete(terminalId);
+  if (sessionTitleEarly.has(terminalId)) {
+    h.onSessionTitle?.(sessionTitleEarly.get(terminalId) ?? null);
+    sessionTitleEarly.delete(terminalId);
+  }
   if (exitedEarly.delete(terminalId)) h.onExit();
   return () => handlers.delete(terminalId);
+}
+
+export function getAgentSessionTitle(terminalId: string): Promise<string | null> {
+  return invoke<string | null>("agent_session_title", { terminalId });
 }
 
 export function writeTerminal(terminalId: string, data: string): Promise<void> {

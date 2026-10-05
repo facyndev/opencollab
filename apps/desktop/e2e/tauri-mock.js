@@ -7,7 +7,7 @@
 //   writes                lo que la UI le escribió a cada terminal
 //   opened                argumentos de cada open_shell
 //   closed                terminalId de cada close_terminal
-//   subagents             terminalId -> subagentes devueltos por subagent_snapshot
+//   agentSessions         terminalId -> título de sesión devuelto por agent_session_title
 //   hooks                 agente -> estado ("installed" | "notInstalled" | ...) de hook_status
 //   hookCalls             { cmd, agent } de cada install/uninstall_agent_hooks
 export function installTauriMock() {
@@ -17,7 +17,7 @@ export function installTauriMock() {
   const writes = [];
   const opened = [];
   const closed = [];
-  const subagents = {};
+  const agentSessions = {};
   const hookCalls = [];
   // Estado de los hooks como lo reportaría el núcleo en una máquina limpia.
   const hooks = {
@@ -43,7 +43,7 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, writes, opened, closed, subagents, hooks, hookCalls };
+  window.__mock = { emit, writes, opened, closed, agentSessions, hooks, hookCalls };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -79,15 +79,15 @@ export function installTauriMock() {
           closed.push(args.terminalId);
           setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
           return null;
-        case "subagent_snapshot":
-          return { terminalId: args.terminalId, subagents: subagents[args.terminalId] ?? [] };
+        case "agent_session_title":
+          return agentSessions[args.terminalId] ?? null;
         case "hook_status":
           return Object.entries(hooks).map(([agent, status]) => ({ agent, status }));
         case "install_agent_hooks":
         case "uninstall_agent_hooks": {
           hookCalls.push({ cmd, agent: args.agent });
           if (!(args.agent in hooks)) throw `agente desconocido: ${args.agent}`;
-          if (hooks[args.agent] === "unsupported") throw "Antigravity CLI no expone eventos de subagente";
+          if (hooks[args.agent] === "unsupported") throw "Antigravity CLI no expone hooks";
           hooks[args.agent] = cmd === "install_agent_hooks" ? "installed" : "notInstalled";
           return null;
         }

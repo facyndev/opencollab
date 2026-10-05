@@ -12,8 +12,7 @@ use infrastructure::default_shell_profile;
 use application::TrackAgentSessionTitle;
 
 use crate::agent_session::{
-    forget_terminal, hook_status_dto, parse_agent, HookStatusDto,
-    TERMINAL_AGENT_SESSION_EVENT,
+    forget_terminal, hook_status_dto, parse_agent, HookStatusDto, TERMINAL_AGENT_SESSION_EVENT,
 };
 use crate::state::AppState;
 
