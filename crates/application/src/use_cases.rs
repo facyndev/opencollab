@@ -8,7 +8,7 @@ use crate::ports::{
     CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize,
     WorkspaceRepository,
 };
-use crate::subagents::HookEndpoint;
+use crate::agent_session::HookEndpoint;
 
 fn load(
     repo: &dyn WorkspaceRepository,

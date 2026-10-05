@@ -15,8 +15,8 @@ pub enum AppError {
     SessionNotFound(SessionId),
     #[error("{user} no tiene permiso de escritura en la terminal {terminal}")]
     WriteNotAllowed { user: UserId, terminal: TerminalId },
-    #[error("no hay traductor de eventos de subagentes para {0:?}")]
-    NoSubagentTranslator(KnownAgent),
+    #[error("no hay traductor de eventos de sesión para {0:?}")]
+    NoSessionTitleTranslator(KnownAgent),
     #[error("no hay instalador de hooks para {0:?}")]
     NoHookInstaller(KnownAgent),
 }
