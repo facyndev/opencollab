@@ -1,5 +1,6 @@
 use domain::{DomainError, SessionId, TerminalId, UserId, WorkspaceId};
 
+use crate::agent_detection::KnownAgent;
 use crate::ports::PortError;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -14,4 +15,6 @@ pub enum AppError {
     SessionNotFound(SessionId),
     #[error("{user} no tiene permiso de escritura en la terminal {terminal}")]
     WriteNotAllowed { user: UserId, terminal: TerminalId },
+    #[error("no hay traductor de eventos de subagentes para {0:?}")]
+    NoSubagentTranslator(KnownAgent),
 }
