@@ -37,9 +37,9 @@ Reutilizamos el canal de hooks existente (`HookReceiver` HTTP local + sidecar `o
 ## Tareas
 
 - [x] **T1 — Limpieza de subagentes y modelo de títulos de sesión en `application`.** Retirar `subagents.rs` y crear `agent_session.rs` con caso de uso y tests.
-- [ ] **T2 — Traductores e instaladores en `infrastructure`.** Traductores para Claude, OpenCode y Codex + actualización de hooks instalados.
-- [ ] **T3 — Wiring en Desktop (Tauri).** Estado, comandos y eventos para títulos de sesión.
-- [ ] **T4 — Frontend e integración en Sidebar.** Hilo con título en `Sidebar.tsx`, limpieza de subagentes en frontend y tests.
+- [x] **T2 — Traductores e instaladores en `infrastructure`.** Traductores para Claude, OpenCode y Codex + actualización de hooks instalados.
+- [x] **T3 — Wiring en Desktop (Tauri).** Estado, comandos y eventos para títulos de sesión.
+- [x] **T4 — Frontend e integración en Sidebar.** Hilo con título en `Sidebar.tsx`, limpieza de subagentes en frontend y tests.
 
 ## Verificación
 
