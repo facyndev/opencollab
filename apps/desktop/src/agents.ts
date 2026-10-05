@@ -1,7 +1,7 @@
 // Presentación de los agentes que detecta el núcleo (ver
 // crates/application/src/agent_detection.rs: los ids tienen que coincidir).
 
-export type AgentId = "claude-code" | "opencode" | "codex" | "antigravity-cli";
+export type AgentId = "claude-code" | "opencode" | "codex" | "antigravity-cli" | "grok";
 
 type AgentInfo = { name: string; badge: string; logoFile: string };
 
@@ -10,6 +10,7 @@ const catalog: Record<AgentId, AgentInfo> = {
   opencode: { name: "OpenCode", badge: "OC", logoFile: "opencode-logo.svg" },
   codex: { name: "Codex", badge: "CX", logoFile: "codex-logo.svg" },
   "antigravity-cli": { name: "Antigravity CLI", badge: "AG", logoFile: "antigravitycli-logo.svg" },
+  grok: { name: "Grok", badge: "GK", logoFile: "grok-xai-logo.svg" },
 };
 
 // Glob en vez de imports directos: si un SVG todavía no está en la carpeta,

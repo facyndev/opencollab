@@ -11,14 +11,16 @@ pub enum KnownAgent {
     OpenCode,
     Codex,
     AntigravityCli,
+    Grok,
 }
 
 impl KnownAgent {
-    pub const ALL: [KnownAgent; 4] = [
+    pub const ALL: [KnownAgent; 5] = [
         KnownAgent::ClaudeCode,
         KnownAgent::OpenCode,
         KnownAgent::Codex,
         KnownAgent::AntigravityCli,
+        KnownAgent::Grok,
     ];
 
     /// Identificador estable que viaja al frontend.
@@ -28,6 +30,7 @@ impl KnownAgent {
             KnownAgent::OpenCode => "opencode",
             KnownAgent::Codex => "codex",
             KnownAgent::AntigravityCli => "antigravity-cli",
+            KnownAgent::Grok => "grok",
         }
     }
 
@@ -43,6 +46,7 @@ impl KnownAgent {
             KnownAgent::OpenCode => &["opencode"],
             KnownAgent::Codex => &["codex"],
             KnownAgent::AntigravityCli => &["agy", "antigravity"],
+            KnownAgent::Grok => &["grok", "grok-cli"],
         }
     }
 
@@ -54,6 +58,7 @@ impl KnownAgent {
             KnownAgent::OpenCode => &["opencode-ai"],
             KnownAgent::Codex => &["@openai/codex"],
             KnownAgent::AntigravityCli => &[],
+            KnownAgent::Grok => &["@xai-official/grok"],
         }
     }
 }
@@ -201,6 +206,9 @@ mod tests {
             ("codex.exe", KnownAgent::Codex),
             ("agy.exe", KnownAgent::AntigravityCli),
             ("claude", KnownAgent::ClaudeCode),
+            ("grok.exe", KnownAgent::Grok),
+            ("grok", KnownAgent::Grok),
+            ("grok-cli", KnownAgent::Grok),
         ] {
             let list = tree(vec![proc(200, SHELL, exe, &[])]);
             assert_eq!(detect_agents(&list, SHELL).primary, Some(agent), "{exe}");
@@ -219,6 +227,20 @@ mod tests {
             ],
         )]);
         assert_eq!(detect_agents(&list, SHELL).primary, Some(KnownAgent::Codex));
+
+        let list_grok = tree(vec![proc(
+            200,
+            SHELL,
+            "node.exe",
+            &[
+                "node",
+                r"C:\Users\u\AppData\Roaming\npm\node_modules\@xai-official\grok\bin\grok.js",
+            ],
+        )]);
+        assert_eq!(
+            detect_agents(&list_grok, SHELL).primary,
+            Some(KnownAgent::Grok)
+        );
     }
 
     #[test]
