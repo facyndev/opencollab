@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { newPane, sessionSummary, swapPanes, type PaneStatus } from "./model";
+import { insertPaneAfter, newPane, sessionSummary, swapPanes, type PaneStatus } from "./model";
 
 describe("swapPanes", () => {
   it("intercambia dos paneles sin tocar el resto", () => {
@@ -16,6 +16,24 @@ describe("swapPanes", () => {
   it("cada panel nuevo tiene un seq mayor (orden estable del DOM)", () => {
     const [a, b] = [newPane(), newPane()];
     expect(b.seq).toBeGreaterThan(a.seq);
+  });
+});
+
+describe("insertPaneAfter", () => {
+  it("pone la terminal nueva al lado de la que la abrió", () => {
+    const [a, b, c] = [newPane(), newPane(), newPane()];
+    expect(insertPaneAfter([a, b], a.id, c).map((p) => p.id)).toEqual([a.id, c.id, b.id]);
+  });
+
+  it("sin panel de origen (o desconocido) la agrega al final", () => {
+    const [a, b, c] = [newPane(), newPane(), newPane()];
+    expect(insertPaneAfter([a, b], null, c).map((p) => p.id)).toEqual([a.id, b.id, c.id]);
+    expect(insertPaneAfter([a, b], "nope", c).map((p) => p.id)).toEqual([a.id, b.id, c.id]);
+  });
+
+  it("guarda la carpeta inicial pedida", () => {
+    expect(newPane("C:\\repo").initialCwd).toBe("C:\\repo");
+    expect(newPane().initialCwd).toBeNull();
   });
 });
 

@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
-# Las tres fuentes (ver "Versionado" en CLAUDE.md).
+# Las tres fuentes (ver "Versionado" en AGENTS.md).
 $cargo = Select-String -Path "$root/Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' |
   Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }
 $package = (Get-Content "$root/apps/desktop/package.json" -Raw | ConvertFrom-Json).version

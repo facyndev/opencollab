@@ -18,13 +18,14 @@ const INTERVAL: Duration = Duration::from_secs(1);
 #[serde(rename_all = "camelCase")]
 struct TerminalAgentPayload {
     terminal_id: String,
-    /// `null` cuando en la terminal no corre ningún agente conocido.
-    agent: Option<&'static str>,
+    /// Agentes conocidos corriendo en la terminal, del más cercano a la shell al
+    /// más profundo. Vacío cuando en la terminal no corre ningún agente.
+    agents: Vec<&'static str>,
 }
 
 pub fn spawn(app: AppHandle) {
     thread::spawn(move || {
-        let mut last: HashMap<TerminalId, Option<&'static str>> = HashMap::new();
+        let mut last: HashMap<TerminalId, Vec<&'static str>> = HashMap::new();
         loop {
             thread::sleep(INTERVAL);
             let state = app.state::<AppState>();
@@ -37,18 +38,24 @@ pub fn spawn(app: AppHandle) {
             };
 
             let mut current = HashMap::with_capacity(detected.len());
-            for (terminal, agent) in detected {
-                let agent = agent.map(|a| a.id());
-                if last.get(&terminal) != Some(&agent) {
+            for (terminal, tree) in detected {
+                // El principal primero, después los que ese agente tiene anidados.
+                let agents: Vec<&'static str> = tree
+                    .primary
+                    .into_iter()
+                    .chain(tree.nested)
+                    .map(|a| a.id())
+                    .collect();
+                if last.get(&terminal) != Some(&agents) {
                     let _ = app.emit(
                         TERMINAL_AGENT_EVENT,
                         TerminalAgentPayload {
                             terminal_id: terminal.to_string(),
-                            agent,
+                            agents: agents.clone(),
                         },
                     );
                 }
-                current.insert(terminal, agent);
+                current.insert(terminal, agents);
             }
             // Las terminales cerradas desaparecen solas del mapa.
             last = current;

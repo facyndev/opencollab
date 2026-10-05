@@ -73,9 +73,11 @@ pub fn open_shell(
     state: State<'_, AppState>,
     cols: u16,
     rows: u16,
+    // Carpeta inicial (p. ej. la de la terminal desde la que se abre); `None` = home.
+    cwd: Option<String>,
 ) -> Result<OpenedTerminal, String> {
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink { app });
-    let profile = default_shell_profile();
+    let profile = default_shell_profile(cwd.as_deref().map(std::path::Path::new));
     let name = profile.name.clone();
     let cwd = profile.cwd.as_ref().map(|p| p.display().to_string());
     state

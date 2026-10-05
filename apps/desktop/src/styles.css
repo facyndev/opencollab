@@ -418,6 +418,10 @@ kbd {
 .thread {
   --thread-line: 2px solid var(--border-strong);
   --thread-x: 12px;
+  /* Alto de una fila. Acota el codo: sin esto, una fila con agentes anidados
+     debajo calcularía el codo sobre el alto de toda la lista y apuntaría al
+     medio en vez de a su terminal. */
+  --thread-row: 26px;
   list-style: none;
   margin: 0 0 6px;
   padding: 0;
@@ -435,7 +439,7 @@ kbd {
   left: var(--thread-x);
   /* 1px de superposición con el tramo de arriba: sin cortes por redondeo de subpíxeles. */
   top: -1px;
-  height: calc(50% + 1px);
+  height: calc(min(50%, var(--thread-row)) + 1px);
   width: 10px;
   border-left: var(--thread-line);
   border-bottom: var(--thread-line);
@@ -449,7 +453,7 @@ kbd {
   left: var(--thread-x);
   /* Arranca donde empieza la curva del codo (su radio es 8px), no donde termina:
      si no, la línea recta queda cortada a la altura de cada rama. */
-  top: calc(50% - 8px);
+  top: calc(min(50%, var(--thread-row)) - 8px);
   bottom: -1px;
   border-left: var(--thread-line);
 }
@@ -457,8 +461,23 @@ kbd {
 /* El primer tramo no tiene nada arriba con qué superponerse. */
 .thread li:first-child::before {
   top: 0;
-  height: 50%;
+  height: min(50%, var(--thread-row));
   border-top-left-radius: 2px;
+}
+
+/* Nivel interno del hilo: los agentes que la terminal de arriba tiene anidados.
+   Hereda el codo de `.thread`, con menos sangría, una fila más baja y un cuerpo
+   chico para que se lea como hijo y no como otra terminal. */
+.thread--sub {
+  --thread-x: 8px;
+  --thread-row: 22px;
+  margin: 0;
+}
+
+.thread--sub .thread-item {
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .thread-item {
@@ -466,6 +485,7 @@ kbd {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: var(--thread-row);
   padding: 5px 8px;
   border-radius: 6px;
   font-size: 12px;
@@ -974,4 +994,28 @@ button.cwd-item:hover {
   margin-left: auto;
   font-family: var(--mono);
   font-size: 11px;
+}
+
+/* Menú "New terminal" del header de una terminal (reusa .cwd-menu / .cwd-item). */
+.new-terminal-menu {
+  min-width: 300px;
+}
+
+.new-terminal-menu .cwd-item {
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.new-terminal-menu .cwd-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.new-terminal-menu .cwd-item-hint {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.new-terminal-label {
+  flex: none;
 }
