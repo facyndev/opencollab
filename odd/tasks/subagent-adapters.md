@@ -80,7 +80,7 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
 - [ ] **T1 — Modelo y hub en `application`.** `SubagentEvent`, `SubagentTree`,
       puerto `SubagentEventTranslator`, caso de uso `TrackSubagents` con tests
       (inicio, fin, error, anidamiento por `parent_id`, terminal cerrada).
-- [ ] **T2 — Traductores en `infrastructure`.** Claude Code, OpenCode, Codex,
+- [x] **T2 — Traductores en `infrastructure`.** Claude Code, OpenCode, Codex,
       con fixtures de payloads documentados.
 - [ ] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
 - [ ] **T4 — Sidecar `opencollab-hook`.**
@@ -124,8 +124,24 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
 - 2026-10-05: rama `feature/subagent-adapters` creada desde `62ad3ea`
   (`feature/split-terminal`, ya commiteada por el usuario).
 - T1: ruta **delegada** (disparador de escritor: 2+ archivos no triviales en
-  `application`). En curso.
+  `application`). Cerrado y mergeado a `develop` (`def99cc`).
+- T2: ruta **delegada** (disparador de escritor: 2+ archivos no triviales en
+  `infrastructure`). Cerrado en rama `feature/subagent-adapters-t2`: un módulo
+  `crates/infrastructure/src/subagent_translators.rs` (481 líneas) con
+  `ClaudeCodeTranslator`, `OpenCodeTranslator`, `CodexTranslator` + fixtures
+  en `mod fixtures` (9 payloads JSON con suposiciones documentadas) + 19 tests
+  (inicio/fin/error por traductor, anidamiento por `parent_id`, inválido→Err,
+  `tool` irrelevante de OpenCode→`Ok(vec![])`, integración con `TrackSubagents`
+  real). TDD estricto (fuente: este documento): RED→GREEN→REFACTOR observado.
+  Verificación observada por el padre: `cargo test -p infrastructure` → 29
+  pasan, 0 fallan; `cargo fmt --all --check` → limpio (reporte del escritor:
+  clippy limpio y `cargo test --workspace` todo verde). `serde_json` ya estaba
+  en `workspace.dependencies`, solo se referenció desde
+  `crates/infrastructure/Cargo.toml`.
 
 ## Siguiente paso
 
-Cerrar T1 (verificación + commit), después T2.
+T3 (receptor HTTP local + inyección de entorno en el PTY). Nota para T5: los
+formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
+JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
+`application`.

@@ -1608,6 +1608,7 @@ dependencies = [
  "application",
  "domain",
  "portable-pty",
+ "serde_json",
  "sysinfo",
 ]
 
