@@ -6,12 +6,14 @@
 //   emit(event, payload)  emite un evento como el núcleo
 //   writes                lo que la UI le escribió a cada terminal
 //   opened                argumentos de cada open_shell
+//   closed                terminalId de cada close_terminal
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
   let terminals = 0;
   const writes = [];
   const opened = [];
+  const closed = [];
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -29,7 +31,7 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, writes, opened };
+  window.__mock = { emit, writes, opened, closed };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -60,6 +62,11 @@ export function installTauriMock() {
           if (cd) setTimeout(() => prompt(args.terminalId, cd[1].replace(/''/g, "'")), 30);
           return null;
         }
+        case "close_terminal":
+          // Como el núcleo: matar el proceso dispara `terminal-exit` después.
+          closed.push(args.terminalId);
+          setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
+          return null;
         case "list_subdirectories":
           return tree[args.path] ?? [];
         default:

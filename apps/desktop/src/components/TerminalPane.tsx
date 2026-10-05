@@ -51,6 +51,10 @@ export function TerminalPane(props: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
+  /// Evita cerrar dos veces: el ✕ mata el PTY y eso también dispara `terminal-exit`.
+  const closingRef = useRef(false);
+  /// `close` cambia en cada render; el listener de salida (registrado una vez) usa la última.
+  const closeRef = useRef<() => Promise<void>>(async () => {});
   const [info, setInfo] = useState<{ name: string; cwd: string | null } | null>(null);
   /// El primero es el agente principal de la terminal; los siguientes son los que
   /// ese agente tiene anidados.
@@ -118,9 +122,11 @@ export function TerminalPane(props: Props) {
         setCwd((current) => current ?? opened.cwd);
         detach = attachTerminal(opened.terminalId, {
           onOutput: (data) => term.write(data),
+          // La shell terminó sola (p. ej. `exit`): se cierra igual que con el ✕.
           onExit: () => {
             setStatus("done");
             setAgents([]);
+            void closeRef.current();
           },
           onAgent: setAgents,
         });
@@ -156,6 +162,8 @@ export function TerminalPane(props: Props) {
   }, [props.focused, props.hidden, props.minimized]);
 
   const close = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
     const id = terminalIdRef.current;
     if (id) {
       try {
@@ -167,6 +175,7 @@ export function TerminalPane(props: Props) {
     }
     props.onClosed();
   };
+  closeRef.current = close;
 
   // Si corre un agente conocido, el panel lo muestra a él en vez de a la shell.
   const detected = agent ? agentInfo(agent) : null;
