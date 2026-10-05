@@ -1,0 +1,13 @@
+[package]
+name = "infrastructure"
+description = "Adaptadores concretos de los puertos de application."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+domain.workspace = true
+application.workspace = true
+portable-pty.workspace = true
+sysinfo.workspace = true

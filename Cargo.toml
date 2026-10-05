@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/application",
+    "crates/protocol",
+    "crates/infrastructure",
+    "apps/desktop/src-tauri",
+    "apps/relay",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+domain = { path = "crates/domain" }
+application = { path = "crates/application" }
+protocol = { path = "crates/protocol" }
+infrastructure = { path = "crates/infrastructure" }
+
+# External
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+portable-pty = "0.9"
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+axum = { version = "0.8", features = ["ws"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }

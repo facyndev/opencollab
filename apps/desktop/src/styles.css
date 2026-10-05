@@ -1,0 +1,977 @@
+:root {
+  color-scheme: dark;
+  --bg: #09090b;
+  --surface: #0f0f12;
+  --surface-2: #151519;
+  --surface-3: #1c1c21;
+  --border: #232329;
+  --border-strong: #2e2e36;
+  --text: #ececf1;
+  --text-muted: #8b8b96;
+  --text-faint: #5f5f6a;
+  --accent: #7c5cff;
+  --accent-hover: #8d71ff;
+  --accent-soft: #a78bfa;
+  --green: #22c55e;
+  --amber: #eab308;
+  --red: #ef4444;
+  --gray: #6b6b75;
+  --radius: 8px;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --font: "Google Sans Variable", "Google Sans", "Segoe UI", system-ui, sans-serif;
+
+  font-family: var(--font);
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.app {
+  display: flex;
+  height: 100%;
+}
+
+/* ---------- Primitivas ---------- */
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-weight: 500;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gray);
+  flex: none;
+}
+
+.dot--live,
+.dot--running,
+.dot--starting {
+  background: var(--accent-soft);
+}
+.dot--done {
+  background: var(--green);
+}
+.dot--waiting {
+  background: var(--amber);
+}
+.dot--failed {
+  background: var(--red);
+}
+
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--surface-3);
+  border: 2px solid var(--bg);
+  flex: none;
+}
+
+.avatar--me {
+  background: #2a2a31;
+}
+
+.avatar--sm {
+  width: 20px;
+  height: 20px;
+  font-size: 8px;
+  border-width: 0;
+}
+
+/* ---------- Sidebar ---------- */
+
+.sidebar {
+  width: 248px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.ws-switcher {
+  position: relative;
+}
+
+.ws-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  text-align: left;
+}
+
+.ws-current:hover {
+  border-color: var(--border-strong);
+}
+
+.ws-current > svg {
+  color: var(--text-muted);
+}
+
+.ws-logo {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  flex: none;
+}
+
+.ws-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ws-name {
+  font-weight: 600;
+}
+
+.ws-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ws-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+}
+
+.ws-menu-title {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ws-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.ws-menu-item:hover {
+  background: var(--surface-3);
+}
+
+.ws-initial {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ws-menu-name {
+  flex: 1;
+}
+
+.ws-check {
+  color: var(--accent-soft);
+  display: grid;
+}
+
+.ws-menu-sep {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--border);
+}
+
+.ws-menu-new {
+  color: var(--text-muted);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+}
+
+.search:focus-within {
+  border-color: var(--accent);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.search kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+
+.sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.session {
+  /* Ancho completo: un <button> se achica a su contenido y pegaría el contador al título. */
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.session:hover {
+  background: var(--surface-2);
+}
+
+/* Sesión en el sidebar: usa el Panel. La sesión es la barra de título y el
+   hilo va en el bloque interno; solo la activa muestra el marco. */
+.session-group {
+  --panel-pad: 4px;
+  --panel-bg: var(--surface-2);
+  --panel-border: var(--border-strong);
+  --panel-body-radius: 10px;
+}
+
+.session-group:not(.panel--plain) .session {
+  padding-inline: 4px;
+  background: transparent;
+}
+
+.session-group:not(.panel--plain) .thread {
+  /* Alinear la línea con el punto de estado de la sesión (el marco suma 4px). */
+  --thread-x: 8px;
+  margin: 0;
+  padding: 6px 6px 6px 0;
+}
+
+.session .dot {
+  margin-top: 5px;
+}
+
+.session-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.session-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* react-icons pinta con currentColor: toma el color del contador. */
+.session-count-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.session--active .session-count {
+  color: var(--text);
+}
+
+/* Hilo de terminales bajo cada sesión. Cada rama es un codo redondeado
+   (borde izquierdo + inferior con radio); la línea vertical sigue hacia las
+   ramas de abajo en todos menos el último. */
+.thread {
+  --thread-line: 2px solid var(--border-strong);
+  --thread-x: 12px;
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.thread li {
+  position: relative;
+  padding-left: calc(var(--thread-x) + 16px);
+}
+
+/* Codo: baja desde arriba y gira redondeado hacia la terminal. */
+.thread li::before {
+  content: "";
+  position: absolute;
+  left: var(--thread-x);
+  /* 1px de superposición con el tramo de arriba: sin cortes por redondeo de subpíxeles. */
+  top: -1px;
+  height: calc(50% + 1px);
+  width: 10px;
+  border-left: var(--thread-line);
+  border-bottom: var(--thread-line);
+  border-bottom-left-radius: 8px;
+}
+
+/* Continuación vertical hacia la siguiente rama. */
+.thread li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: var(--thread-x);
+  /* Arranca donde empieza la curva del codo (su radio es 8px), no donde termina:
+     si no, la línea recta queda cortada a la altura de cada rama. */
+  top: calc(50% - 8px);
+  bottom: -1px;
+  border-left: var(--thread-line);
+}
+
+/* El primer tramo no tiene nada arriba con qué superponerse. */
+.thread li:first-child::before {
+  top: 0;
+  height: 50%;
+  border-top-left-radius: 2px;
+}
+
+.thread-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.thread-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.thread-item--focused {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.thread-item .terminal-icon {
+  color: currentColor;
+}
+
+.thread-item .terminal-icon--logo {
+  background-color: currentColor;
+}
+
+.thread-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessions-empty {
+  padding: 8px;
+  color: var(--text-faint);
+}
+
+.user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+}
+
+.user-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.user-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.user-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+/* ---------- Main ---------- */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.crumb-muted {
+  color: var(--text-muted);
+}
+
+.crumb-sep {
+  color: var(--text-faint);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatars {
+  display: flex;
+  margin-right: 4px;
+}
+
+.avatars .avatar + .avatar {
+  margin-left: -8px;
+}
+
+.segmented {
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.segmented button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--text-muted);
+}
+
+.segmented button:hover,
+.segmented .is-active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* ---------- Grilla ---------- */
+
+.grid {
+  /* offsetParent de los paneles: usePaneDrag mide sus posiciones respecto de la grilla. */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  overflow: auto;
+}
+
+.grid--grid {
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  grid-auto-rows: minmax(240px, 1fr);
+}
+
+.grid--columns {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(320px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.grid.grid--solo {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-flow: row;
+}
+
+.grid-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- Panel: wrapper reutilizable (components/Panel.tsx) ----------
+   Marco con la barra de título arriba y el contenido en un bloque interno
+   oscuro con radio, envuelto por el padding del marco. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--panel-pad, 6px) var(--panel-pad, 6px);
+  border: 1px solid var(--panel-border, var(--border));
+  border-radius: 12px;
+  background: var(--panel-bg, var(--surface));
+}
+
+.panel-body {
+  border-radius: var(--panel-body-radius, 12px);
+  background: #0b0b0d;
+  overflow: hidden;
+}
+
+/* Sin marco: solo el contenido. */
+.panel--plain {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.panel--plain .panel-body {
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Panel de una terminal. */
+.pane {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pane[hidden] {
+  display: none;
+}
+
+.pane--focused {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px rgb(124 92 255 / 0.35);
+}
+
+.pane--dragging {
+  z-index: 10;
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px rgb(124 92 255 / 0.5),
+    0 24px 48px rgb(0 0 0 / 0.55);
+}
+
+.pane-header--draggable {
+  cursor: grab;
+}
+
+.grid--dragging,
+.grid--dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.pane--minimized {
+  align-self: start;
+}
+
+.pane--minimized {
+  padding-bottom: 0;
+}
+
+.pane--minimized .pane-body {
+  display: none;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 2px 0 4px;
+  white-space: nowrap;
+}
+
+.pane-badge {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+/* TerminalIcon: logo de agente (máscara con el token) o ícono de la shell. */
+.terminal-icon {
+  flex: none;
+  color: var(--text);
+}
+
+.terminal-icon--logo {
+  display: inline-block;
+  background-color: var(--text);
+  mask: var(--logo) center / contain no-repeat;
+}
+
+.pane-name {
+  font-weight: 600;
+}
+
+.pane-cwd {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+/* Ruta clickeable: mismo ⇅ que la tarjeta de usuario del sidebar. */
+.cwd-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 4px 2px 6px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cwd-button svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.cwd-button:hover:not(:disabled),
+.cwd-button[aria-expanded="true"] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.cwd-button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.cwd-button:disabled svg {
+  display: none;
+}
+
+.cwd-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cwd-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 240px;
+  max-width: 420px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+}
+
+.cwd-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cwd-item > svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+button.cwd-item:hover {
+  background: var(--surface-3);
+}
+
+.cwd-item--current {
+  color: var(--text-muted);
+}
+
+.cwd-item-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cwd-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.cwd-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 2px 4px;
+  padding: 0 8px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.cwd-filter:focus-within {
+  border-color: var(--accent);
+}
+
+.cwd-filter svg {
+  width: 13px;
+  height: 13px;
+}
+
+.cwd-filter input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.cwd-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.cwd-item-forward {
+  color: var(--text-faint);
+}
+
+.cwd-item-hint {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.pane-cwd + .pane-status {
+  margin-left: 0;
+}
+
+.pane-status--starting,
+.pane-status--running {
+  color: var(--text-muted);
+}
+.pane-status--done {
+  color: var(--text-muted);
+}
+.pane-status--failed {
+  color: var(--red);
+}
+
+.pane-controls {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+/* La terminal (el fondo y el radio los pone .panel-body). */
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 4px 4px 10px;
+}
+
+/* xterm.js: que el viewport tome el alto del contenedor */
+.pane-body .xterm {
+  height: 100%;
+}
+
+/* ---------- Status bar ---------- */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 36px;
+  margin: 0 8px 8px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* Barra sólida, con la misma superficie que los paneles. */
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.statusbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar-shortcuts {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+}

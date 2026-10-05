@@ -1,0 +1,151 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Estado del proyecto
+
+Scaffolding inicial. Implementado: modelo de dominio completo con permisos y tests, casos de uso de lanzar / escribir / redimensionar / cerrar terminal y cambiar permisos, adaptador PTY real, y app desktop con la UI de referencia (shells locales reales). Pendiente: cliente WebSocket (`CollabTransport` real), lógica del relay (hoy `/ws` es un stub), persistencia, autenticación, comandos del núcleo para workspaces/sesiones, UI de permisos e invitaciones, y lanzar agentes directamente como perfil (hoy cada terminal abre la shell por defecto y el agente se detecta cuando el usuario lo ejecuta ahí). La sesión del desktop es por ahora una sesión local fija creada en `apps/desktop/src-tauri/src/state.rs`.
+
+## Producto
+
+OpenCollab es una app desktop que centraliza agentes de IA de terminal (Claude Code, OpenCode, Codex, Gemini CLI o cualquier CLI). Permite abrir múltiples terminales dispuestas en una grilla para ver en paralelo qué hace cada agente.
+
+El diferencial es la **colaboración en tiempo real**: un usuario puede sumar compañeros a un workspace o a una sesión puntual y todos ven sus terminales en vivo.
+
+### Modelo de dominio: Workspace → Session → Terminal
+
+- **Workspace:** contenedor de organización (por ejemplo, un proyecto). Tiene un dueño y agrupa sesiones.
+- **Session:** grupo de **varias terminales** que se ven juntas en una grilla. Es la unidad que se comparte en vivo.
+- **Terminal:** un PTY dentro de una sesión, que ejecuta un `AgentProfile` o una shell.
+
+### Dos formas de colaborar: miembro del workspace vs. invitado de sesión
+
+| | **Miembro del workspace** | **Invitado de sesión** |
+|---|---|---|
+| Para qué | Equipo estable del proyecto | Colaboración puntual |
+| Duración | Permanente, hasta que el dueño lo quite | Temporal: vale solo para esa sesión |
+| Alcance | Las sesiones del workspace | Únicamente la sesión a la que fue invitado; no ve el resto del workspace |
+| Se invita desde | El workspace | La sesión |
+
+Son conceptos distintos en el dominio (no modelar al invitado como un miembro con fecha de vencimiento, ni al miembro como invitado de todas las sesiones). Un miembro del workspace no necesita ser re-invitado a cada sesión nueva.
+
+**Permiso base "Ver":**
+
+- Al crearse una sesión, cada miembro del workspace tiene **Ver activo por defecto**. El dueño puede desactivarlo para un miembro en una sesión concreta.
+- **Ver es el permiso mínimo para compartir:** un participante sin Ver no tiene acceso a la sesión (no recibe streams ni la ve listada). Cualquier permiso superior (por ejemplo, Escribir) requiere Ver; desactivar Ver quita también los superiores, y activar Escribir activa Ver.
+- Se modela como un único nivel ordenado `AccessLevel { None < View < Write }` (`crates/domain/src/permission.rs`), no como flags independientes: así "Escribir sin Ver" es irrepresentable. `Session` resuelve el permiso efectivo de cada usuario (override de la sesión o `View` por defecto para miembros) y expone `can_view` / `can_write` como única fuente de verdad.
+- Este invariante vive en `domain` (no en la UI ni en el relay) y debe estar cubierto por tests: un miembro nuevo arranca con Ver activo, no existe un estado con Escribir sin Ver, y quitar Ver revoca el acceso.
+- La UI debe mostrar explícitamente que Ver viene activo por defecto y que es el mínimo para que la sesión esté compartida con esa persona (por ejemplo, el toggle de Ver marcado de entrada y un texto que lo indique al desactivarlo).
+
+**Permisos en vivo:** los permisos (ver / escribir) de cualquier participante de una sesión, sea miembro o invitado, se pueden **modificar en cualquier momento mientras la sesión está activa**, y el cambio aplica en caliente a quien ya está conectado (quitarle la escritura corta su input de inmediato; revocar el acceso lo desconecta). No asumir que los permisos se fijan al unirse ni cachearlos por conexión: cada input entrante se valida contra el permiso vigente.
+
+Evitar nombrar "sesión" a otra cosa (por ejemplo, la sesión de login o el PTY) para no confundir el concepto central.
+
+Los agentes son **agnósticos**: el sistema no debe tener lógica específica de un agente en el dominio. Un agente es un perfil (comando, args, env, cwd) que se lanza dentro de un PTY.
+
+## Stack
+
+- **Desktop:** Tauri 2, backend en Rust (PTYs con `portable-pty`).
+- **Frontend:** React + TypeScript, terminales con `xterm.js`.
+- **Colaboración:** servidor relay propio en Rust sobre WebSockets (autenticación, sesiones compartidas, invitaciones y retransmisión de streams de PTY).
+- **Monorepo:** Cargo workspace para todo el código Rust; el dominio y los casos de uso se comparten entre la app desktop y el relay.
+
+## Arquitectura (Clean Architecture)
+
+Regla de dependencias: las dependencias apuntan siempre hacia adentro. `domain` no depende de nada; `application` solo de `domain`; la infraestructura y los adaptadores implementan los puertos definidos en `application`.
+
+Estructura:
+
+```
+crates/
+  domain/          # Entidades y reglas puras: Workspace, Session, Terminal, WorkspaceMember, SessionGuest, Invitation, AgentProfile. Sin I/O, sin Tauri, sin tokio.
+  application/     # Casos de uso + puertos (traits): PtyPort, WorkspaceRepository, CollabTransport, etc.
+  protocol/        # Mensajes del wire (serde) compartidos entre desktop y relay. Versionados.
+  infrastructure/  # Adaptadores concretos: portable-pty, persistencia, cliente WebSocket.
+apps/
+  desktop/
+    src-tauri/     # Composition root de la app: wiring de dependencias + comandos/eventos Tauri (adaptadores de entrada delgados).
+    src/           # Frontend React: grilla de terminales, xterm.js, UI de workspaces.
+  relay/           # Servidor de colaboración: composition root + adaptadores WebSocket/HTTP sobre los mismos casos de uso.
+```
+
+Principios clave:
+
+- Los comandos Tauri y los handlers del relay solo traducen entrada/salida y delegan en casos de uso; no contienen lógica de negocio.
+- El frontend no conoce detalles de PTY ni del relay: habla con el backend vía comandos/eventos Tauri.
+- Todo lo que cruza la red se define en `protocol`; desktop y relay nunca serializan tipos de dominio directamente.
+
+### Flujos principales
+
+- **Terminal local:** caso de uso lanza un `AgentProfile` vía `PtyPort` → la salida del PTY se emite como evento Tauri → el frontend la escribe en la instancia de xterm.js correspondiente. El input del usuario sigue el camino inverso.
+- **Sesión compartida:** el host, además de emitir localmente, envía el stream de cada terminal de la sesión al relay vía `CollabTransport`; el relay lo retransmite solo a los miembros de esa sesión. Los permisos (quién puede ver / escribir en una terminal) se deciden en `application`, no en el transporte.
+- **Cambio de permisos en vivo:** el dueño modifica el permiso de un miembro → caso de uso en `application` actualiza la sesión → se propaga por `protocol` al relay y a los clientes conectados (para que la UI refleje el nuevo estado) → desde ese momento el input del miembro se acepta o rechaza según el permiso nuevo. La validación final ocurre en la máquina del host antes de escribir en el PTY; el relay también filtra, pero no es la única barrera.
+
+## Flujo de ramas: Git Flow
+
+El repo se maneja con **Git Flow**:
+
+- `main`: solo código liberado. Cada merge a `main` es una versión y se etiqueta (`vX.Y.Z`). Nunca se commitea directo.
+- `develop`: rama de integración; de acá salen y acá vuelven las features.
+- `feature/<nombre>`: sale de `develop`, vuelve a `develop`. Una por funcionalidad (p. ej. `feature/relay-websocket`).
+- `release/<versión>`: sale de `develop` para preparar una versión (solo ajustes, versión y fixes); se mergea a `main` (con tag) **y** de vuelta a `develop`.
+- `hotfix/<versión>`: sale de `main` para un arreglo urgente; se mergea a `main` (con tag) **y** a `develop`.
+
+No trabajar ni commitear directo en `main` ni en `develop`: antes de cambiar código, crear o usar la rama `feature/*` (o `hotfix/*`) que corresponda.
+
+Remoto: `origin` → https://github.com/facyndev/opencollab (licencia MIT).
+
+## Versionado
+
+**Versionado semántico** (`MAJOR.MINOR.PATCH`), con tag `vX.Y.Z` en `main` por cada versión liberada.
+
+- `PATCH`: arreglos sin cambios de comportamiento visibles (lo típico de un `hotfix/*`).
+- `MINOR`: funcionalidades nuevas compatibles.
+- `MAJOR`: cambios incompatibles. Mientras estemos en `0.y.z` (antes de la 1.0), un cambio incompatible sube `MINOR`.
+
+La versión de la app vive en **tres lugares que tienen que coincidir** (hoy `0.1.0`):
+
+- `Cargo.toml` raíz → `[workspace.package] version` (todos los crates la heredan con `version.workspace = true`).
+- `apps/desktop/package.json` → `version`.
+- `apps/desktop/src-tauri/tauri.conf.json` → `version` (es la que muestra el instalador).
+
+La versión se sube **solo** en la rama `release/*` o `hotfix/*`, como un commit propio, nunca dentro de una feature. El tag se crea sobre el merge a `main`.
+
+El **protocolo de red** tiene su propia versión, independiente de la de la app: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
+
+## Comandos
+
+Rust (desde la raíz del repo):
+
+- `cargo build --workspace`
+- `cargo test --workspace`
+- Test puntual: `cargo test -p domain removing_view_revokes_write_and_access` (el filtro es un substring del nombre; `cargo test -p <crate> -- --list` lista los tests)
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo fmt --all` (en CI: `cargo fmt --all --check`)
+
+Desktop (desde `apps/desktop`, usa pnpm):
+
+- `pnpm install`
+- `cargo tauri dev`: levanta Vite en `localhost:1420` y abre la ventana.
+- `pnpm build`: typecheck (`tsc --noEmit`) + build de Vite.
+- `cargo tauri build`: instalador.
+
+Relay: `cargo run -p relay` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`).
+
+### Particularidades
+
+- En Windows, ConPTY envía una consulta de posición de cursor (`ESC[6n`) y retiene la salida hasta recibir respuesta. En la app la contesta xterm.js vía `onData` → `write_terminal`. Cualquier test o cliente que lea un PTY sin xterm debe responderla (ver el test de `crates/infrastructure/src/pty.rs`).
+- **Detección de agentes:** el panel muestra qué agente corre en cada terminal (Claude Code, OpenCode, Codex, Antigravity CLI). No se parsea lo que el usuario escribe: `agent_watcher.rs` (desktop) llama cada 1 s a `DetectTerminalAgents`, que toma una foto de procesos (`ProcessInspector`, implementado con `sysinfo`) y recorre en anchura los descendientes de la shell de cada terminal; gana el agente más cercano a la shell (los más profundos suelen ser herramientas que ese agente lanzó). Solo se emite `terminal-agent` cuando cambia. El catálogo (`crates/application/src/agent_detection.rs`) reconoce por nombre de ejecutable (`claude`, `opencode`, `codex`, `agy`/`antigravity`) o, si el proceso es `node`/`bun`/`deno`, por el paquete npm en los argumentos (`@openai/codex`, etc.). Para sumar un agente: agregarlo al enum `KnownAgent` en Rust y al catálogo de `apps/desktop/src/agents.ts` con el mismo id.
+- **Directorio actual de cada terminal (shell integration):** la shell por defecto (`crates/infrastructure/src/shell.rs`) arranca PowerShell con `-NoExit -Command` envolviendo su `prompt` para emitir `OSC 7` (`ESC]7;file://localhost/C:/ruta ESC\`) antes de cada prompt; xterm lo lee (`registerOscHandler(7)`) y el header muestra la carpeta real en vivo. No se puede leer desde afuera porque PowerShell no cambia el cwd del proceso al hacer `cd`. Test real: `cargo test -p infrastructure --test shell_integration_e2e -- --ignored`. En Unix todavía no hay integración (solo se muestra la carpeta inicial).
+- **Cambiador de ruta** (`CwdSwitcher.tsx`): menú con subcarpetas (adelante, vía `list_subdirectories` → `ListSubdirectories` → `DirectoryBrowser`), `..` y directorios padre (atrás). Navegar = escribirle un `cd` a la shell (`cdCommand` en `src/cwd.ts`, según la shell), así que se desactiva mientras corre un agente: el texto le llegaría al agente. El menú va en un portal con posición fija porque el panel tiene `overflow: hidden`, y se cierra con `resize`.
+- **`Panel`** (`components/Panel.tsx`): wrapper visual reutilizable (marco + barra de título + bloque interno oscuro con radio). Lo usan el panel de una terminal y la sesión del sidebar; cualquier contenedor nuevo con ese look debe usarlo en vez de copiar estilos. Se ajusta con variables CSS (`--panel-pad`, `--panel-bg`, `--panel-border`, `--panel-body-radius`) y `plain` lo deja sin marco.
+- **Hilo de terminales en el sidebar:** cada sesión lista sus terminales en el orden de la grilla, con el mismo `TerminalIcon` que el header (logo del agente detectado o ícono de la shell). Cada panel reporta qué corre en él con `onMeta` hacia `App`. Clic en una terminal del hilo → va a su sesión y la enfoca.
+- Logos de agentes: `apps/desktop/src/assets/agents/{claudecode,opencode,codex,antigravitycli}-logo.svg`. Se cargan con `import.meta.glob`, así que si falta uno el build no falla y el panel muestra un badge de texto. Se pintan como máscara CSS (`.pane-logo`: `mask` + `background-color: var(--text)`), no con `<img>`: el SVG solo aporta la forma y el color sale siempre del token, sin importar el `fill` del archivo.
+- Test end-to-end de detección con los CLIs reales instalados: `cargo test -p infrastructure --test agent_detection_e2e -- --ignored --nocapture --test-threads=1` (está `#[ignore]` porque depende de la máquina).
+- Cerrar una terminal mata el **árbol de procesos completo** por pid (`taskkill /T /F` en Windows, `kill -KILL -<pgid>` en Unix), para que el agente que corre dentro de la shell no quede huérfano. No usar `ChildKiller::kill` de portable-pty: en Windows falla con "handle inválido" (os error 6) o devuelve un falso error con código 0.
+- El frontend no usa `React.StrictMode`: su doble montaje en dev abriría un PTY extra por terminal (un panel solo cierra su PTY con el botón ✕ → `close_terminal`, no al desmontarse).
+- Frontend: los workspaces y las sesiones del sidebar son por ahora estado de UI (`apps/desktop/src/model.ts`), porque el núcleo todavía no expone comandos para ellos; todas las terminales corren dentro de la única sesión del núcleo. Las terminales de sesiones no activas quedan montadas y ocultas (atributo `hidden`) para no perder sus PTY; xterm solo hace `fit()` si su contenedor tiene tamaño. Al agregar comandos de workspaces/sesiones en el núcleo, reemplazar ese estado local en lugar de duplicarlo.
+- **Arrastrar paneles** (`apps/desktop/src/usePaneDrag.ts`): se arrastran por el header y se intercambian en vivo con el panel que está bajo el puntero, con animación FLIP. Regla clave: **nunca reordenar el DOM de los paneles** (mover el nodo de una xterm puede resetear su scroll/estado). El DOM se renderiza siempre por `Pane.seq` (orden de creación) y la posición visual sale del orden de `Session.panes` aplicado con la propiedad CSS `order`. El hit-testing usa `offsetLeft/Top` (posición de layout, sin transforms) para no oscilar mientras los demás paneles se animan. El arrastre se desactiva con un solo panel visible (maximizado o layout single).
+- Íconos: los de UI genéricos vienen de `react-icons` (set Codicons, `react-icons/vsc`): `VscTerminal` en el contador de terminales de cada sesión, y en el header del panel el ícono de la shell (`VscTerminalPowershell`, `VscTerminalCmd`, `VscTerminalBash` o `VscTerminal`) cuando no corre un agente conocido. Los trazos simples propios están en `src/icons.tsx`; SVGs propios del proyecto en `src/assets/opencollab/` (pintados como máscara CSS para heredar el color del texto).
+- Tipografía: **Google Sans**, empaquetada con la app vía `@fontsource-variable/google-sans` (funciona sin conexión; pesos 400–700). Se usa por el token `--font`; el código monoespaciado sigue con `--mono`.
+- Diseño de referencia: tema oscuro, tipografía Google Sans, acento violeta (`--accent: #7c5cff`), sidebar (selector de workspace, búsqueda, sesiones, usuario), topbar (breadcrumb, Invite, layouts grid/columns/single, New terminal), paneles con header (badge, nombre, cwd, estado, controles) y status bar con atajos (`Ctrl/⌘+T`, `+1-4`, `+Shift+M`, `+K`).

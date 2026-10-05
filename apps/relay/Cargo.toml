@@ -1,0 +1,15 @@
+[package]
+name = "relay"
+description = "Servidor de colaboración de OpenCollab (WebSocket)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+protocol.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

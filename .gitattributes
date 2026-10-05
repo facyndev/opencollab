@@ -1,0 +1,9 @@
+# Finales de línea LF en el repo y en el working copy, en cualquier sistema:
+# evita diffs de CRLF y que `cargo fmt --check` dependa del core.autocrlf de cada uno.
+* text=auto eol=lf
+
+# Binarios
+*.png binary
+*.ico binary
+*.icns binary
+*.woff2 binary
