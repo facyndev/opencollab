@@ -190,7 +190,16 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   (contra `HookReceiver` real y el binario compilado; no pasaron por RED).
   Verificación: el padre re-corrió `cargo fmt --all --check` y `cargo test
   --workspace` (hook-relay 7+8, infrastructure 46, 0 fallan); escritor reportó
-  clippy limpio.
+  clippy limpio. Commit `d5f80f1`. RDD del corte `103a88b..d5f80f1` (R3-fixes +
+  T4, 801 líneas, `medium`): consentido, lente reliability → **aprobado** y
+  acknowledged (`review-5ebec51754a82336`). Hallazgos no bloqueantes,
+  pendientes de decisión (prefijo T4-): T4-001 `run_bin` hace unwrap del
+  write a stdin y puede fallar por broken pipe (tests intermitentes); T4-002 el
+  socket se cierra antes de liberar el `Slot` → falso 503 bajo el tope; T4-003
+  el sink corre bajo el mutex (serializa y frena el shutdown si es lento);
+  T4-004 el 503 sin leer el pedido puede llegar como reset; T4-005 sin test de
+  receptor que acepta y no responde; T4-006 URL con path vacío aceptada.
+  Último límite revisado: `d5f80f1`.
 
 ## Siguiente paso
 
