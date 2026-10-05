@@ -291,7 +291,7 @@ export function App() {
           )}
         </main>
 
-        <StatusBar terminals={totals.terminals} live={totals.live} />
+        <StatusBar />
       </div>
     </div>
   );
