@@ -15,6 +15,7 @@ use application::{ActivityTracker, TrackAgentSessionTitle};
 use crate::agent_session::{
     forget_terminal, hook_status_dto, parse_agent, HookStatusDto, TERMINAL_AGENT_SESSION_EVENT,
 };
+use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
 
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal-output";
@@ -168,6 +169,12 @@ pub fn git_branch(state: State<'_, AppState>, path: String) -> Option<BranchDto>
             detached: branch.is_detached(),
             name: branch.label().to_string(),
         })
+}
+
+// `async`: sondear el relay bloquea hasta su timeout y no debe frenar la UI.
+#[tauri::command(async)]
+pub fn collab_status(state: State<'_, AppState>) -> Result<CollabStatusPayload, String> {
+    Ok(collab_status::snapshot(&state, None))
 }
 
 #[tauri::command(async)]

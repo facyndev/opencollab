@@ -85,6 +85,9 @@ export function installTauriMock() {
           return null;
         case "agent_session_title":
           return agentSessions[args.terminalId] ?? null;
+        case "collab_status":
+          // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
+          return { connected: false, syncMs: null, collaborators: 1 };
         case "hook_status":
           return Object.entries(hooks).map(([agent, status]) => ({ agent, status }));
         case "install_agent_hooks":

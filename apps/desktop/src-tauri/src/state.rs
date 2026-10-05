@@ -3,17 +3,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use application::ports::{
-    HookInstaller, ProcessInspector, PtyPort, SessionTitleTranslator, WorkspaceRepository,
+    HookInstaller, ProcessInspector, PtyPort, RelayProbe, SessionTitleTranslator,
+    WorkspaceRepository,
 };
 use application::{
-    ActivityTracker, AppError, CloseTerminal, DetectTerminalAgents, HookEndpoint, InspectBranch,
-    InspectHookInstallation, InstallAgentHooks, LaunchTerminal, ListSubdirectories, ResizeTerminal,
-    SendTerminalInput, TrackAgentSessionTitle, UninstallAgentHooks,
+    ActivityTracker, AppError, CheckRelay, CloseTerminal, DetectTerminalAgents, HookEndpoint,
+    InspectBranch, InspectHookInstallation, InstallAgentHooks, LaunchTerminal, ListSubdirectories,
+    ResizeTerminal, SendTerminalInput, SessionCollaborators, TrackAgentSessionTitle,
+    UninstallAgentHooks,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
     AntigravityHookInstaller, ClaudeCodeHookInstaller, ClaudeCodeTranslator, CodexHookInstaller,
-    CodexTranslator, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver,
+    CodexTranslator, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver, HttpRelayProbe,
     InMemoryWorkspaceRepository, OpenCodePluginInstaller, OpenCodeTranslator, PortablePtyAdapter,
     SysinfoProcessInspector,
 };
@@ -41,6 +43,8 @@ pub struct AppState {
     pub agent_sessions: Arc<TrackAgentSessionTitle>,
     /// Actividad de cada terminal, inferida de su salida (ver `agent_watcher`).
     pub activity: Arc<ActivityTracker>,
+    pub check_relay: CheckRelay,
+    pub session_collaborators: SessionCollaborators,
     pub inspect_hooks: InspectHookInstallation,
     pub install_hooks: InstallAgentHooks,
     pub uninstall_hooks: UninstallAgentHooks,
@@ -55,6 +59,11 @@ impl AppState {
         let repo: Arc<dyn WorkspaceRepository> = Arc::new(InMemoryWorkspaceRepository::new());
         let pty: Arc<dyn PtyPort> = Arc::new(PortablePtyAdapter::new());
         let inspector: Arc<dyn ProcessInspector> = Arc::new(SysinfoProcessInspector::new());
+
+        // Dirección del relay: `RELAY_ADDR` o la de por defecto del protocolo.
+        let relay_addr = std::env::var("RELAY_ADDR")
+            .unwrap_or_else(|_| protocol::DEFAULT_RELAY_ADDR.to_string());
+        let relay_probe: Arc<dyn RelayProbe> = Arc::new(HttpRelayProbe::new(relay_addr));
 
         let local_user = UserId::new();
         let workspace = Workspace::new(local_user, "Local");
@@ -98,11 +107,13 @@ impl AppState {
             send_input: SendTerminalInput::new(repo.clone(), pty.clone()),
             resize_terminal: ResizeTerminal::new(repo.clone(), pty.clone()),
             close_terminal: CloseTerminal::new(repo.clone(), pty.clone()),
-            detect_agents: DetectTerminalAgents::new(repo, pty, inspector),
+            detect_agents: DetectTerminalAgents::new(repo.clone(), pty, inspector),
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
             inspect_branch: InspectBranch::new(Arc::new(FsRepositoryInspector::new())),
             agent_sessions,
             activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
+            check_relay: CheckRelay::new(relay_probe),
+            session_collaborators: SessionCollaborators::new(repo),
             inspect_hooks: InspectHookInstallation::new(installers.clone()),
             install_hooks: InstallAgentHooks::new(installers.clone()),
             uninstall_hooks: UninstallAgentHooks::new(installers),

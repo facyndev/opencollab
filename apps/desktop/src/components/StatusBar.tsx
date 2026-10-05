@@ -1,3 +1,4 @@
+import { DEFAULT_COLLAB_STATUS } from "../collabStatus";
 import { modKey, shiftKey } from "../shortcuts";
 
 type Props = {
@@ -7,9 +8,9 @@ type Props = {
 };
 
 export function StatusBar({
-  connected = true,
-  syncMs = 24,
-  collaborators = 3,
+  connected = DEFAULT_COLLAB_STATUS.connected,
+  syncMs = DEFAULT_COLLAB_STATUS.syncMs,
+  collaborators = DEFAULT_COLLAB_STATUS.collaborators,
 }: Props = {}) {
   return (
     <footer className="statusbar">

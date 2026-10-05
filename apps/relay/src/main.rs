@@ -50,7 +50,7 @@ async fn main() {
         .init();
 
     let addr: SocketAddr = std::env::var("RELAY_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:8787".into())
+        .unwrap_or_else(|_| protocol::DEFAULT_RELAY_ADDR.into())
         .parse()
         .expect("RELAY_ADDR inválida");
 

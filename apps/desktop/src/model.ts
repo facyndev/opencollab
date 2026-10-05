@@ -24,6 +24,7 @@ export type PaneMeta = {
   activity?: Activity | null;
   /// Terminó de trabajar sin que su panel estuviera enfocado y aún no se miró.
   attention?: boolean;
+  terminalId?: string | null;
 };
 
 export type Pane = {

@@ -15,6 +15,7 @@ import cwdAndThread from "./scenarios/cwd-and-thread.mjs";
 import dragSwap from "./scenarios/drag-swap.mjs";
 import exitClosesPane from "./scenarios/exit-closes-pane.mjs";
 import threadMeta from "./scenarios/thread-meta.mjs";
+import statusBarLive from "./scenarios/status-bar-live.mjs";
 import newTerminalHere from "./scenarios/new-terminal-here.mjs";
 
 const scenarios = {
@@ -23,6 +24,7 @@ const scenarios = {
   "línea secundaria del hilo": threadMeta,
   "nueva terminal desde otra": newTerminalHere,
   "exit en la shell cierra el panel": exitClosesPane,
+  "status bar con estado real": statusBarLive,
 };
 
 function chromePath() {

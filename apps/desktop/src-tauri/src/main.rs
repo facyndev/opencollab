@@ -3,6 +3,7 @@
 
 mod agent_session;
 mod agent_watcher;
+mod collab_status;
 mod commands;
 mod state;
 
@@ -18,6 +19,7 @@ fn main() {
             }
             app.manage(state::AppState::bootstrap(app.handle())?);
             agent_watcher::spawn(app.handle().clone());
+            collab_status::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -28,6 +30,7 @@ fn main() {
             commands::list_subdirectories,
             commands::git_branch,
             commands::agent_session_title,
+            commands::collab_status,
             commands::hook_status,
             commands::install_agent_hooks,
             commands::uninstall_agent_hooks,
