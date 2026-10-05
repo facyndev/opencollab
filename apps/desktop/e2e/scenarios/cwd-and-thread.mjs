@@ -47,7 +47,7 @@ export default async function cwdAndThread(page, checks) {
     thread.includes("Fix authentication bug");
   checks["el hilo muestra el logo del agente"] =
     (await page.$$(".thread-item .terminal-icon--logo")).length === 2;
-  checks["el subagente cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {
+  checks["el agente anidado cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {
     const items = [...document.querySelectorAll(".thread-item")];
     const codex = items.find((e) => e.textContent === "Codex");
     if (!codex) return false;
@@ -56,7 +56,7 @@ export default async function cwdAndThread(page, checks) {
     const owner = codex.closest("li").parentElement.closest("li");
     return !!owner && [...owner.querySelectorAll(".thread-item--sub")].includes(codex);
   });
-  checks["el subagente abre la terminal que lo tiene"] = await page.evaluate(() => {
+  checks["el agente anidado abre la terminal que lo tiene"] = await page.evaluate(() => {
     const codex = [...document.querySelectorAll(".thread-item--sub")].find(
       (e) => e.textContent === "Codex",
     );
@@ -65,7 +65,7 @@ export default async function cwdAndThread(page, checks) {
     return true;
   });
   await wait(100);
-  checks["el clic en el subagente enfoca su terminal"] = await page.$$eval(
+  checks["el clic en el agente anidado enfoca su terminal"] = await page.$$eval(
     ".pane:not([hidden])",
     (els) => els[1].classList.contains("pane--focused") && !els[0].classList.contains("pane--focused"),
   );

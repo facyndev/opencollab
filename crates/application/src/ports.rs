@@ -75,7 +75,7 @@ pub trait SessionTitleTranslator: Send + Sync {
 }
 
 /// Instala / quita en la configuración de un agente los hooks o el plugin que
-/// reportan sus subagentes. Uno por agente; solo agrega y quita entradas propias.
+/// reportan el título de su sesión. Uno por agente; solo agrega y quita entradas propias.
 pub trait HookInstaller: Send + Sync {
     fn agent(&self) -> KnownAgent;
     fn status(&self) -> Result<HookStatus, PortError>;

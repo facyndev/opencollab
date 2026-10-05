@@ -1,5 +1,5 @@
-//! Instalación de los hooks / plugins que cada agente usa para reportar sus
-//! subagentes. Los casos de uso solo orquestan los puertos [`HookInstaller`];
+//! Instalación de los hooks / plugins que cada agente usa para reportar el
+//! título de su sesión. Los casos de uso solo orquestan los puertos [`HookInstaller`];
 //! tocar la configuración de cada agente es trabajo de la infraestructura.
 
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use crate::ports::{HookInstaller, PortError};
 /// Estado de la integración de OpenCollab en la configuración de un agente.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookStatus {
-    /// El agente no ofrece un mecanismo para reportar subagentes.
+    /// El agente no ofrece un mecanismo para reportar el título de sesión.
     Unsupported,
     /// Nuestras entradas no están (o están desactualizadas).
     NotInstalled,

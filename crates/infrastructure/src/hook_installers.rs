@@ -1,4 +1,5 @@
-//! Instaladores de los hooks / plugin con que cada agente reporta sus subagentes.
+//! Instaladores de los hooks / plugin con que cada agente reporta el título de
+//! su sesión (o el prompt inicial del usuario).
 //!
 //! Reglas comunes de los instaladores JSON (Claude Code y Codex):
 //!
@@ -21,20 +22,17 @@
 //!
 //! - Claude Code, <https://code.claude.com/docs/en/hooks>: `settings.json` →
 //!   `{"hooks": {"<Evento>": [{"matcher"?, "hooks": [{"type": "command",
-//!   "command", "timeout"?}]}]}}`; `SubagentStart` / `SubagentStop` existen, el
-//!   `matcher` opcional filtra por tipo de agente (sin él, todos). Reciben por
-//!   stdin `session_id`, `hook_event_name`, `agent_type`, `agent_id`.
+//!   "command", "timeout"?}]}]}}`; usamos `UserPromptSubmit`, que recibe por
+//!   stdin `session_id`, `hook_event_name` y `prompt`.
 //! - Codex, <https://learn.chatgpt.com/docs/hooks> (antes developers.openai.com):
-//!   `~/.codex/hooks.json` con la misma forma; eventos `SubagentStart` /
-//!   `SubagentStop`; campos `timeout` (s) y `async` (segundo plano). Codex pide
-//!   al usuario aprobar los hooks la primera vez. Los campos exactos del stdin
-//!   de los eventos de subagente no figuran en la doc: el traductor es tolerante.
+//!   `~/.codex/hooks.json` con la misma forma; evento `UserPromptSubmit`;
+//!   campos `timeout` (s) y `async` (segundo plano). Codex pide al usuario
+//!   aprobar los hooks la primera vez. El traductor es tolerante con los campos
+//!   del stdin.
 //! - OpenCode, <https://opencode.ai/docs/plugins/>: archivo en
 //!   `~/.config/opencode/plugins/` que exporta una función async con hooks
-//!   (`event`, `tool.execute.after`). **Suposiciones** (la doc no las detalla):
-//!   `session.created` trae `event.properties.info.{id, parentID}`; el
-//!   `tool.execute.after` de `task` trae el id de la sesión hija en
-//!   `output.metadata.sessionId` (el `input.sessionID` es el de la sesión padre).
+//!   (`event`). **Suposición** (la doc no la detalla): `session.created` y
+//!   `session.updated` traen el título en `event.properties.info.title`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -299,7 +297,7 @@ fn remove_hooks(doc: &mut Value, path: &Path) -> Result<bool, PortError> {
     Ok(changed)
 }
 
-/// Claude Code: hooks `SubagentStart` / `SubagentStop` en `<raíz>/settings.json`.
+/// Claude Code: hook `UserPromptSubmit` en `<raíz>/settings.json`.
 pub struct ClaudeCodeHookInstaller(JsonHooks);
 
 impl ClaudeCodeHookInstaller {
@@ -329,7 +327,7 @@ impl HookInstaller for ClaudeCodeHookInstaller {
     }
 }
 
-/// Codex: hooks `SubagentStart` / `SubagentStop` (`async`) en `<raíz>/hooks.json`.
+/// Codex: hook `UserPromptSubmit` (`async`) en `<raíz>/hooks.json`.
 /// Codex le pide al usuario aprobar los hooks la primera vez que los ve.
 pub struct CodexHookInstaller(JsonHooks);
 
@@ -486,7 +484,7 @@ impl HookInstaller for OpenCodePluginInstaller {
 // Antigravity: sin mecanismo
 // ---------------------------------------------------------------------------
 
-/// Antigravity CLI: sus hooks no tienen eventos de subagente. `status` es
+/// Antigravity CLI: sus hooks no exponen el título ni el prompt. `status` es
 /// siempre `Unsupported`; `install` / `uninstall` fallan con un error claro
 /// (nunca modifican nada), para que la UI no ofrezca una instalación falsa.
 pub struct AntigravityHookInstaller;
@@ -510,7 +508,7 @@ impl HookInstaller for AntigravityHookInstaller {
 }
 
 fn unsupported() -> PortError {
-    PortError::new("Antigravity CLI no expone eventos de subagente: no hay hooks que instalar")
+    PortError::new("Antigravity CLI no expone el título de sesión: no hay hooks que instalar")
 }
 
 #[cfg(test)]

@@ -84,12 +84,12 @@ fn binary_delivers_event_and_exits_zero() {
     let terminal = TerminalId::new();
     let mut cmd = base_command(&["codex"]);
     with_endpoint(&mut cmd, receiver.url(), receiver.token(), terminal);
-    let out = run_bin(cmd, b"{\"hook\":\"SubagentStart\"}");
+    let out = run_bin(cmd, b"{\"hook\":\"UserPromptSubmit\"}");
     assert_silent_success(&out);
     let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(event.terminal_id, terminal);
     assert_eq!(event.agent, KnownAgent::Codex);
-    assert_eq!(event.payload, "{\"hook\":\"SubagentStart\"}");
+    assert_eq!(event.payload, "{\"hook\":\"UserPromptSubmit\"}");
 }
 
 #[test]
