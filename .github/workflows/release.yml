@@ -1,0 +1,84 @@
+# Release: al pushear un tag vX.Y.Z (sobre main, ver Git Flow en CLAUDE.md).
+#   1. Corre todo el CI (unit + E2E). Si falla, no se construye nada.
+#   2. Verifica que el tag coincida con la versión de la app.
+#   3. Construye los instaladores de Windows con Tauri.
+#   4. Los renombra a <os>_<versión>.<ext>, calcula sus SHA-256 y publica la
+#      release de GitHub con los archivos, los .sha256 y SHA256SUMS.txt.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # Primero lo barato: un tag mal puesto falla en segundos, sin correr el CI.
+  version:
+    name: Versión del tag = versión de la app
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: check
+        shell: pwsh
+        run: ./scripts/check-version.ps1 -Tag "${{ github.ref_name }}"
+
+  ci:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  windows:
+    name: Build Windows
+    needs: [version, ci]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Instalar dependencias del frontend
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build de Tauri (NSIS + MSI)
+        working-directory: apps/desktop
+        run: pnpm tauri build
+
+      - name: Renombrar y calcular hashes
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -Version "${{ env.VERSION }}" -OutDir release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows_${{ env.VERSION }}
+          path: release/
+
+      - name: Publicar release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: OpenCollab ${{ github.ref_name }}
+          body_path: release/release-notes.md
+          # Versiones con sufijo (v1.0.0-beta.1) salen como pre-release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            release/windows_*.exe
+            release/windows_*.msi
+            release/*.sha256
+            release/SHA256SUMS.txt
