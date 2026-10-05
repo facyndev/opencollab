@@ -23,3 +23,6 @@ apps/desktop/src-tauri/gen/schemas/
 .DS_Store
 Thumbs.db
 *.log
+
+# Caché local del registro de skills de gentle-ai
+.atl/

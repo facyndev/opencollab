@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use crate::agent_detection::ProcessInfo;
+use crate::agent_detection::{KnownAgent, ProcessInfo};
+use crate::subagents::SubagentChange;
 
 use domain::{
     AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId,
@@ -63,6 +64,14 @@ pub trait DirectoryBrowser: Send + Sync {
 /// Foto de los procesos del sistema, para detectar qué corre en cada terminal.
 pub trait ProcessInspector: Send + Sync {
     fn snapshot(&self) -> Result<Vec<ProcessInfo>, PortError>;
+}
+
+/// Traduce el payload crudo de un hook de un agente a cambios de subagentes.
+/// El payload llega como texto: interpretarlo (JSON, etc.) es trabajo de la
+/// infraestructura.
+pub trait SubagentEventTranslator: Send + Sync {
+    fn agent(&self) -> KnownAgent;
+    fn translate(&self, payload: &str) -> Result<Vec<SubagentChange>, PortError>;
 }
 
 pub trait WorkspaceRepository: Send + Sync {
