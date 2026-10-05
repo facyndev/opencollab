@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { opencollabLogoTransparent } from "./assets/brand";
 import { Button } from "./components/Button";
 import { Sidebar } from "./components/Sidebar";
 import { Plus } from "./icons";
@@ -285,6 +286,7 @@ export function App() {
 
           {activeSession.panes.length === 0 && (
             <div className="grid-empty">
+              <img src={opencollabLogoTransparent} alt="OpenCollab" className="grid-empty-logo" />
               <p>Esta sesión no tiene terminales.</p>
               <Button variant="primary" icon={<Plus />} onClick={() => addTerminal()}>
                 New terminal
