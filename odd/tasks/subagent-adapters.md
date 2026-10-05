@@ -276,6 +276,7 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   (86 infrastructure + 11 desktop + 45 application + domain + protocol, 0 fallan);
   `pnpm test` (33 tests pasando en 4 archivos); `pnpm build` (typecheck y bundle
   Vite sin errores); `pnpm test:e2e` (los 6 escenarios pasando con código 0).
+  Commit `2842692`.
 
 ## Siguiente paso
 
