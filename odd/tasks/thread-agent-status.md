@@ -29,6 +29,7 @@ In the sidebar thread, show the agent state next to the terminal title (`Claude 
 
 - [x] **T1 — Branch refresh polling.** `useGitBranch` re-queries every few seconds (and on cwd / refreshKey change); pure, tested helper where possible. Route: delegated writer (preparation trigger + multi-file). Done in `29e9d54`; RED: `branchWatch.test.ts` failed (module missing), GREEN 61 tests; `pnpm build` ok.
 - [x] **T2 — State next to the title, branch as a thread line.** Title row: `<icon> <name> · <state label>` with the tone color/icon, replacing the dot when an agent is detected. Branch rendered below as a thread child line (same connector look as nested agents). Tool detail and uptime stay in the secondary line. Update e2e scenario. Route: delegated writer. Done in `6b7d5be`; RED: 19 e2e checks failed before the UI change, GREEN: `pnpm test` 61 passed, `pnpm build` ok, `pnpm test:e2e` exit 0.
+- [x] **T3 — Review follow-ups.** Ignore out-of-order branch poll responses (sequence number), keep the last known branch on query error (null only if none known yet), fix the `` cwd fixture in `branchWatch.test.ts`, and use `heads[0]?.includes` consistently in `thread-meta.mjs`; AGENTS.md updated. Route: delegated writer. Done in `9e04b6c`; RED: 2 new `branchWatch` tests failed, GREEN: `pnpm test` 63 passed, `pnpm build` ok, `pnpm test:e2e` all passed.
 
 ## Acceptance criteria
 
@@ -40,4 +41,4 @@ In the sidebar thread, show the agent state next to the terminal title (`Claude 
 ## Progress
 
 - Created 2026-10-05. Delivery strategy: ask-on-risk (forecast < 400 lines).
-- T1 and T2 implemented 2026-10-05. Next: review and delivery (PR to `develop`).
+- T1, T2 and T3 implemented 2026-10-05. Next: review and delivery (PR to `develop`).
