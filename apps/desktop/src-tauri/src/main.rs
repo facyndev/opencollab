@@ -24,6 +24,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_shell,
+            commands::available_agents,
             commands::write_terminal,
             commands::resize_terminal,
             commands::close_terminal,

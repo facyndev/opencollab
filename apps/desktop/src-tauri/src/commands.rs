@@ -8,9 +8,9 @@ use domain::TerminalId;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use infrastructure::default_shell_profile;
+use infrastructure::{agent_shell_profile, command_exists, default_shell_profile};
 
-use application::{exit_event, ActivityTracker, AgentEventSink, AgentStates};
+use application::{exit_event, ActivityTracker, AgentEventSink, AgentStates, KnownAgent};
 
 use crate::agent_events::TauriAgentEvents;
 use crate::collab_status::{self, CollabStatusPayload};
@@ -88,20 +88,40 @@ pub fn open_shell(
     rows: u16,
     // Carpeta inicial (p. ej. la de la terminal desde la que se abre); `None` = home.
     cwd: Option<String>,
+    // Id de un agente conocido a ejecutar dentro de la shell; `None` = solo la shell.
+    agent: Option<String>,
 ) -> Result<OpenedTerminal, String> {
+    let agent = agent
+        .map(|id| KnownAgent::from_id(&id).ok_or_else(|| format!("agente desconocido: {id}")))
+        .transpose()?;
+    let events: Arc<dyn AgentEventSink> = Arc::new(TauriAgentEvents::new(
+        app.clone(),
+        state.agent_states.clone(),
+    ));
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
-        events: Arc::new(TauriAgentEvents::new(
-            app.clone(),
-            state.agent_states.clone(),
-        )),
+        events: events.clone(),
         app,
         activity: state.activity.clone(),
         states: state.agent_states.clone(),
     });
-    let profile = default_shell_profile(cwd.as_deref().map(std::path::Path::new));
+    let cwd_path = cwd.as_deref().map(std::path::Path::new);
+    // El adaptador del agente (si lo hay) agrega args/env antes de lanzar.
+    let (profile, prepared) = match agent {
+        Some(agent) => {
+            let prepared = state.adapters.prepare(agent).map_err(|e| e.to_string())?;
+            let profile = agent_shell_profile(
+                cwd_path,
+                agent.launch_command(),
+                &prepared.args,
+                &prepared.env,
+            );
+            (profile, Some(prepared))
+        }
+        None => (default_shell_profile(cwd_path), None),
+    };
     let name = profile.name.clone();
     let cwd = profile.cwd.as_ref().map(|p| p.display().to_string());
-    state
+    let id = state
         .launch_terminal
         .execute(
             state.local_user,
@@ -110,12 +130,26 @@ pub fn open_shell(
             TerminalSize { cols, rows },
             sink,
         )
-        .map(|id| OpenedTerminal {
-            terminal_id: id.to_string(),
-            name,
-            cwd,
-        })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Some(prepared) = prepared {
+        prepared.bind(id, events);
+    }
+    Ok(OpenedTerminal {
+        terminal_id: id.to_string(),
+        name,
+        cwd,
+    })
+}
+
+/// Ids de los agentes conocidos que están instalados (su comando está en el `PATH`).
+/// Lee disco: `async`.
+#[tauri::command(async)]
+pub fn available_agents() -> Vec<&'static str> {
+    KnownAgent::ALL
+        .into_iter()
+        .filter(|a| command_exists(a.launch_command()))
+        .map(|a| a.id())
+        .collect()
 }
 
 // Síncrono a propósito: los comandos async corren en un pool y podrían

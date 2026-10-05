@@ -4,6 +4,7 @@ import { opencollabLogoTransparent } from "./assets/brand";
 import { Button } from "./components/Button";
 import { Sidebar } from "./components/Sidebar";
 import { Plus } from "./icons";
+import type { AgentId } from "./agents";
 import { StatusBar } from "./components/StatusBar";
 import { TerminalPane } from "./components/TerminalPane";
 import { TopBar } from "./components/TopBar";
@@ -75,8 +76,8 @@ export function App() {
   /// Abre una terminal en la sesión activa. Si se abre desde otra (`fromPaneId`),
   /// va al lado de ella; `cwd` es la carpeta inicial (`null` = la por defecto).
   const addTerminal = useCallback(
-    (cwd: string | null = null, fromPaneId: string | null = null) => {
-      const pane = newPane(cwd);
+    (cwd: string | null = null, fromPaneId: string | null = null, agent: AgentId | null = null) => {
+      const pane = newPane(cwd, agent);
       updateSession(activeSession.id, (s) => ({
         ...s,
         panes: insertPaneAfter(s.panes, fromPaneId, pane),
@@ -257,6 +258,7 @@ export function App() {
                 key={pane.id}
                 paneId={pane.id}
                 initialCwd={pane.initialCwd}
+                initialAgent={pane.agent}
                 order={index}
                 focused={focusedPaneId === pane.id}
                 minimized={pane.minimized && soloPaneId !== pane.id}
@@ -279,7 +281,7 @@ export function App() {
                 }
                 onToggleMaximize={() => toggleMaximize(pane.id)}
                 onClosed={() => removePane(session.id, pane.id)}
-                onNewTerminal={(cwd) => addTerminal(cwd, pane.id)}
+                onNewTerminal={(cwd, agent) => addTerminal(cwd, pane.id, agent ?? null)}
               />
             );
           })}

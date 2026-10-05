@@ -27,6 +27,8 @@ type Props = {
   paneId: string;
   /// Carpeta en la que arranca la shell (`null` = la por defecto).
   initialCwd: string | null;
+  /// Agente a ejecutar dentro de la shell al abrir (`null` = solo la shell).
+  initialAgent: AgentId | null;
   focused: boolean;
   minimized: boolean;
   maximized: boolean;
@@ -45,13 +47,14 @@ type Props = {
   onToggleMinimize: () => void;
   onToggleMaximize: () => void;
   onClosed: () => void;
-  /// Abrir otra terminal al lado de esta (`cwd` = carpeta inicial, `null` = la por defecto).
-  onNewTerminal: (cwd: string | null) => void;
+  /// Abrir otra terminal al lado de esta (`cwd` = carpeta inicial, `null` = la por defecto;
+  /// `agent` = agente a lanzar, omitido = solo la shell).
+  onNewTerminal: (cwd: string | null, agent?: AgentId) => void;
 };
 
 /// Una celda de la grilla: una instancia de xterm.js conectada a un PTY del núcleo.
 export function TerminalPane(props: Props) {
-  const { paneId, initialCwd, onStatus, onMeta } = props;
+  const { paneId, initialCwd, initialAgent, onStatus, onMeta } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
@@ -137,7 +140,7 @@ export function TerminalPane(props: Props) {
     let detach: (() => void) | null = null;
 
     // La carpeta inicial solo importa al crear el PTY: no se reabre si cambia.
-    openShell(term.cols, term.rows, initialCwd)
+    openShell(term.cols, term.rows, initialCwd, initialAgent)
       .then((opened) => {
         if (disposed) {
           void closeTerminal(opened.terminalId);

@@ -2,20 +2,26 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { VscFolderOpened, VscHome } from "react-icons/vsc";
 
+import { agentInfo, type AgentId } from "../agents";
 import { Plus } from "../icons";
 import { modKey, shiftKey } from "../shortcuts";
+import { availableAgents } from "../terminalApi";
+import { TerminalIcon } from "./TerminalIcon";
 
 type Props = {
   /// Carpeta actual de la terminal (`null` si todavía no se conoce).
   cwd: string | null;
   /// `cwd` = carpeta inicial de la terminal nueva; `null` = la por defecto.
-  onOpen: (cwd: string | null) => void;
+  /// `agent` = agente a ejecutar dentro de la shell; omitido = solo la shell.
+  onOpen: (cwd: string | null, agent?: AgentId) => void;
 };
 
-/// Botón del header de una terminal para abrir otra: en la misma carpeta o en la por defecto.
+/// Botón del header de una terminal para abrir otra: en la misma carpeta o en la
+/// por defecto, o directamente un agente instalado (corre dentro de la shell).
 export function NewTerminalMenu({ cwd, onOpen }: Props) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ right: number; top: number } | null>(null);
+  const [agents, setAgents] = useState<AgentId[]>([]);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -25,6 +31,16 @@ export function NewTerminalMenu({ cwd, onOpen }: Props) {
     if (!open || !buttonRef.current) return;
     const r = buttonRef.current.getBoundingClientRect();
     setPosition({ right: window.innerWidth - r.right, top: r.bottom + 4 });
+  }, [open]);
+
+  // Se consulta al abrir por primera vez (el núcleo lo cachea en `availableAgents`).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void availableAgents().then((found) => !cancelled && setAgents(found));
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -45,9 +61,9 @@ export function NewTerminalMenu({ cwd, onOpen }: Props) {
     };
   }, [open]);
 
-  const choose = (dir: string | null) => {
+  const choose = (dir: string | null, agent?: AgentId) => {
     setOpen(false);
-    onOpen(dir);
+    onOpen(dir, agent);
   };
 
   return (
@@ -88,6 +104,26 @@ export function NewTerminalMenu({ cwd, onOpen }: Props) {
               <span className="cwd-item-path" />
               <kbd className="new-terminal-kbd">{`${modKey}T`}</kbd>
             </button>
+            {agents.length > 0 && (
+              <>
+                <div className="ws-menu-title">Launch agent{cwd ? " here" : ""}</div>
+                {agents.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="menuitem"
+                    className="cwd-item new-terminal-agent"
+                    data-agent={id}
+                    title={cwd ? `${agentInfo(id).name} en ${cwd}` : `${agentInfo(id).name} en la carpeta por defecto`}
+                    onClick={() => choose(cwd, id)}
+                  >
+                    <TerminalIcon agent={id} shellName="" size={14} />
+                    <span className="new-terminal-label">{agentInfo(id).name}</span>
+                    <span className="cwd-item-path" />
+                  </button>
+                ))}
+              </>
+            )}
           </div>,
           document.body,
         )}

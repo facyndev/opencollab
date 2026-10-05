@@ -39,6 +39,12 @@ impl KnownAgent {
         KnownAgent::ALL.into_iter().find(|a| a.id() == id)
     }
 
+    /// Comando con el que se lanza el agente desde una shell (el primer nombre
+    /// de ejecutable: es el mismo por el que se lo detecta después).
+    pub fn launch_command(self) -> &'static str {
+        self.executables()[0]
+    }
+
     /// Nombres de ejecutable (sin extensión) que identifican al agente.
     fn executables(self) -> &'static [&'static str] {
         match self {
@@ -176,6 +182,15 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_known_agent_has_a_launch_command_that_it_also_detects_by() {
+        for agent in KnownAgent::ALL {
+            let command = agent.launch_command();
+            assert!(agent.executables().contains(&command), "{command}");
+        }
+        assert_eq!(KnownAgent::ClaudeCode.launch_command(), "claude");
+    }
 
     #[test]
     fn from_id_round_trips_every_known_agent() {

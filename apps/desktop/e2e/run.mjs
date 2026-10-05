@@ -17,12 +17,14 @@ import exitClosesPane from "./scenarios/exit-closes-pane.mjs";
 import threadMeta from "./scenarios/thread-meta.mjs";
 import statusBarLive from "./scenarios/status-bar-live.mjs";
 import newTerminalHere from "./scenarios/new-terminal-here.mjs";
+import launchAgent from "./scenarios/launch-agent.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
   "ruta, cambiador e hilo": cwdAndThread,
   "línea secundaria del hilo": threadMeta,
   "nueva terminal desde otra": newTerminalHere,
+  "lanzar un agente como perfil": launchAgent,
   "exit en la shell cierra el panel": exitClosesPane,
   "status bar con estado real": statusBarLive,
 };

@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use application::ports::{ProcessInspector, PtyPort, RelayProbe, WorkspaceRepository};
 use application::{
-    ActivityTracker, AgentStates, AppError, CheckRelay, CloseTerminal, DetectTerminalAgents,
-    InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal, SendTerminalInput,
-    SessionCollaborators,
+    ActivityTracker, AgentAdapters, AgentStates, AppError, CheckRelay, CloseTerminal,
+    DetectTerminalAgents, InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal,
+    SendTerminalInput, SessionCollaborators,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
@@ -32,6 +32,9 @@ pub struct AppState {
     pub activity: Arc<ActivityTracker>,
     /// Último estado reducido de cada terminal con agente (ver `agent_events`).
     pub agent_states: Arc<AgentStates>,
+    /// Adaptadores de agentes registrados. Hoy ninguno: todos usan el camino genérico.
+    /// Sumar uno (Claude Code, OpenCode...) es registrarlo acá.
+    pub adapters: AgentAdapters,
     pub check_relay: CheckRelay,
     pub session_collaborators: SessionCollaborators,
 }
@@ -66,6 +69,7 @@ impl AppState {
             inspect_branch: InspectBranch::new(Arc::new(FsRepositoryInspector::new())),
             activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
             agent_states: Arc::new(AgentStates::new()),
+            adapters: AgentAdapters::new(Vec::new()),
             check_relay: CheckRelay::new(relay_probe),
             session_collaborators: SessionCollaborators::new(repo),
         })

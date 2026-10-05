@@ -36,6 +36,8 @@ export type Pane = {
   minimized: boolean;
   /// Carpeta en la que arranca la shell (`null` = la por defecto del núcleo).
   initialCwd: string | null;
+  /// Agente que se lanza dentro de la shell al abrir la terminal (`null` = solo la shell).
+  agent: AgentId | null;
 };
 
 export type Session = {
@@ -62,8 +64,8 @@ let counter = 0;
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${counter++}`;
 
 let paneSeq = 0;
-export function newPane(initialCwd: string | null = null): Pane {
-  return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd };
+export function newPane(initialCwd: string | null = null, agent: AgentId | null = null): Pane {
+  return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd, agent };
 }
 
 /// Agrega `pane` justo después de `afterId` (o al final si no está).

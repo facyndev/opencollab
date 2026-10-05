@@ -74,9 +74,23 @@ export function gitBranch(path: string): Promise<GitBranch | null> {
 export type OpenedTerminal = { terminalId: string; name: string; cwd: string | null };
 
 /// `cwd`: carpeta inicial; `null` = la por defecto. Si ya no existe, el núcleo usa la por defecto.
-export async function openShell(cols: number, rows: number, cwd: string | null = null): Promise<OpenedTerminal> {
+/// `agent`: agente a ejecutar dentro de la shell (al salir, la terminal vuelve a la shell); `null` = solo la shell.
+export async function openShell(
+  cols: number,
+  rows: number,
+  cwd: string | null = null,
+  agent: AgentId | null = null,
+): Promise<OpenedTerminal> {
   await ensureListening();
-  return invoke<OpenedTerminal>("open_shell", { cols, rows, cwd });
+  return invoke<OpenedTerminal>("open_shell", { cols, rows, cwd, agent });
+}
+
+let available: Promise<AgentId[]> | null = null;
+
+/// Agentes conocidos instalados (encontrados en el PATH). Se consulta una vez; si falla, ninguno.
+export function availableAgents(): Promise<AgentId[]> {
+  available ??= invoke<AgentId[]>("available_agents").catch(() => []);
+  return available;
 }
 
 /// Subcarpetas de `path`, ya ordenadas por el núcleo.

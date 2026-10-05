@@ -5,7 +5,7 @@
 // Controles para los tests en `window.__mock`:
 //   emit(event, payload)  emite un evento como el núcleo
 //   writes                lo que la UI le escribió a cada terminal
-//   opened                argumentos de cada open_shell
+//   opened                argumentos de cada open_shell (cols, rows, cwd, agent)
 //   closed                terminalId de cada close_terminal
 //   (eventos del núcleo: terminal-output/exit/agent/agent-state)
 //   agentState(id, patch) emite terminal-agent-state con el estado completo (patch sobre el vacío)
@@ -76,6 +76,9 @@ export function installTauriMock() {
           setTimeout(() => prompt(terminalId, cwd), 50);
           return { terminalId, name: "PowerShell", cwd };
         }
+        case "available_agents":
+          // Como el núcleo: solo los agentes cuyo comando está en el PATH.
+          return ["claude-code", "opencode", "codex"];
         case "write_terminal": {
           writes.push(args);
           const cd = /^Set-Location -LiteralPath '(.*)'\r$/.exec(args.data);
