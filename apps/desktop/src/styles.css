@@ -118,8 +118,12 @@ kbd {
 .dot--starting {
   background: var(--accent-soft);
 }
+.dot--connected,
 .dot--done {
   background: var(--green);
+}
+.dot--idle {
+  background: var(--gray);
 }
 .dot--waiting {
   background: var(--amber);
@@ -973,10 +977,11 @@ button.cwd-item:hover {
   align-items: center;
   gap: 20px;
   height: 36px;
-  margin: 0 8px 8px;
+  margin: 0 8px 0;
   padding: 0 14px;
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
   /* Barra sólida que se despega del fondo, con un brillo sutil arriba. */
   background: var(--surface-2);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
