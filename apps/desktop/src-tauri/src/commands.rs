@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use infrastructure::{agent_shell_profile, command_exists, default_shell_profile};
 
-use application::{exit_event, ActivityTracker, AgentEventSink, AgentStates, KnownAgent};
+use application::{exit_event, ActivityTracker, AgentAdapters, AgentStates, KnownAgent};
 
 use crate::agent_events::TauriAgentEvents;
 use crate::collab_status::{self, CollabStatusPayload};
@@ -36,8 +36,9 @@ struct TerminalExitPayload {
 struct TauriOutputSink {
     app: AppHandle,
     activity: Arc<ActivityTracker>,
-    events: Arc<dyn AgentEventSink>,
+    events: Arc<TauriAgentEvents>,
     states: Arc<AgentStates>,
+    adapters: Arc<AgentAdapters>,
 }
 
 impl TerminalOutputSink for TauriOutputSink {
@@ -55,8 +56,10 @@ impl TerminalOutputSink for TauriOutputSink {
     fn exited(&self, terminal: TerminalId) {
         self.activity.forget(terminal);
         // Sin código de salida disponible en el puerto del PTY: se asume normal.
-        self.events.emit(terminal, exit_event(None));
+        self.events.emit_generic(terminal, exit_event(None));
         self.states.forget(terminal);
+        // Los adaptadores sueltan lo suyo (hooks, archivos temporales, sockets).
+        self.adapters.release(terminal);
         let _ = self.app.emit(
             TERMINAL_EXIT_EVENT,
             TerminalExitPayload {
@@ -94,12 +97,13 @@ pub fn open_shell(
     let agent = agent
         .map(|id| KnownAgent::from_id(&id).ok_or_else(|| format!("agente desconocido: {id}")))
         .transpose()?;
-    let events: Arc<dyn AgentEventSink> = Arc::new(TauriAgentEvents::new(
+    let events = Arc::new(TauriAgentEvents::new(
         app.clone(),
         state.agent_states.clone(),
     ));
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
         events: events.clone(),
+        adapters: state.adapters.clone(),
         app,
         activity: state.activity.clone(),
         states: state.agent_states.clone(),
@@ -132,6 +136,10 @@ pub fn open_shell(
         )
         .map_err(|e| e.to_string())?;
     if let Some(prepared) = prepared {
+        // Con adaptador rico, el estado lo manda él y no la actividad del PTY.
+        if prepared.is_rich() {
+            state.agent_states.mark_rich(id);
+        }
         prepared.bind(id, events);
     }
     Ok(OpenedTerminal {

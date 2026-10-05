@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use application::{activity_event, AgentEventSink};
+use application::activity_event;
 use domain::TerminalId;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -38,7 +38,7 @@ pub fn spawn(app: AppHandle) {
             let state = app.state::<AppState>();
             // Adaptador genérico: la actividad del PTY como `status_changed`.
             for (terminal, activity) in state.activity.tick(Instant::now()) {
-                events.emit(terminal, activity_event(activity));
+                events.emit_generic(terminal, activity_event(activity));
             }
             let detected = match state.detect_agents.execute(state.session_id) {
                 Ok(detected) => detected,

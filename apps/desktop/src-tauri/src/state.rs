@@ -3,14 +3,14 @@ use std::time::Duration;
 
 use application::ports::{ProcessInspector, PtyPort, RelayProbe, WorkspaceRepository};
 use application::{
-    ActivityTracker, AgentAdapters, AgentStates, AppError, CheckRelay, CloseTerminal,
+    ActivityTracker, AgentAdapter, AgentAdapters, AgentStates, AppError, CheckRelay, CloseTerminal,
     DetectTerminalAgents, InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal,
     SendTerminalInput, SessionCollaborators,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
-    FsDirectoryBrowser, FsRepositoryInspector, HttpRelayProbe, InMemoryWorkspaceRepository,
-    PortablePtyAdapter, SysinfoProcessInspector,
+    ClaudeCodeAdapter, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver, HttpRelayProbe,
+    InMemoryWorkspaceRepository, PortablePtyAdapter, SysinfoProcessInspector,
 };
 
 /// Silencio de un PTY a partir del cual se considera inactivo.
@@ -32,11 +32,22 @@ pub struct AppState {
     pub activity: Arc<ActivityTracker>,
     /// Último estado reducido de cada terminal con agente (ver `agent_events`).
     pub agent_states: Arc<AgentStates>,
-    /// Adaptadores de agentes registrados. Hoy ninguno: todos usan el camino genérico.
+    /// Adaptadores de agentes registrados; los demás agentes usan el camino genérico.
     /// Sumar uno (Claude Code, OpenCode...) es registrarlo acá.
-    pub adapters: AgentAdapters,
+    pub adapters: Arc<AgentAdapters>,
     pub check_relay: CheckRelay,
     pub session_collaborators: SessionCollaborators,
+}
+
+/// Adaptadores ricos disponibles. Si uno no puede arrancar (p. ej. no abre su
+/// puerto local) se omite: ese agente cae al camino genérico.
+fn agent_adapters() -> Vec<Arc<dyn AgentAdapter>> {
+    let mut adapters: Vec<Arc<dyn AgentAdapter>> = Vec::new();
+    match HookReceiver::start() {
+        Ok(receiver) => adapters.push(Arc::new(ClaudeCodeAdapter::new(receiver))),
+        Err(e) => eprintln!("adaptador de Claude Code deshabilitado: {e}"),
+    }
+    adapters
 }
 
 impl AppState {
@@ -69,7 +80,7 @@ impl AppState {
             inspect_branch: InspectBranch::new(Arc::new(FsRepositoryInspector::new())),
             activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
             agent_states: Arc::new(AgentStates::new()),
-            adapters: AgentAdapters::new(Vec::new()),
+            adapters: Arc::new(AgentAdapters::new(agent_adapters())),
             check_relay: CheckRelay::new(relay_probe),
             session_collaborators: SessionCollaborators::new(repo),
         })

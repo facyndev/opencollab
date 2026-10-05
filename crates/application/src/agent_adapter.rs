@@ -14,7 +14,7 @@
 //! salida del proceso como eventos. Para sumar un agente rico basta una
 //! implementación de [`AgentAdapter`] registrada en [`AgentAdapters`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use domain::TerminalId;
@@ -47,6 +47,10 @@ pub trait AgentAdapter: Send + Sync {
     fn prepare(&self) -> Result<LaunchAugmentation, PortError>;
     /// Con la terminal creada: empezar a emitir eventos de ese lanzamiento.
     fn bind(&self, token: &str, terminal: TerminalId, events: Arc<dyn AgentEventSink>);
+    /// La terminal se cerró: liberar lo que `prepare`/`bind` dejaron (archivos
+    /// temporales, listeners, hilos). Se llama para toda terminal, así que debe
+    /// ignorar las que no le pertenecen.
+    fn release(&self, _terminal: TerminalId) {}
 }
 
 /// Resultado de `AgentAdapters::prepare`: lo que hay que agregar al lanzamiento
@@ -65,6 +69,12 @@ impl PreparedLaunch {
             env: Vec::new(),
             binding: None,
         }
+    }
+
+    /// `true` si hay un adaptador rico: pasa a ser la fuente autoritativa del
+    /// estado de la terminal (ver `AgentStates::mark_rich`).
+    pub fn is_rich(&self) -> bool {
+        self.binding.is_some()
     }
 
     /// Con la terminal creada, activa el adaptador (si lo hay).
@@ -99,6 +109,15 @@ impl AgentAdapters {
     }
 }
 
+impl AgentAdapters {
+    /// Avisa a todos los adaptadores que la terminal se cerró.
+    pub fn release(&self, terminal: TerminalId) {
+        for adapter in &self.adapters {
+            adapter.release(terminal);
+        }
+    }
+}
+
 /// Adaptador genérico: la actividad del PTY como evento.
 pub fn activity_event(activity: Activity) -> AgentEvent {
     AgentEvent::StatusChanged {
@@ -125,6 +144,8 @@ pub fn exit_event(code: Option<i32>) -> AgentEvent {
 #[derive(Default)]
 pub struct AgentStates {
     states: Mutex<HashMap<TerminalId, AgentState>>,
+    /// Terminales con un adaptador rico: él decide el estado (ver `mark_rich`).
+    rich: Mutex<HashSet<TerminalId>>,
 }
 
 impl AgentStates {
@@ -144,9 +165,32 @@ impl AgentStates {
         Some(next)
     }
 
+    /// Marca que la terminal tiene un adaptador rico. Desde entonces es
+    /// autoritativo para `status_changed`: el estado inferido de la actividad del
+    /// PTY se ignora en `apply_generic` (la salida del proceso sigue valiendo).
+    pub fn mark_rich(&self, terminal: TerminalId) {
+        if let Ok(mut rich) = self.rich.lock() {
+            rich.insert(terminal);
+        }
+    }
+
+    /// Como `apply`, pero para eventos del camino genérico (actividad del PTY,
+    /// salida del proceso): si la terminal tiene un adaptador rico, los
+    /// `status_changed` se descartan porque ese adaptador sabe más.
+    pub fn apply_generic(&self, terminal: TerminalId, event: AgentEvent) -> Option<AgentState> {
+        let is_rich = self.rich.lock().ok()?.contains(&terminal);
+        if is_rich && matches!(event, AgentEvent::StatusChanged { .. }) {
+            return None;
+        }
+        self.apply(terminal, event)
+    }
+
     pub fn forget(&self, terminal: TerminalId) {
         if let Ok(mut states) = self.states.lock() {
             states.remove(&terminal);
+        }
+        if let Ok(mut rich) = self.rich.lock() {
+            rich.remove(&terminal);
         }
     }
 }
@@ -270,5 +314,73 @@ mod tests {
                 }
             )]
         );
+    }
+
+    #[test]
+    fn a_rich_terminal_ignores_generic_status_but_keeps_generic_exit() {
+        let states = AgentStates::new();
+        let t = TerminalId::new();
+        let working = AgentEvent::StatusChanged {
+            status: AgentStatus::Working,
+        };
+        states.mark_rich(t);
+        // El adaptador rico manda: la actividad del PTY no mueve el estado.
+        assert_eq!(states.apply_generic(t, working.clone()), None);
+        // Lo del adaptador rico sí se aplica.
+        assert!(states.apply(t, working.clone()).is_some());
+        // La salida del proceso sigue valiendo aunque venga por el camino genérico.
+        let done = states.apply_generic(t, AgentEvent::Completed).unwrap();
+        assert!(done.completed);
+    }
+
+    #[test]
+    fn a_terminal_without_rich_source_applies_generic_status() {
+        let states = AgentStates::new();
+        let t = TerminalId::new();
+        let working = AgentEvent::StatusChanged {
+            status: AgentStatus::Working,
+        };
+        assert!(states.apply_generic(t, working).is_some());
+    }
+
+    #[test]
+    fn forgetting_a_terminal_drops_its_rich_mark() {
+        let states = AgentStates::new();
+        let t = TerminalId::new();
+        states.mark_rich(t);
+        states.forget(t);
+        let working = AgentEvent::StatusChanged {
+            status: AgentStatus::Working,
+        };
+        assert!(states.apply_generic(t, working).is_some());
+    }
+
+    #[test]
+    fn prepared_launch_reports_whether_it_has_a_rich_adapter() {
+        let adapters = AgentAdapters::new(vec![Arc::new(FakeAdapter)]);
+        assert!(adapters.prepare(KnownAgent::ClaudeCode).unwrap().is_rich());
+        assert!(!adapters.prepare(KnownAgent::Codex).unwrap().is_rich());
+    }
+
+    #[test]
+    fn release_reaches_every_adapter() {
+        let released = Arc::new(Mutex::new(Vec::new()));
+        struct Releasing(Arc<Mutex<Vec<TerminalId>>>);
+        impl AgentAdapter for Releasing {
+            fn agent(&self) -> KnownAgent {
+                KnownAgent::ClaudeCode
+            }
+            fn prepare(&self) -> Result<LaunchAugmentation, PortError> {
+                Ok(LaunchAugmentation::default())
+            }
+            fn bind(&self, _: &str, _: TerminalId, _: Arc<dyn AgentEventSink>) {}
+            fn release(&self, terminal: TerminalId) {
+                self.0.lock().unwrap().push(terminal);
+            }
+        }
+        let adapters = AgentAdapters::new(vec![Arc::new(Releasing(released.clone()))]);
+        let t = TerminalId::new();
+        adapters.release(t);
+        assert_eq!(*released.lock().unwrap(), vec![t]);
     }
 }

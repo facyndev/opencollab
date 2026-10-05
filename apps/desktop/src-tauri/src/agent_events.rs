@@ -32,9 +32,9 @@ impl TauriAgentEvents {
     }
 }
 
-impl AgentEventSink for TauriAgentEvents {
-    fn emit(&self, terminal: TerminalId, event: AgentEvent) {
-        if let Some(state) = self.states.apply(terminal, event) {
+impl TauriAgentEvents {
+    fn publish(&self, terminal: TerminalId, state: Option<AgentState>) {
+        if let Some(state) = state {
             let _ = self.app.emit(
                 TERMINAL_AGENT_STATE_EVENT,
                 TerminalAgentStatePayload {
@@ -43,5 +43,20 @@ impl AgentEventSink for TauriAgentEvents {
                 },
             );
         }
+    }
+
+    /// Camino genérico (actividad del PTY, salida del proceso): si la terminal
+    /// tiene un adaptador rico, su `status_changed` se descarta.
+    pub fn emit_generic(&self, terminal: TerminalId, event: AgentEvent) {
+        let state = self.states.apply_generic(terminal, event);
+        self.publish(terminal, state);
+    }
+}
+
+impl AgentEventSink for TauriAgentEvents {
+    /// Camino de los adaptadores ricos: autoritativo.
+    fn emit(&self, terminal: TerminalId, event: AgentEvent) {
+        let state = self.states.apply(terminal, event);
+        self.publish(terminal, state);
     }
 }
