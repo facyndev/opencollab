@@ -1,4 +1,4 @@
-//! Piezas puras del wiring de subagentes: DTOs del wire hacia el frontend,
+//! Piezas puras del wiring de sesiones de agentes: DTOs del wire hacia el frontend,
 //! mapeos de estado y el decorador que exige el binario `opencollab-hook`.
 //! Los DTOs viven acá (no en `application`/`domain`, que no conocen serde).
 
@@ -6,46 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use application::ports::{HookInstaller, PortError};
-use application::{
-    HookStatus, KnownAgent, RawSubagentEvent, Subagent, SubagentStatus, TrackSubagents,
-};
+use application::{HookStatus, KnownAgent, RawSessionEvent, TrackAgentSessionTitle};
 use domain::TerminalId;
 use serde::Serialize;
 
-pub const TERMINAL_SUBAGENTS_EVENT: &str = "terminal-subagents";
+pub const TERMINAL_AGENT_SESSION_EVENT: &str = "terminal-agent-session";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SubagentDto {
-    pub id: String,
-    pub parent_id: Option<String>,
-    pub agent: &'static str,
-    pub kind: Option<String>,
-    pub label: Option<String>,
-    /// `running` | `completed` | `failed`.
-    pub status: &'static str,
-}
-
-fn subagent_dto(s: &Subagent) -> SubagentDto {
-    SubagentDto {
-        id: s.id.clone(),
-        parent_id: s.parent_id.clone(),
-        agent: s.agent.id(),
-        kind: s.kind.clone(),
-        label: s.label.clone(),
-        status: match s.status {
-            SubagentStatus::Running => "running",
-            SubagentStatus::Completed => "completed",
-            SubagentStatus::Failed => "failed",
-        },
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminalSubagentsPayload {
+pub struct TerminalAgentSessionPayload {
     pub terminal_id: String,
-    pub subagents: Vec<SubagentDto>,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -56,13 +27,6 @@ pub struct HookStatusDto {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-}
-
-pub fn subagents_payload(terminal: TerminalId, subagents: &[Subagent]) -> TerminalSubagentsPayload {
-    TerminalSubagentsPayload {
-        terminal_id: terminal.to_string(),
-        subagents: subagents.iter().map(subagent_dto).collect(),
-    }
 }
 
 pub fn hook_status_dto(agent: KnownAgent, status: Result<HookStatus, PortError>) -> HookStatusDto {
@@ -99,14 +63,17 @@ pub fn hook_binary_path(dir: &Path) -> PathBuf {
 }
 
 /// Lo que hace el sink del receptor: aplica el evento en el hub y devuelve el
-/// payload a emitir si el árbol cambió. Los errores se loguean y se ignoran.
+/// payload a emitir si el título cambió. Los errores se loguean y se ignoran.
 pub fn apply_hook_event(
-    hub: &TrackSubagents,
-    event: RawSubagentEvent,
-) -> Option<TerminalSubagentsPayload> {
-    let terminal = event.terminal;
-    match hub.handle(event) {
-        Ok(Some(snapshot)) => Some(subagents_payload(terminal, &snapshot)),
+    tracker: &TrackAgentSessionTitle,
+    event: RawSessionEvent,
+) -> Option<TerminalAgentSessionPayload> {
+    let terminal_id = event.terminal_id;
+    match tracker.handle(event) {
+        Ok(Some(title)) => Some(TerminalAgentSessionPayload {
+            terminal_id: terminal_id.to_string(),
+            title: Some(title),
+        }),
         Ok(None) => None,
         Err(e) => {
             eprintln!("evento de hook ignorado: {e}");
@@ -115,15 +82,16 @@ pub fn apply_hook_event(
     }
 }
 
-/// La terminal se cerró: descarta su árbol. Devuelve un payload vacío solo si
-/// tenía subagentes (para que la UI los limpie).
+/// La terminal se cerró: descarta su título. Devuelve un payload con `title: None`
+/// solo si tenía título guardado (para que la UI lo limpie).
 pub fn forget_terminal(
-    hub: &TrackSubagents,
+    tracker: &TrackAgentSessionTitle,
     terminal: TerminalId,
-) -> Option<TerminalSubagentsPayload> {
-    let had_subagents = !hub.snapshot(terminal).is_empty();
-    hub.forget(terminal);
-    had_subagents.then(|| subagents_payload(terminal, &[]))
+) -> Option<TerminalAgentSessionPayload> {
+    tracker.forget(terminal).then(|| TerminalAgentSessionPayload {
+        terminal_id: terminal.to_string(),
+        title: None,
+    })
 }
 
 /// Decorador: `install` falla con un mensaje claro si falta el binario del
@@ -167,61 +135,49 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use application::ports::SubagentEventTranslator;
+    use application::ports::SessionTitleTranslator;
     use infrastructure::{ClaudeCodeTranslator, CodexTranslator, HookReceiver, OpenCodeTranslator};
     use serde_json::json;
 
     use super::*;
 
-    fn hub() -> TrackSubagents {
-        let translators: Vec<Arc<dyn SubagentEventTranslator>> = vec![
+    fn tracker() -> TrackAgentSessionTitle {
+        let translators: Vec<Arc<dyn SessionTitleTranslator>> = vec![
             Arc::new(ClaudeCodeTranslator),
             Arc::new(OpenCodeTranslator),
             Arc::new(CodexTranslator),
         ];
-        TrackSubagents::new(translators)
+        TrackAgentSessionTitle::new(translators)
     }
 
-    fn sub(id: &str, status: SubagentStatus) -> Subagent {
-        Subagent {
-            id: id.into(),
-            parent_id: Some("p".into()),
-            agent: KnownAgent::ClaudeCode,
-            kind: Some("Explore".into()),
-            label: None,
-            status,
-        }
-    }
+    const CLAUDE_PROMPT: &str = r#"{"session_id":"s","hook_event_name":"UserPromptSubmit","prompt":"Fix authentication bug"}"#;
 
-    const CLAUDE_START: &str = r#"{"session_id":"s","hook_event_name":"SubagentStart","agent_id":"a1","agent_type":"Explore","description":"buscar foo"}"#;
-
-    fn raw(terminal: TerminalId, payload: &str) -> RawSubagentEvent {
-        RawSubagentEvent {
-            terminal,
+    fn raw(terminal_id: TerminalId, payload: &str) -> RawSessionEvent {
+        RawSessionEvent {
+            terminal_id,
             agent: KnownAgent::ClaudeCode,
             payload: payload.into(),
         }
     }
 
     #[test]
-    fn payload_serializes_camel_case_with_string_ids_and_status() {
+    fn payload_serializes_camel_case_with_string_id_and_title() {
         let terminal = TerminalId::new();
-        let value = serde_json::to_value(subagents_payload(
-            terminal,
-            &[
-                sub("a", SubagentStatus::Running),
-                sub("b", SubagentStatus::Completed),
-                sub("c", SubagentStatus::Failed),
-            ],
-        ))
+        let value = serde_json::to_value(TerminalAgentSessionPayload {
+            terminal_id: terminal.to_string(),
+            title: Some("Implement login".into()),
+        })
         .unwrap();
         assert_eq!(value["terminalId"], json!(terminal.to_string()));
-        assert_eq!(
-            value["subagents"][0],
-            json!({"id":"a","parentId":"p","agent":"claude-code","kind":"Explore","label":null,"status":"running"})
-        );
-        assert_eq!(value["subagents"][1]["status"], "completed");
-        assert_eq!(value["subagents"][2]["status"], "failed");
+        assert_eq!(value["title"], json!("Implement login"));
+
+        let none_value = serde_json::to_value(TerminalAgentSessionPayload {
+            terminal_id: terminal.to_string(),
+            title: None,
+        })
+        .unwrap();
+        assert_eq!(none_value["terminalId"], json!(terminal.to_string()));
+        assert_eq!(none_value["title"], json!(null));
     }
 
     #[test]
@@ -324,51 +280,50 @@ mod tests {
     }
 
     #[test]
-    fn apply_hook_event_returns_payload_only_when_tree_changes() {
-        let hub = hub();
+    fn apply_hook_event_returns_payload_when_title_changes() {
+        let tr = tracker();
         let terminal = TerminalId::new();
-        let first = apply_hook_event(&hub, raw(terminal, CLAUDE_START)).unwrap();
+        let first = apply_hook_event(&tr, raw(terminal, CLAUDE_PROMPT)).unwrap();
         assert_eq!(first.terminal_id, terminal.to_string());
-        assert_eq!(first.subagents.len(), 1);
-        assert_eq!(first.subagents[0].status, "running");
-        assert_eq!(first.subagents[0].label.as_deref(), Some("buscar foo"));
-        assert_eq!(apply_hook_event(&hub, raw(terminal, CLAUDE_START)), None);
+        assert_eq!(first.title.as_deref(), Some("Fix authentication bug"));
+        // Mismo prompt no vuelve a emitir
+        assert_eq!(apply_hook_event(&tr, raw(terminal, CLAUDE_PROMPT)), None);
     }
 
     #[test]
-    fn apply_hook_event_swallows_hub_errors() {
-        let hub = hub();
+    fn apply_hook_event_swallows_tracker_errors() {
+        let tr = tracker();
         assert_eq!(
-            apply_hook_event(&hub, raw(TerminalId::new(), "no es json")),
+            apply_hook_event(&tr, raw(TerminalId::new(), "no es json")),
             None
         );
-        let no_translator = TrackSubagents::new(vec![]);
+        let no_translator = TrackAgentSessionTitle::new(vec![]);
         assert_eq!(
-            apply_hook_event(&no_translator, raw(TerminalId::new(), CLAUDE_START)),
+            apply_hook_event(&no_translator, raw(TerminalId::new(), CLAUDE_PROMPT)),
             None
         );
     }
 
     #[test]
-    fn forget_terminal_emits_empty_only_if_it_had_subagents() {
-        let hub = hub();
+    fn forget_terminal_emits_none_only_if_it_had_a_title() {
+        let tr = tracker();
         let terminal = TerminalId::new();
-        assert_eq!(forget_terminal(&hub, terminal), None);
-        apply_hook_event(&hub, raw(terminal, CLAUDE_START)).unwrap();
-        let cleared = forget_terminal(&hub, terminal).unwrap();
+        assert_eq!(forget_terminal(&tr, terminal), None);
+        apply_hook_event(&tr, raw(terminal, CLAUDE_PROMPT)).unwrap();
+        let cleared = forget_terminal(&tr, terminal).unwrap();
         assert_eq!(cleared.terminal_id, terminal.to_string());
-        assert!(cleared.subagents.is_empty());
-        assert!(hub.snapshot(terminal).is_empty());
+        assert_eq!(cleared.title, None);
+        assert_eq!(tr.title(terminal), None);
     }
 
     #[test]
-    fn real_receiver_feeds_hub_and_produces_payload_for_the_right_terminal() {
-        let hub = Arc::new(hub());
+    fn real_receiver_feeds_tracker_and_produces_payload_for_the_right_terminal() {
+        let tr = Arc::new(tracker());
         let (tx, rx) = mpsc::channel();
         let receiver = {
-            let hub = hub.clone();
+            let tr = tr.clone();
             HookReceiver::start(move |event| {
-                if let Some(p) = apply_hook_event(&hub, event) {
+                if let Some(p) = apply_hook_event(&tr, event) {
                     let _ = tx.send(p);
                 }
             })
@@ -383,9 +338,9 @@ mod tests {
             .unwrap()
             .to_owned();
         let request = format!(
-            "POST /hook/claude-code HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {}\r\nX-OpenCollab-Terminal: {terminal}\r\nContent-Length: {}\r\n\r\n{CLAUDE_START}",
+            "POST /hook/claude-code HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {}\r\nX-OpenCollab-Terminal: {terminal}\r\nContent-Length: {}\r\n\r\n{CLAUDE_PROMPT}",
             receiver.token(),
-            CLAUDE_START.len()
+            CLAUDE_PROMPT.len()
         );
         let mut stream = TcpStream::connect(&addr).unwrap();
         stream.write_all(request.as_bytes()).unwrap();
@@ -394,6 +349,6 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 204"), "{response}");
         let payload = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(payload.terminal_id, terminal.to_string());
-        assert_eq!(payload.subagents[0].id, "a1");
+        assert_eq!(payload.title.as_deref(), Some("Fix authentication bug"));
     }
 }

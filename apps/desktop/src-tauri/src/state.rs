@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use application::ports::{
-    HookInstaller, ProcessInspector, PtyPort, SubagentEventTranslator, WorkspaceRepository,
+    HookInstaller, ProcessInspector, PtyPort, SessionTitleTranslator, WorkspaceRepository,
 };
 use application::{
     AppError, CloseTerminal, DetectTerminalAgents, HookEndpoint, InspectHookInstallation,
     InstallAgentHooks, LaunchTerminal, ListSubdirectories, ResizeTerminal, SendTerminalInput,
-    TrackSubagents, UninstallAgentHooks,
+    TrackAgentSessionTitle, UninstallAgentHooks,
 };
 use domain::{Session, SessionId, UserId, Workspace};
 use infrastructure::{
@@ -17,8 +17,8 @@ use infrastructure::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::subagents::{
-    apply_hook_event, hook_binary_path, RequireHookBinary, TERMINAL_SUBAGENTS_EVENT,
+use crate::agent_session::{
+    apply_hook_event, hook_binary_path, RequireHookBinary, TERMINAL_AGENT_SESSION_EVENT,
 };
 
 /// Dependencias cableadas de la app. Mientras no haya cuentas ni persistencia,
@@ -32,7 +32,7 @@ pub struct AppState {
     pub close_terminal: CloseTerminal,
     pub detect_agents: DetectTerminalAgents,
     pub list_subdirectories: ListSubdirectories,
-    pub subagents: Arc<TrackSubagents>,
+    pub agent_sessions: Arc<TrackAgentSessionTitle>,
     pub inspect_hooks: InspectHookInstallation,
     pub install_hooks: InstallAgentHooks,
     pub uninstall_hooks: UninstallAgentHooks,
@@ -41,7 +41,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// `app` se necesita para emitir `terminal-subagents` desde el hilo del
+    /// `app` se necesita para emitir `terminal-agent-session` desde el hilo del
     /// receptor, por eso se arma en `setup`, cuando el handle ya existe.
     pub fn bootstrap(app: &AppHandle) -> Result<Self, AppError> {
         let repo: Arc<dyn WorkspaceRepository> = Arc::new(InMemoryWorkspaceRepository::new());
@@ -55,20 +55,20 @@ impl AppState {
         repo.save_workspace(workspace)?;
         repo.save_session(session)?;
 
-        let translators: Vec<Arc<dyn SubagentEventTranslator>> = vec![
+        let translators: Vec<Arc<dyn SessionTitleTranslator>> = vec![
             Arc::new(ClaudeCodeTranslator),
             Arc::new(OpenCodeTranslator),
             Arc::new(CodexTranslator),
         ];
-        let subagents = Arc::new(TrackSubagents::new(translators));
+        let agent_sessions = Arc::new(TrackAgentSessionTitle::new(translators));
 
         // Si el receptor no arranca, las terminales se lanzan sin endpoint: la
-        // app sigue funcionando, solo sin subagentes en vivo.
+        // app sigue funcionando, solo sin títulos de agentes en vivo.
         let hook_receiver = {
-            let (hub, app) = (subagents.clone(), app.clone());
+            let (tracker, app) = (agent_sessions.clone(), app.clone());
             HookReceiver::start(move |event| {
-                if let Some(payload) = apply_hook_event(&hub, event) {
-                    let _ = app.emit(TERMINAL_SUBAGENTS_EVENT, payload);
+                if let Some(payload) = apply_hook_event(&tracker, event) {
+                    let _ = app.emit(TERMINAL_AGENT_SESSION_EVENT, payload);
                 }
             })
             .map_err(|e| eprintln!("receptor de hooks no disponible: {e}"))
@@ -92,7 +92,7 @@ impl AppState {
             close_terminal: CloseTerminal::new(repo.clone(), pty.clone()),
             detect_agents: DetectTerminalAgents::new(repo, pty, inspector),
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
-            subagents,
+            agent_sessions,
             inspect_hooks: InspectHookInstallation::new(installers.clone()),
             install_hooks: InstallAgentHooks::new(installers.clone()),
             uninstall_hooks: UninstallAgentHooks::new(installers),

@@ -9,13 +9,13 @@ use tauri::{AppHandle, Emitter, State};
 
 use infrastructure::default_shell_profile;
 
-use application::TrackSubagents;
+use application::TrackAgentSessionTitle;
 
-use crate::state::AppState;
-use crate::subagents::{
-    forget_terminal, hook_status_dto, parse_agent, subagents_payload, HookStatusDto,
-    TerminalSubagentsPayload, TERMINAL_SUBAGENTS_EVENT,
+use crate::agent_session::{
+    forget_terminal, hook_status_dto, parse_agent, HookStatusDto,
+    TERMINAL_AGENT_SESSION_EVENT,
 };
+use crate::state::AppState;
 
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal-output";
 pub const TERMINAL_EXIT_EVENT: &str = "terminal-exit";
@@ -36,7 +36,7 @@ struct TerminalExitPayload {
 /// Reenvía la salida de los PTY al frontend como eventos.
 struct TauriOutputSink {
     app: AppHandle,
-    subagents: Arc<TrackSubagents>,
+    agent_sessions: Arc<TrackAgentSessionTitle>,
 }
 
 impl TerminalOutputSink for TauriOutputSink {
@@ -51,7 +51,7 @@ impl TerminalOutputSink for TauriOutputSink {
     }
 
     fn exited(&self, terminal: TerminalId) {
-        emit_forgotten(&self.app, &self.subagents, terminal);
+        emit_forgotten(&self.app, &self.agent_sessions, terminal);
         let _ = self.app.emit(
             TERMINAL_EXIT_EVENT,
             TerminalExitPayload {
@@ -61,10 +61,10 @@ impl TerminalOutputSink for TauriOutputSink {
     }
 }
 
-/// La terminal terminó: descarta sus subagentes y avisa a la UI si tenía.
-fn emit_forgotten(app: &AppHandle, hub: &TrackSubagents, terminal: TerminalId) {
-    if let Some(payload) = forget_terminal(hub, terminal) {
-        let _ = app.emit(TERMINAL_SUBAGENTS_EVENT, payload);
+/// La terminal terminó: descarta su sesión de agente y avisa a la UI si tenía.
+fn emit_forgotten(app: &AppHandle, tracker: &TrackAgentSessionTitle, terminal: TerminalId) {
+    if let Some(payload) = forget_terminal(tracker, terminal) {
+        let _ = app.emit(TERMINAL_AGENT_SESSION_EVENT, payload);
     }
 }
 
@@ -93,7 +93,7 @@ pub fn open_shell(
 ) -> Result<OpenedTerminal, String> {
     let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
         app,
-        subagents: state.subagents.clone(),
+        agent_sessions: state.agent_sessions.clone(),
     });
     let profile = default_shell_profile(cwd.as_deref().map(std::path::Path::new));
     let name = profile.name.clone();
@@ -157,22 +157,19 @@ pub fn close_terminal(
         .close_terminal
         .execute(state.local_user, state.session_id, terminal)
         .map_err(|e| e.to_string())?;
-    emit_forgotten(&app, &state.subagents, terminal);
+    emit_forgotten(&app, &state.agent_sessions, terminal);
     Ok(())
 }
 
-/// Foto inicial de los subagentes de una terminal (los cambios llegan por el
-/// evento `terminal-subagents`).
+/// Título de sesión activo de una terminal (los cambios llegan por el
+/// evento `terminal-agent-session`).
 #[tauri::command]
-pub fn subagent_snapshot(
+pub fn agent_session_title(
     state: State<'_, AppState>,
     terminal_id: String,
-) -> Result<TerminalSubagentsPayload, String> {
+) -> Result<Option<String>, String> {
     let terminal = parse_terminal(&terminal_id)?;
-    Ok(subagents_payload(
-        terminal,
-        &state.subagents.snapshot(terminal),
-    ))
+    Ok(state.agent_sessions.title(terminal))
 }
 
 // Los comandos de hooks leen y escriben archivos de configuración: `async`
