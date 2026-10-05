@@ -88,7 +88,7 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
       sobre directorios temporales (merge sin pisar, idempotencia, uninstall).
 - [x] **T6 — Wiring en desktop**: hub, evento `terminal-subagents`, comandos de
       estado/instalación.
-- [ ] **T7 — Frontend**: árbol de subagentes con estado en el sidebar, panel de
+- [x] **T7 — Frontend**: árbol de subagentes con estado en el sidebar, panel de
       instalación con confirmación, mock y escenario E2E.
 - [ ] **T8 — Verificación real y docs**: probar con cada agente instalado,
       actualizar `AGENTS.md`.
@@ -252,12 +252,34 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   infrastructure 79, 0 fallan), `pnpm test` 23; escritor: clippy, `pnpm
   build` y `pnpm test:e2e` en verde. No se corrió la app real.
 
+- T7: ruta **delegada** (frontend completo: árbol de subagentes con estado en el
+  sidebar, panel de instalación con confirmación, mock y escenario E2E). Rama
+  `feature/subagent-adapters-t7`. Archivos: `apps/desktop/src/subagents.ts`
+  (`buildSubagentTree` con soporte para raíces y anidamiento jerárquico),
+  `apps/desktop/src/subagents.test.ts` (5 tests nuevos de Vitest),
+  `apps/desktop/src/components/SettingsModal.tsx` (consulta de hooks, lista de
+  los 4 agentes con badges, confirmación explícita antes de modificar disco con
+  `installAgentHooks`/`uninstallAgentHooks`, feedback de resultado y atajos
+  Escape/backdrop/✕), `apps/desktop/src/components/Sidebar.tsx` (renderizado de
+  subagentes con `TerminalIcon`, etiquetas y puntos de estado; apertura de
+  SettingsModal), `apps/desktop/src/App.tsx` (suscripción a `onTerminalSubagents`
+  y cleanup en `removePane`), `apps/desktop/src/components/TerminalPane.tsx` y
+  `apps/desktop/src/model.ts` (propagación de `terminalId` en `PaneMeta` para
+  enlazar eventos con el hilo del sidebar), `apps/desktop/src/styles.css`
+  (estilos de modal, badges de hooks, diálogo de confirmación y feedback),
+  `apps/desktop/e2e/scenarios/subagents-and-hooks.mjs` y `apps/desktop/e2e/run.mjs`
+  (escenario E2E con 16 verificaciones que cubren subagentes en vivo, anidamiento,
+  foco por clic, apertura de Settings, badges, confirmación de instalación y
+  desinstalación sin llamadas prematuras, y cierre).
+  Verificación observada: `cargo fmt --all --check` limpio; `cargo clippy
+  --workspace --all-targets -- -D warnings` limpio; `cargo test --workspace`
+  (86 infrastructure + 11 desktop + 45 application + domain + protocol, 0 fallan);
+  `pnpm test` (33 tests pasando en 4 archivos); `pnpm build` (typecheck y bundle
+  Vite sin errores); `pnpm test:e2e` (los 6 escenarios pasando con código 0).
+  Commit `2842692`.
+
 ## Siguiente paso
 
-T7 (frontend: árbol de subagentes en el sidebar, panel de instalación con
-confirmación, escenario E2E). Ojo: la pila T4–T6 sale de `2ac32e6` y no
-incluye la status bar de `develop`; `state.rs`/`commands.rs`/`main.rs` pueden
-chocar al integrar. Nota: los
-formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
-JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
-`application`.
+T8 — Verificación real y docs: probar con cada agente instalado (Claude Code,
+OpenCode, Codex, Antigravity CLI), empaquetado del sidecar `opencollab-hook`
+como `externalBin` en Tauri, y actualización de `AGENTS.md`.
