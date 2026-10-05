@@ -160,6 +160,19 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   puede colgarse si falla el self-connect; R3-003 faltan tests de cuerpo en
   varias lecturas, sin `Content-Length`, cuerpo corto y header de terminal
   ausente; R3-004 404/405 antes de 401 y `Bearer` sensible a mayúsculas.
+- T3 (correcciones R3-001..003, autorizadas por el usuario): ruta **delegada**
+  (un archivo no trivial con diseño de concurrencia). Solo
+  `hook_receiver.rs` (+280/−30). R3-002: listener no bloqueante con sondeo de
+  10 ms, sin self-connect. R3-001: tope de 32 conexiones (`503` inmediato al
+  excederlo, guard `Slot`), compuerta `Mutex<bool>` que llama al sink bajo el
+  lock: tras `shutdown` el sink nunca se invoca (los workers no se joinean
+  para no reintroducir el cuelgue; terminan por timeout). R3-003: 8 tests
+  nuevos; RED observado en `sink_is_never_called_after_shutdown_returns` y
+  `connections_over_the_cap_get_503`, el resto verde al llegar (cubren
+  comportamiento existente). Contrato HTTP sin cambios salvo `503`.
+  Verificación: el padre re-corrió fmt check, clippy y `cargo test
+  --workspace` (infrastructure 46, 0 fallan); el escritor corrió los tests del
+  receptor 3 veces sin intermitencias. R3-004 queda pendiente.
 
 ## Siguiente paso
 
