@@ -10,6 +10,27 @@ use crate::agent_detection::KnownAgent;
 use crate::error::AppError;
 use crate::ports::SubagentEventTranslator;
 
+/// Dónde y con qué token los hooks de los agentes reportan sus eventos. Se
+/// inyecta en el entorno de cada terminal para que el hook salga ya atado a ella.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookEndpoint {
+    pub url: String,
+    pub token: String,
+}
+
+impl HookEndpoint {
+    pub const ENV_TERMINAL_ID: &'static str = "OPENCOLLAB_TERMINAL_ID";
+    pub const ENV_URL: &'static str = "OPENCOLLAB_HOOK_URL";
+    pub const ENV_TOKEN: &'static str = "OPENCOLLAB_HOOK_TOKEN";
+
+    pub fn new(url: impl Into<String>, token: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            token: token.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubagentStatus {
     Running,

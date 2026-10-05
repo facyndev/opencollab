@@ -9,7 +9,8 @@ mod use_cases;
 pub use agent_detection::{AgentTree, KnownAgent};
 pub use error::AppError;
 pub use subagents::{
-    RawSubagentEvent, Subagent, SubagentChange, SubagentStatus, SubagentTree, TrackSubagents,
+    HookEndpoint, RawSubagentEvent, Subagent, SubagentChange, SubagentStatus, SubagentTree,
+    TrackSubagents,
 };
 pub use use_cases::{
     AccessChange, ChangeParticipantAccess, CloseTerminal, DetectTerminalAgents, LaunchTerminal,

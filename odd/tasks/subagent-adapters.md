@@ -77,12 +77,12 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
 
 ## Tareas
 
-- [ ] **T1 — Modelo y hub en `application`.** `SubagentEvent`, `SubagentTree`,
+- [x] **T1 — Modelo y hub en `application`.** `SubagentEvent`, `SubagentTree`,
       puerto `SubagentEventTranslator`, caso de uso `TrackSubagents` con tests
       (inicio, fin, error, anidamiento por `parent_id`, terminal cerrada).
 - [x] **T2 — Traductores en `infrastructure`.** Claude Code, OpenCode, Codex,
       con fixtures de payloads documentados.
-- [ ] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
+- [x] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
 - [ ] **T4 — Sidecar `opencollab-hook`.**
 - [ ] **T5 — Instaladores** (puerto `HookInstaller` + 4 adaptadores) con tests
       sobre directorios temporales (merge sin pisar, idempotencia, uninstall).
@@ -139,9 +139,24 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   en `workspace.dependencies`, solo se referenció desde
   `crates/infrastructure/Cargo.toml`.
 
+- T3: ruta **delegada** (disparador de escritor: receptor + inyección en 2+
+  archivos no triviales). Rama `feature/subagent-adapters-t3` (apilada sobre
+  T2). `crates/infrastructure/src/hook_receiver.rs` (HTTP/1.1 a mano, sync,
+  `127.0.0.1:0`, hilo por conexión con timeout 2 s, token uuid). Contrato para
+  T4/T5: `POST /hook/<KnownAgent::id>`, `Authorization: Bearer <token>`,
+  `X-OpenCollab-Terminal: <uuid>`, cuerpo crudo ≤ 1 MiB; 204 / 400 / 401 / 404
+  / 405 / 413. Sink `Fn(RawSubagentEvent)`. Inyección en
+  `LaunchTerminal::execute` vía builder `with_hook_endpoint(HookEndpoint)`:
+  solo el perfil que va al PTY lleva las 3 variables (el token no se guarda en
+  la sesión). `KnownAgent::from_id` agregado. TDD: RED observado (errores de
+  compilación E0599/E0433/E0432 por APIs inexistentes) → GREEN. Verificación:
+  escritor reportó fmt/clippy/test limpios; el padre re-corrió `cargo fmt
+  --all --check` (limpio) y `cargo test --workspace` (application 40,
+  infrastructure 38, 0 fallan).
+
 ## Siguiente paso
 
-T3 (receptor HTTP local + inyección de entorno en el PTY). Nota para T5: los
+T4 (sidecar `opencollab-hook`, siguiendo el contrato HTTP de T3). Nota para T5: los
 formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
 JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
 `application`.

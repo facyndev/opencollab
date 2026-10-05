@@ -11,4 +11,5 @@ domain.workspace = true
 application.workspace = true
 portable-pty.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 sysinfo.workspace = true

@@ -1,6 +1,7 @@
 //! Adaptadores concretos de los puertos definidos en `application`.
 
 mod directory_browser;
+mod hook_receiver;
 mod memory_repository;
 mod process_inspector;
 mod pty;
@@ -8,6 +9,7 @@ mod shell;
 mod subagent_translators;
 
 pub use directory_browser::FsDirectoryBrowser;
+pub use hook_receiver::HookReceiver;
 pub use memory_repository::InMemoryWorkspaceRepository;
 pub use process_inspector::SysinfoProcessInspector;
 pub use pty::PortablePtyAdapter;
