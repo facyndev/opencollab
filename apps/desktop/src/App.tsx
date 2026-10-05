@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "./components/Button";
 import { Sidebar } from "./components/Sidebar";
+import { Plus } from "./icons";
 import { StatusBar } from "./components/StatusBar";
 import { TerminalPane } from "./components/TerminalPane";
 import { TopBar } from "./components/TopBar";
@@ -282,9 +284,9 @@ export function App() {
           {activeSession.panes.length === 0 && (
             <div className="grid-empty">
               <p>Esta sesión no tiene terminales.</p>
-              <button type="button" className="btn btn--primary" onClick={() => addTerminal()}>
+              <Button variant="primary" icon={<Plus />} onClick={() => addTerminal()}>
                 New terminal
-              </button>
+              </Button>
             </div>
           )}
         </main>
