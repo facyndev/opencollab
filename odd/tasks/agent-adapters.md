@@ -39,8 +39,8 @@ Rejected: ACP (replaces the TUI; Claude via Agent SDK with claude.ai login is no
 
 - [x] **T1 — `AgentEvent` contract, reducer and generic adapter.** Replace the ad-hoc activity event with `AgentEvent`s; sidebar renders `AgentState`. Route: delegated writer. Commit `3fd8057`.
 - [x] **T2 — Launch agents as profiles from the app.** New-terminal menu offers detected/known agents; the agent runs inside the default shell so the pane returns to the shell on exit; adapters can augment args/env. Route: delegated writer. Commit `1e4bc34`.
-- [ ] **T3 — Claude Code adapter (`--settings` HTTP hooks).** Route: delegated writer.
-- [ ] **T4 — OpenCode adapter (`--port` + SSE `/event`).** Route: delegated writer.
+- [x] **T3 — Claude Code adapter (`--settings` HTTP hooks).** Route: delegated writer. Commit `d4342e8`.
+- [x] **T4 — OpenCode adapter (`--port` + SSE `/event`).** Route: delegated writer. Commit `13976a3`.
 - [ ] **T5 — Codex adapter (app-server + `--remote`).** Deferred until Codex quota renews (2026-10-16) to verify tool/approval events.
 
 ## Acceptance criteria
@@ -67,8 +67,16 @@ TDD: on (source: user global config). RDD: off (global). Delivery: ask-on-risk; 
 - T2 `1e4bc34`: `agent_shell_profile` (infrastructure) chains the agent inside the default shell (PowerShell: `; cmd 'args'` after the OSC 7 integration; Unix: `-c 'cmd; exec $SHELL'`), `command_exists` (PATH + PATHEXT), `KnownAgent::launch_command`, `open_shell(agent?)`, `available_agents`, `AppState.adapters` (empty: T3/T4 implement `AgentAdapter` and register there). Menu `+` lists installed agents; e2e `launch-agent`.
 - Route evidence (T1, T2): delegated writer (multi-file Rust + frontend); `shell.rs` untouched (new module `agent_launch.rs` instead).
 
+- T3 `d4342e8`: `HookReceiver` (std::net, 127.0.0.1, random port, token in URL `/hook/<token>`, 401 before reading body, 256 KiB body cap, 16 connections, always `{}`), pure `ClaudeHookTranslator` + `settings_json`, `ClaudeCodeAdapter` (settings file in `<tmp>/opencollab/`, deleted on release, stale >24 h cleaned at startup). Parent decision implemented in `application`: `AgentStates::mark_rich` / `apply_generic` (generic `status_changed` ignored for rich terminals; exit still applies), `AgentAdapter::release`, `PreparedLaunch::is_rich`. `Stop` -> message + idle (not completed). `PermissionRequest` has no `tool_use_id`: request id derived from tool + summary.
+- T4 `13976a3`: `OpenCodeAdapter` (free port + per-launch `OPENCODE_SERVER_PASSWORD` via env; password supported, verified: 401 without/with wrong credentials, TUI works with it), `sse.rs` (base64, chunked decoder, line splitter), pure `OpenCodeTranslator` (ignores child sessions, only final assistant text). Known limit: rich mark persists if the agent exits but the shell stays.
+- Route evidence (T3, T4): delegated writer (multi-file Rust + docs); no frontend/mock change (event contract unchanged).
+
 ## Verification evidence
 
 - RED observed: `cargo test -p application agent_state` (undeclared `AgentState`), `... launch_command` (E0599 no method), Vitest `Cannot find module './agentState'` (suite failed) and `newPane().agent` undefined (2 failures). Not strictly red: `agent_event` and `agent_adapter` tests were written together with their code (the module was not registered at first, 0 tests ran), `agent_launch` tests passed on first run, and the new real-shell e2e passed on first run.
 - After T2: `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` ok; `cargo test --workspace` all pass (application 71, infrastructure 30 + 2 integration); `cargo test -p infrastructure --test shell_integration_e2e -- --ignored` 2 passed (real PowerShell runs the agent command inside the shell and returns to its OSC 7 prompt); `pnpm test` 7 files / 56 tests; `pnpm build` ok; `pnpm test:e2e` all scenarios pass.
 - Not verified: launching a real agent CLI from the app UI (`cargo tauri dev` not run).
+- T3/T4 RED observed: `cargo test -p application agent_adapter` (E0599 `is_rich`/`release`/`mark_rich` missing), `cargo test -p infrastructure claude_hooks` (11 failed with stub translator), `... opencode_events` (8 failed with stub translator). Not strictly red: `hook_receiver`, `claude_adapter`, `sse` and `opencode_adapter` tests were written together with their code and passed on first run.
+- Live checks (real CLIs, per-launch config only, nothing written to user config): `cargo test -p infrastructure --test claude_adapter_e2e -- --ignored` passed (claude 2.1.289 `-p` with the adapter's `--settings`: working, tool_started Bash, tool_finished, message, idle); `... --test opencode_adapter_e2e -- --ignored` passed (real OpenCode TUI in a real PTY launched via `agent_shell_profile` with the password env: working, tool_started pending+running with `echo hi`, tool_finished, message, idle). Approval path (`PermissionRequest`/`permission.asked`) covered by unit tests built from spike payloads; not exercised live in this task.
+- After T4: `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` ok; `cargo test --workspace` all pass (application 76, infrastructure 77 + ignored e2e); `pnpm test` 56 passed; `pnpm build` ok; `pnpm test:e2e` all pass.
+- Not verified: launching Claude/OpenCode from the app UI (`cargo tauri dev` not run).
