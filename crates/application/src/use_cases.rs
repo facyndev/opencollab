@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace};
 
-use crate::agent_detection::{detect_agent, KnownAgent};
+use crate::agent_detection::{detect_agents, AgentTree};
 use crate::error::AppError;
 use crate::ports::{
     CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize,
@@ -145,7 +145,8 @@ impl ListSubdirectories {
     }
 }
 
-/// Qué agente conocido corre en cada terminal viva de la sesión.
+/// Qué agentes conocidos corren en cada terminal viva de la sesión: el principal
+/// de cada una y los que ese agente tiene anidados.
 pub struct DetectTerminalAgents {
     repo: Arc<dyn WorkspaceRepository>,
     pty: Arc<dyn PtyPort>,
@@ -165,10 +166,7 @@ impl DetectTerminalAgents {
         }
     }
 
-    pub fn execute(
-        &self,
-        session_id: SessionId,
-    ) -> Result<Vec<(TerminalId, Option<KnownAgent>)>, AppError> {
+    pub fn execute(&self, session_id: SessionId) -> Result<Vec<(TerminalId, AgentTree)>, AppError> {
         let session = self
             .repo
             .find_session(session_id)?
@@ -185,7 +183,7 @@ impl DetectTerminalAgents {
         let processes = self.inspector.snapshot()?;
         Ok(live
             .into_iter()
-            .map(|(terminal, pid)| (terminal, detect_agent(&processes, pid)))
+            .map(|(terminal, pid)| (terminal, detect_agents(&processes, pid)))
             .collect())
     }
 }
@@ -254,6 +252,7 @@ mod tests {
     use domain::{DomainError, WorkspaceId};
 
     use super::*;
+    use crate::agent_detection::KnownAgent;
     use crate::ports::PortError;
 
     #[derive(Default)]
@@ -448,7 +447,51 @@ mod tests {
 
         assert_eq!(
             detected,
-            vec![(w.terminal, Some(KnownAgent::ClaudeCode)), (second, None)]
+            vec![
+                (
+                    w.terminal,
+                    AgentTree {
+                        primary: Some(KnownAgent::ClaudeCode),
+                        nested: vec![],
+                    }
+                ),
+                (second, AgentTree::default()),
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_the_agents_nested_below_the_main_one() {
+        let w = world();
+        // Claude Code (2000) con Codex (2001) debajo, ambos en la primera terminal.
+        let inspector = Arc::new(FakeInspector(vec![
+            crate::agent_detection::ProcessInfo {
+                pid: 2000,
+                parent: Some(1000),
+                name: "claude.exe".into(),
+                args: vec![],
+            },
+            crate::agent_detection::ProcessInfo {
+                pid: 2001,
+                parent: Some(2000),
+                name: "codex.exe".into(),
+                args: vec![],
+            },
+        ]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(
+            detected,
+            vec![(
+                w.terminal,
+                AgentTree {
+                    primary: Some(KnownAgent::ClaudeCode),
+                    nested: vec![KnownAgent::Codex],
+                }
+            )]
         );
     }
 

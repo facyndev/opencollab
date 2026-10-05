@@ -8,6 +8,7 @@ import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
 import { localUser, statusLabel, type PaneMeta, type PaneStatus } from "../model";
 import { CwdSwitcher } from "./CwdSwitcher";
+import { NewTerminalMenu } from "./NewTerminalMenu";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
 import {
@@ -20,6 +21,8 @@ import {
 
 type Props = {
   paneId: string;
+  /// Carpeta en la que arranca la shell (`null` = la por defecto).
+  initialCwd: string | null;
   focused: boolean;
   minimized: boolean;
   maximized: boolean;
@@ -38,16 +41,21 @@ type Props = {
   onToggleMinimize: () => void;
   onToggleMaximize: () => void;
   onClosed: () => void;
+  /// Abrir otra terminal al lado de esta (`cwd` = carpeta inicial, `null` = la por defecto).
+  onNewTerminal: (cwd: string | null) => void;
 };
 
 /// Una celda de la grilla: una instancia de xterm.js conectada a un PTY del núcleo.
 export function TerminalPane(props: Props) {
-  const { paneId, onStatus, onMeta } = props;
+  const { paneId, initialCwd, onStatus, onMeta } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const [info, setInfo] = useState<{ name: string; cwd: string | null } | null>(null);
-  const [agent, setAgent] = useState<AgentId | null>(null);
+  /// El primero es el agente principal de la terminal; los siguientes son los que
+  /// ese agente tiene anidados.
+  const [agents, setAgents] = useState<AgentId[]>([]);
+  const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
   const [status, setStatus] = useState<PaneStatus>("starting");
@@ -55,8 +63,8 @@ export function TerminalPane(props: Props) {
 
   useEffect(() => onStatus(paneId, status), [paneId, status, onStatus]);
   useEffect(
-    () => onMeta(paneId, { shellName: info?.name ?? null, agent }),
-    [paneId, info?.name, agent, onMeta],
+    () => onMeta(paneId, { shellName: info?.name ?? null, agents, cwd }),
+    [paneId, info?.name, agents, cwd, onMeta],
   );
 
   useEffect(() => {
@@ -98,7 +106,8 @@ export function TerminalPane(props: Props) {
     let disposed = false;
     let detach: (() => void) | null = null;
 
-    openShell(term.cols, term.rows)
+    // La carpeta inicial solo importa al crear el PTY: no se reabre si cambia.
+    openShell(term.cols, term.rows, initialCwd)
       .then((opened) => {
         if (disposed) {
           void closeTerminal(opened.terminalId);
@@ -111,9 +120,9 @@ export function TerminalPane(props: Props) {
           onOutput: (data) => term.write(data),
           onExit: () => {
             setStatus("done");
-            setAgent(null);
+            setAgents([]);
           },
-          onAgent: setAgent,
+          onAgent: setAgents,
         });
         setStatus((s) => (s === "done" ? s : "running"));
       })
@@ -211,6 +220,7 @@ export function TerminalPane(props: Props) {
           {localUser.initials}
         </span>
         <span className="pane-controls">
+          <NewTerminalMenu cwd={cwd} onOpen={props.onNewTerminal} />
           <button type="button" className="icon-btn" title="Minimize" onClick={props.onToggleMinimize}>
             <Minus />
           </button>

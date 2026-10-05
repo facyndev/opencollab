@@ -5,11 +5,13 @@
 // Controles para los tests en `window.__mock`:
 //   emit(event, payload)  emite un evento como el núcleo
 //   writes                lo que la UI le escribió a cada terminal
+//   opened                argumentos de cada open_shell
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
   let terminals = 0;
   const writes = [];
+  const opened = [];
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -27,7 +29,7 @@ export function installTauriMock() {
     "C:\\Users\\facun\\OneDrive": ["Escritorio"],
   };
 
-  window.__mock = { emit, writes };
+  window.__mock = { emit, writes, opened };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -45,9 +47,12 @@ export function installTauriMock() {
           (listeners[args.event] ??= []).push(args.handler);
           return args.handler;
         case "open_shell": {
+          // Como el núcleo: arranca en `cwd` si es una carpeta conocida; si no, en el home.
+          opened.push(args);
           const terminalId = `t${++terminals}`;
-          setTimeout(() => prompt(terminalId, "C:\\Users\\facun"), 50);
-          return { terminalId, name: "PowerShell", cwd: "C:\\Users\\facun" };
+          const cwd = args.cwd && args.cwd in tree ? args.cwd : "C:\\Users\\facun";
+          setTimeout(() => prompt(terminalId, cwd), 50);
+          return { terminalId, name: "PowerShell", cwd };
         }
         case "write_terminal": {
           writes.push(args);

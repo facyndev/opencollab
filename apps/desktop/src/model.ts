@@ -5,8 +5,11 @@ import type { AgentId } from "./agents";
 
 export type PaneStatus = "starting" | "running" | "done" | "failed";
 
-/// Qué corre en una terminal: la shell y, si se detectó, el agente.
-export type PaneMeta = { shellName: string | null; agent: AgentId | null };
+/// Qué corre en una terminal: la shell, si se detectó, los agentes, y su carpeta
+/// actual. `agents` viene ordenado del más cercano a la shell al más profundo: el
+/// primero es el agente principal de la terminal y los demás son los que este
+/// tiene anidados.
+export type PaneMeta = { shellName: string | null; agents: AgentId[]; cwd: string | null };
 
 export type Pane = {
   id: string;
@@ -15,6 +18,8 @@ export type Pane = {
   seq: number;
   /// Ventana chica que solo muestra el header.
   minimized: boolean;
+  /// Carpeta en la que arranca la shell (`null` = la por defecto del núcleo).
+  initialCwd: string | null;
 };
 
 export type Session = {
@@ -41,8 +46,15 @@ let counter = 0;
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${counter++}`;
 
 let paneSeq = 0;
-export function newPane(): Pane {
-  return { id: newId("pane"), seq: paneSeq++, minimized: false };
+export function newPane(initialCwd: string | null = null): Pane {
+  return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd };
+}
+
+/// Agrega `pane` justo después de `afterId` (o al final si no está).
+export function insertPaneAfter(panes: Pane[], afterId: string | null, pane: Pane): Pane[] {
+  const i = afterId ? panes.findIndex((p) => p.id === afterId) : -1;
+  if (i < 0) return [...panes, pane];
+  return [...panes.slice(0, i + 1), pane, ...panes.slice(i + 1)];
 }
 
 /// Intercambia dos paneles de lugar.

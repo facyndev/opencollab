@@ -13,7 +13,7 @@ export function StatusBar({ terminals, live }: Props) {
       </span>
       <span className="statusbar-item">1 collaborator</span>
       <span className="statusbar-shortcuts">
-        <kbd>{modKey}T</kbd> new · <kbd>{modKey}1-4</kbd> focus · <kbd>{modKey}{shiftKey}M</kbd> maximize
+        <kbd>{modKey}T</kbd> new · <kbd>{modKey}{shiftKey}T</kbd> new here · <kbd>{modKey}1-4</kbd> focus · <kbd>{modKey}{shiftKey}M</kbd> maximize
       </span>
     </footer>
   );

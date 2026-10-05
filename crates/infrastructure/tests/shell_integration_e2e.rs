@@ -47,7 +47,7 @@ fn wait_for(pty: &PortablePtyAdapter, terminal: TerminalId, sink: &Sink, needle:
 #[test]
 #[ignore = "lanza la shell real del sistema"]
 fn default_shell_reports_its_cwd_with_osc7() {
-    let profile = default_shell_profile();
+    let profile = default_shell_profile(None);
     let home = profile.cwd.clone().expect("la shell arranca en el home");
     let home = home.display().to_string().replace('\\', "/");
 

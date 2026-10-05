@@ -13,8 +13,13 @@ import { preview } from "vite";
 import { installTauriMock } from "./tauri-mock.js";
 import cwdAndThread from "./scenarios/cwd-and-thread.mjs";
 import dragSwap from "./scenarios/drag-swap.mjs";
+import newTerminalHere from "./scenarios/new-terminal-here.mjs";
 
-const scenarios = { "drag & swap de terminales": dragSwap, "ruta, cambiador e hilo": cwdAndThread };
+const scenarios = {
+  "drag & swap de terminales": dragSwap,
+  "ruta, cambiador e hilo": cwdAndThread,
+  "nueva terminal desde otra": newTerminalHere,
+};
 
 function chromePath() {
   const candidates = [

@@ -166,7 +166,8 @@ export function Sidebar(props: Props) {
                 <ul className="thread">
                   {s.panes.map((pane, i) => {
                     const m = meta[pane.id];
-                    const agent = m?.agent ?? null;
+                    const agents = m?.agents ?? [];
+                    const agent = agents[0] ?? null;
                     const label = agent
                       ? agentInfo(agent).name
                       : (m?.shellName ?? `Terminal ${i + 1}`);
@@ -184,6 +185,26 @@ export function Sidebar(props: Props) {
                           <span className="thread-label">{label}</span>
                           <span className={`dot dot--${status}`} />
                         </button>
+                        {/* Agentes que el de arriba tiene corriendo debajo: cuelgan de
+                            su terminal y abren la misma. Sin punto de estado, porque
+                            el estado es el de la terminal. */}
+                        {agents.length > 1 ? (
+                          <ul className="thread thread--sub">
+                            {agents.slice(1).map((sub) => (
+                              <li key={sub}>
+                                <button
+                                  type="button"
+                                  className="thread-item thread-item--sub"
+                                  title={`${label} → ${agentInfo(sub).name}`}
+                                  onClick={() => props.onSelectTerminal(s.id, pane.id)}
+                                >
+                                  <TerminalIcon agent={sub} shellName="" size={11} />
+                                  <span className="thread-label">{agentInfo(sub).name}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : undefined}
                       </li>
                     );
                   })}

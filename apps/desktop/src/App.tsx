@@ -5,6 +5,7 @@ import { StatusBar } from "./components/StatusBar";
 import { TerminalPane } from "./components/TerminalPane";
 import { TopBar } from "./components/TopBar";
 import {
+  insertPaneAfter,
   newPane,
   newSession,
   newWorkspace,
@@ -66,12 +67,20 @@ export function App() {
     [],
   );
 
-  const addTerminal = useCallback(() => {
-    const pane = newPane();
-    updateSession(activeSession.id, (s) => ({ ...s, panes: [...s.panes, pane] }));
-    setFocusedPaneId(pane.id);
-    setMaximizedPaneId(null);
-  }, [activeSession.id, updateSession]);
+  /// Abre una terminal en la sesión activa. Si se abre desde otra (`fromPaneId`),
+  /// va al lado de ella; `cwd` es la carpeta inicial (`null` = la por defecto).
+  const addTerminal = useCallback(
+    (cwd: string | null = null, fromPaneId: string | null = null) => {
+      const pane = newPane(cwd);
+      updateSession(activeSession.id, (s) => ({
+        ...s,
+        panes: insertPaneAfter(s.panes, fromPaneId, pane),
+      }));
+      setFocusedPaneId(pane.id);
+      setMaximizedPaneId(null);
+    },
+    [activeSession.id, updateSession],
+  );
 
   const removePane = (sessionId: string, paneId: string) => {
     updateSession(sessionId, (s) => ({ ...s, panes: s.panes.filter((p) => p.id !== paneId) }));
@@ -131,6 +140,9 @@ export function App() {
       const key = e.key.toLowerCase();
       let handled = true;
       if (key === "t" && !e.shiftKey) addTerminal();
+      // En la carpeta de la terminal enfocada (si se conoce), al lado de ella.
+      else if (key === "t" && e.shiftKey)
+        addTerminal(focusedPaneId ? (meta[focusedPaneId]?.cwd ?? null) : null, focusedPaneId);
       else if (key === "k" && !e.shiftKey) searchRef.current?.focus();
       else if (key === "m" && e.shiftKey) toggleMaximize(focusedPaneId);
       else if (/^[1-4]$/.test(key)) {
@@ -147,7 +159,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [addTerminal, toggleMaximize, focusedPaneId, maximizedPaneId, activeSession.panes]);
+  }, [addTerminal, toggleMaximize, focusedPaneId, maximizedPaneId, activeSession.panes, meta]);
 
   const soloPaneId =
     maximizedPaneId ?? (layout === "single" ? (focusedPaneId ?? activeSession.panes[0]?.id) : null);
@@ -218,7 +230,7 @@ export function App() {
             setLayout(l);
             setMaximizedPaneId(null);
           }}
-          onNewTerminal={addTerminal}
+          onNewTerminal={() => addTerminal()}
         />
 
         <main
@@ -239,6 +251,7 @@ export function App() {
               <TerminalPane
                 key={pane.id}
                 paneId={pane.id}
+                initialCwd={pane.initialCwd}
                 order={index}
                 focused={focusedPaneId === pane.id}
                 minimized={pane.minimized && soloPaneId !== pane.id}
@@ -261,6 +274,7 @@ export function App() {
                 }
                 onToggleMaximize={() => toggleMaximize(pane.id)}
                 onClosed={() => removePane(session.id, pane.id)}
+                onNewTerminal={(cwd) => addTerminal(cwd, pane.id)}
               />
             );
           })}
@@ -268,7 +282,7 @@ export function App() {
           {activeSession.panes.length === 0 && (
             <div className="grid-empty">
               <p>Esta sesión no tiene terminales.</p>
-              <button type="button" className="btn btn--primary" onClick={addTerminal}>
+              <button type="button" className="btn btn--primary" onClick={() => addTerminal()}>
                 New terminal
               </button>
             </div>

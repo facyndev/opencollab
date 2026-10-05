@@ -7,13 +7,15 @@ import type { AgentId } from "./agents";
 
 type OutputPayload = { terminalId: string; data: number[] };
 type ExitPayload = { terminalId: string };
-type AgentPayload = { terminalId: string; agent: AgentId | null };
+/// El primero es el agente principal de la terminal; los siguientes son los que
+/// ese agente tiene anidados.
+type AgentPayload = { terminalId: string; agents: AgentId[] };
 
 export type TerminalHandlers = {
   onOutput: (data: Uint8Array) => void;
   onExit: () => void;
-  /// Agente conocido que corre en la terminal (`null` = ninguno).
-  onAgent: (agent: AgentId | null) => void;
+  /// Agentes conocidos que corren en la terminal (lista vacía = ninguno).
+  onAgent: (agents: AgentId[]) => void;
 };
 
 const handlers = new Map<string, TerminalHandlers>();
@@ -21,7 +23,7 @@ const handlers = new Map<string, TerminalHandlers>();
 // (el PTY arranca dentro de open_shell), así que se guarda hasta entonces.
 const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
-const agentEarly = new Map<string, AgentId | null>();
+const agentEarly = new Map<string, AgentId[]>();
 
 let listening: Promise<void> | null = null;
 
@@ -40,8 +42,8 @@ function ensureListening(): Promise<void> {
     }),
     listen<AgentPayload>("terminal-agent", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
-      if (handler) handler.onAgent(payload.agent);
-      else agentEarly.set(payload.terminalId, payload.agent);
+      if (handler) handler.onAgent(payload.agents);
+      else agentEarly.set(payload.terminalId, payload.agents);
     }),
   ]).then(() => undefined);
   return listening;
@@ -49,9 +51,10 @@ function ensureListening(): Promise<void> {
 
 export type OpenedTerminal = { terminalId: string; name: string; cwd: string | null };
 
-export async function openShell(cols: number, rows: number): Promise<OpenedTerminal> {
+/// `cwd`: carpeta inicial; `null` = la por defecto. Si ya no existe, el núcleo usa la por defecto.
+export async function openShell(cols: number, rows: number, cwd: string | null = null): Promise<OpenedTerminal> {
   await ensureListening();
-  return invoke<OpenedTerminal>("open_shell", { cols, rows });
+  return invoke<OpenedTerminal>("open_shell", { cols, rows, cwd });
 }
 
 /// Subcarpetas de `path`, ya ordenadas por el núcleo.
@@ -67,7 +70,7 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
   handlers.set(terminalId, h);
   for (const chunk of pending.get(terminalId) ?? []) h.onOutput(chunk);
   pending.delete(terminalId);
-  if (agentEarly.has(terminalId)) h.onAgent(agentEarly.get(terminalId) ?? null);
+  if (agentEarly.has(terminalId)) h.onAgent(agentEarly.get(terminalId) ?? []);
   agentEarly.delete(terminalId);
   if (exitedEarly.delete(terminalId)) h.onExit();
   return () => handlers.delete(terminalId);

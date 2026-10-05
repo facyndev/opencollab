@@ -96,10 +96,25 @@ fn identify(process: &ProcessInfo) -> Option<KnownAgent> {
     })
 }
 
-/// Busca un agente conocido entre los descendientes de `root` (la shell de la
-/// terminal). Si hay varios, gana el más cercano a la shell: es el que lanzó
-/// el usuario; los más profundos suelen ser procesos que ese agente lanzó.
-pub fn detect_agent(processes: &[ProcessInfo], root: u32) -> Option<KnownAgent> {
+/// Agentes conocidos corriendo en una terminal: el principal (el más cercano a
+/// la shell, o sea el que lanzó el usuario) y los que ese agente tiene debajo.
+///
+/// Son agentes *anidados*, no los subagentes internos de un agente: Claude Code,
+/// OpenCode y Codex corren sus subagentes dentro del mismo proceso, así que no
+/// aparecen en el árbol de procesos. Lo que sí aparece son otros CLIs que un
+/// agente lanza como herramienta.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentTree {
+    pub primary: Option<KnownAgent>,
+    /// Agentes conocidos por debajo del principal, del más cercano al shell al
+    /// más profundo, sin repetir.
+    pub nested: Vec<KnownAgent>,
+}
+
+/// Busca los agentes conocidos entre los descendientes de `root` (la shell de la
+/// terminal). El recorrido es en anchura, así que el primero encontrado es el más
+/// cercano a la shell y ese es el principal; los demás son los que él lanzó.
+pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
     let mut children: HashMap<u32, Vec<&ProcessInfo>> = HashMap::new();
     for process in processes {
         if let Some(parent) = process.parent {
@@ -110,7 +125,8 @@ pub fn detect_agent(processes: &[ProcessInfo], root: u32) -> Option<KnownAgent> 
         }
     }
 
-    // Recorrido en anchura: el primer agente encontrado es el de menor profundidad.
+    // Acumula en orden de anchura (menor profundidad primero) y sin repetir.
+    let mut found: Vec<KnownAgent> = Vec::new();
     let mut level = vec![root];
     let mut visited = std::collections::HashSet::from([root]);
     while !level.is_empty() {
@@ -118,8 +134,11 @@ pub fn detect_agent(processes: &[ProcessInfo], root: u32) -> Option<KnownAgent> 
         for pid in level {
             for child in children.get(&pid).into_iter().flatten() {
                 if let Some(agent) = identify(child) {
-                    return Some(agent);
+                    if !found.contains(&agent) {
+                        found.push(agent);
+                    }
                 }
+                // Aunque sea un agente, sigue bajando: puede tener otros debajo.
                 if visited.insert(child.pid) {
                     next.push(child.pid);
                 }
@@ -127,7 +146,12 @@ pub fn detect_agent(processes: &[ProcessInfo], root: u32) -> Option<KnownAgent> 
         }
         level = next;
     }
-    None
+
+    let mut found = found.into_iter();
+    AgentTree {
+        primary: found.next(),
+        nested: found.collect(),
+    }
 }
 
 #[cfg(test)]
@@ -153,7 +177,7 @@ mod tests {
 
     #[test]
     fn plain_shell_has_no_agent() {
-        assert_eq!(detect_agent(&tree(vec![]), SHELL), None);
+        assert_eq!(detect_agents(&tree(vec![]), SHELL).primary, None);
     }
 
     #[test]
@@ -166,7 +190,7 @@ mod tests {
             ("claude", KnownAgent::ClaudeCode),
         ] {
             let list = tree(vec![proc(200, SHELL, exe, &[])]);
-            assert_eq!(detect_agent(&list, SHELL), Some(agent), "{exe}");
+            assert_eq!(detect_agents(&list, SHELL).primary, Some(agent), "{exe}");
         }
     }
 
@@ -181,19 +205,19 @@ mod tests {
                 r"C:\Users\u\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js",
             ],
         )]);
-        assert_eq!(detect_agent(&list, SHELL), Some(KnownAgent::Codex));
+        assert_eq!(detect_agents(&list, SHELL).primary, Some(KnownAgent::Codex));
     }
 
     #[test]
     fn unrelated_node_process_is_not_an_agent() {
         let list = tree(vec![proc(200, SHELL, "node.exe", &["node", "server.js"])]);
-        assert_eq!(detect_agent(&list, SHELL), None);
+        assert_eq!(detect_agents(&list, SHELL).primary, None);
     }
 
     #[test]
     fn helper_processes_with_similar_names_do_not_match() {
         let list = tree(vec![proc(200, SHELL, "codex-command-runner.exe", &[])]);
-        assert_eq!(detect_agent(&list, SHELL), None);
+        assert_eq!(detect_agents(&list, SHELL).primary, None);
     }
 
     #[test]
@@ -209,23 +233,85 @@ mod tests {
             ),
             proc(400, 300, "codex.exe", &[]),
         ]);
-        assert_eq!(detect_agent(&list, SHELL), Some(KnownAgent::Codex));
+        assert_eq!(detect_agents(&list, SHELL).primary, Some(KnownAgent::Codex));
     }
 
     #[test]
     fn the_agent_closest_to_the_shell_wins() {
-        // Claude Code lanzó Codex como herramienta: la terminal es de Claude Code.
+        // Claude Code lanzó Codex como herramienta: la terminal es de Claude Code,
+        // y Codex queda anidado debajo.
         let list = tree(vec![
             proc(200, SHELL, "claude.exe", &[]),
             proc(300, 200, "codex.exe", &[]),
         ]);
-        assert_eq!(detect_agent(&list, SHELL), Some(KnownAgent::ClaudeCode));
+        assert_eq!(
+            detect_agents(&list, SHELL),
+            AgentTree {
+                primary: Some(KnownAgent::ClaudeCode),
+                nested: vec![KnownAgent::Codex],
+            }
+        );
+    }
+
+    #[test]
+    fn lists_every_known_agent_nested_below_the_primary() {
+        // powershell -> claude -> {codex, opencode -> agy}
+        let list = tree(vec![
+            proc(200, SHELL, "claude.exe", &[]),
+            proc(300, 200, "codex.exe", &[]),
+            proc(400, 200, "opencode.exe", &[]),
+            proc(500, 400, "agy.exe", &[]),
+        ]);
+        assert_eq!(
+            detect_agents(&list, SHELL),
+            AgentTree {
+                primary: Some(KnownAgent::ClaudeCode),
+                // Orden de anchura: Codex y OpenCode cuelgan del mismo nivel, y el
+                // Antigravity cuelga de OpenCode.
+                nested: vec![
+                    KnownAgent::Codex,
+                    KnownAgent::OpenCode,
+                    KnownAgent::AntigravityCli,
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn repeated_agents_of_the_same_kind_count_once() {
+        // Tres codex debajo del mismo claude: el hilo muestra un solo Codex.
+        let list = tree(vec![
+            proc(200, SHELL, "claude.exe", &[]),
+            proc(300, 200, "codex.exe", &[]),
+            proc(301, 200, "codex.exe", &[]),
+            proc(302, 200, "codex.exe", &[]),
+        ]);
+        assert_eq!(
+            detect_agents(&list, SHELL),
+            AgentTree {
+                primary: Some(KnownAgent::ClaudeCode),
+                nested: vec![KnownAgent::Codex],
+            }
+        );
+    }
+
+    #[test]
+    fn a_deeper_agent_does_not_become_the_primary() {
+        // Gana el más cercano a la shell, aunque haya otro agente más abajo.
+        let list = tree(vec![
+            proc(200, SHELL, "opencode.exe", &[]),
+            proc(300, 200, "cmd.exe", &[]),
+            proc(400, 300, "claude.exe", &[]),
+        ]);
+        let detected = detect_agents(&list, SHELL);
+        assert_eq!(detected.primary, Some(KnownAgent::OpenCode));
+        assert_eq!(detected.nested, vec![KnownAgent::ClaudeCode]);
     }
 
     #[test]
     fn ignores_agents_outside_the_terminal() {
         let list = tree(vec![proc(200, 999, "claude.exe", &[])]);
-        assert_eq!(detect_agent(&list, SHELL), None);
+        assert_eq!(detect_agents(&list, SHELL).primary, None);
     }
 
     #[test]
@@ -235,6 +321,6 @@ mod tests {
             proc(200, SHELL, "cmd.exe", &[]),
             proc(300, 200, "cmd.exe", &[]),
         ];
-        assert_eq!(detect_agent(&list, SHELL), None);
+        assert_eq!(detect_agents(&list, SHELL).primary, None);
     }
 }

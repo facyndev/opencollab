@@ -1,4 +1,4 @@
-# Release: al pushear un tag vX.Y.Z (sobre main, ver Git Flow en CLAUDE.md).
+# Release: al pushear un tag vX.Y.Z (sobre main, ver Git Flow en AGENTS.md).
 #   1. Corre todo el CI (unit + E2E). Si falla, no se construye nada.
 #   2. Verifica que el tag coincida con la versión de la app.
 #   3. Construye los instaladores de Windows con Tauri.
