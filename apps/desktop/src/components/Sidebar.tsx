@@ -12,6 +12,7 @@ import {
   type Workspace,
 } from "../model";
 import { modKey } from "../shortcuts";
+import { IconButton } from "./Button";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
 
@@ -123,9 +124,7 @@ export function Sidebar(props: Props) {
 
       <div className="sessions-header">
         <span>Sessions</span>
-        <button type="button" className="icon-btn" title="New session" onClick={props.onCreateSession}>
-          <Plus />
-        </button>
+        <IconButton icon={<Plus />} title="New session" onClick={props.onCreateSession} />
       </div>
 
       <nav className="sessions">
@@ -204,9 +203,7 @@ export function Sidebar(props: Props) {
           </span>
         </span>
         <ChevronsUpDown />
-        <button type="button" className="icon-btn" title="Settings">
-          <Sliders />
-        </button>
+        <IconButton icon={<Sliders />} title="Settings" />
       </div>
     </aside>
   );

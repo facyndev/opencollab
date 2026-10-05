@@ -7,6 +7,7 @@ import { agentInfo, type AgentId } from "../agents";
 import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
 import { localUser, statusLabel, type PaneMeta, type PaneStatus } from "../model";
+import { IconButton } from "./Button";
 import { CwdSwitcher } from "./CwdSwitcher";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
@@ -211,15 +212,9 @@ export function TerminalPane(props: Props) {
           {localUser.initials}
         </span>
         <span className="pane-controls">
-          <button type="button" className="icon-btn" title="Minimize" onClick={props.onToggleMinimize}>
-            <Minus />
-          </button>
-          <button type="button" className="icon-btn" title="Maximize" onClick={props.onToggleMaximize}>
-            <Maximize />
-          </button>
-          <button type="button" className="icon-btn" title="Close" onClick={() => void close()}>
-            <Close />
-          </button>
+          <IconButton icon={<Minus />} title="Minimize" onClick={props.onToggleMinimize} />
+          <IconButton icon={<Maximize />} title="Maximize" onClick={props.onToggleMaximize} />
+          <IconButton icon={<Close />} title="Close" onClick={() => void close()} />
         </span>
       </header>
   );
