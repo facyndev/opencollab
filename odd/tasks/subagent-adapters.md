@@ -83,7 +83,7 @@ transcripciones/conversaciones (solo metadatos), cambios en `protocol`.
 - [x] **T2 — Traductores en `infrastructure`.** Claude Code, OpenCode, Codex,
       con fixtures de payloads documentados.
 - [x] **T3 — Receptor HTTP local + inyección de entorno en el PTY.**
-- [ ] **T4 — Sidecar `opencollab-hook`.**
+- [x] **T4 — Sidecar `opencollab-hook`.**
 - [ ] **T5 — Instaladores** (puerto `HookInstaller` + 4 adaptadores) con tests
       sobre directorios temporales (merge sin pisar, idempotencia, uninstall).
 - [ ] **T6 — Wiring en desktop**: hub, evento `terminal-subagents`, comandos de
@@ -172,11 +172,30 @@ Git Flow). Cortes de PR: se registran acá a medida que se cierran tareas.
   comportamiento existente). Contrato HTTP sin cambios salvo `503`.
   Verificación: el padre re-corrió fmt check, clippy y `cargo test
   --workspace` (infrastructure 46, 0 fallan); el escritor corrió los tests del
-  receptor 3 veces sin intermitencias. R3-004 queda pendiente.
+  receptor 3 veces sin intermitencias. R3-004 queda pendiente. Commit
+  `45038ef`; assess vs `103a88b`: `medium`, `under_budget` (pendiente en el
+  corte). T2+T3 mergeados a `develop` por el usuario (`2ac32e6`).
+- RDD del stop hook: compara contra `af87b898` (merge-base con `main`), así que
+  su candidato es todo lo no liberado y da `lens_context_budget_exceeded`.
+  Decisión del usuario: seguir revisando por commit con `assess --base-ref`
+  hasta liberar al cerrar la feature.
+- T4: ruta **delegada** (crate nuevo con lib, bin y tests de integración). Rama
+  `feature/subagent-adapters-t4` desde `develop`. `apps/hook-relay` (bin
+  `opencollab-hook`, ~424 líneas): solo depende de `application` en runtime
+  (`infrastructure` es dev-dependency). `opencollab-hook <agent-id>`: lee stdin
+  (≤ 1 MiB), las 3 variables `OPENCOLLAB_*`, y hace el POST del contrato de T3;
+  solo acepta `http://127.0.0.1:<puerto>/...`, rechaza CR/LF en token y
+  terminal, timeouts de 500 ms, sin salida y siempre exit 0. TDD: 7 unit tests
+  RED (stubs `todo!()`) → GREEN; 8 tests de integración escritos después
+  (contra `HookReceiver` real y el binario compilado; no pasaron por RED).
+  Verificación: el padre re-corrió `cargo fmt --all --check` y `cargo test
+  --workspace` (hook-relay 7+8, infrastructure 46, 0 fallan); escritor reportó
+  clippy limpio.
 
 ## Siguiente paso
 
-T4 (sidecar `opencollab-hook`, siguiendo el contrato HTTP de T3). Nota para T5: los
+T5 (instaladores de hooks; Claude Code y Codex invocan `opencollab-hook
+<agent-id>`). Nota para T5: los
 formatos OpenCode son contrato propio del futuro plugin `opencollab.ts`; si el
 JSON real de Claude/Codex difiere, mapearlo en los traductores sin tocar
 `application`.
