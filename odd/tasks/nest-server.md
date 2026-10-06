@@ -39,8 +39,9 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   El server lleva su propio `package.json` + lockfile; comandos con
   `pnpm --dir apps/server`.
 - Puertos de `application` siguen sincrónicos; el server Nest no los toca.
-- TDD: modo sin resolver (no hay registro `sdd-init`); rigen checks funcionales
-  ordinarios con tests al lado del código, no TDD estricto.
+- TDD (T2 en adelante): **estricto**, fuente `~/.claude/CLAUDE.md`
+  ("Strict TDD Mode: enabled"), runner `pnpm --dir apps/server test`
+  (vitest). RED observado antes de implementar. (T1 corrió sin TDD.)
 
 ## Checklist
 
@@ -52,10 +53,42 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   - [x] Retoque factual de `AGENTS.md` (stack + comando del relay)
   - [x] Job `server` en `ci.yml` (install + test + build)
   - Evidencia: commit work-unit en esta rama
-- [ ] **T2** — Auth (login, tokens, endpoints para el flujo web + deep link)
-- [ ] **T3** — Ruteo por sesión y filtrado por permiso vigente en `/ws`
-- [ ] **T4** — DB (Prisma) según `architecture/persistence-seams`
-- [ ] **T5** — `apps/web` + `packages/contracts` como fuente del wire
+- [ ] **T2** — Dominio colaborativo en Nest (`apps/server/src/domain`, TS puro,
+  sin Nest ni Prisma): `AccessLevel` ordenado, `Workspace`, `Session`
+  (`accessOf`, overrides lazy, invitados), `Invitation`, `Terminal`/
+  `AgentProfile`, errores. Portar los tests de `crates/domain` como specs
+  (RED primero) para que ninguna invariante se pierda.
+- [ ] **T3** — Persistencia completa: Prisma + PostgreSQL. Esquema acordado:
+  `User`, `PasswordCredential`, `OAuthIdentity`, `RefreshToken`,
+  `DesktopLoginCode`, `Workspace`, `WorkspaceMember`, `Session`,
+  `SessionAccessOverride`, `SessionGuest`, `Terminal` (con `position`),
+  `Invitation` (kind + status + `expiresAt`/`respondedAt`); migración inicial con `citext` y CHECK de `Invitation`,
+  `docker-compose` local, servicio Postgres en el job `server` del CI,
+  repositorios que mapean agregados ↔ filas con tests de integración.
+- [ ] **T4** — Auth: usuario o email + contraseña (argon2id), OAuth GitHub y
+  Google (identidades vinculables), access JWT + refresh rotado con detección
+  de reuso, `DesktopLoginCode` (PKCE) para el deep link al desktop.
+- [ ] **T5** — Ruteo por sesión y filtrado por permiso vigente en `/ws`.
+- [ ] **T6** — `apps/web` + `packages/contracts` como fuente del wire.
+- [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
+  terminal, validación final con el `AccessLevel` que manda el server) y
+  actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
+
+## Decisiones (2026-10-06)
+
+- El server Nest es dueño del dominio colaborativo (workspaces, membresías,
+  sesiones, invitaciones, resolución de permisos). Rust conserva PTY,
+  procesos, agentes y la validación final del input antes del PTY. Motivo:
+  con la DB en el server, "Rust manda, Nest obedece" obligaba a duplicar las
+  reglas en TS a mano. Descartados: espejo TS con tests (duplicación
+  permanente) y Rust→WASM/napi (toolchain cruzado).
+- DB completa ahora (no mínima), antes de la auth. Motor: PostgreSQL.
+- Auth: OAuth GitHub + Google, y usuario o email con contraseña.
+- Esquema: fechas terminan en `At`; `User` sin avatar; acceso efectivo nunca
+  se guarda (solo overrides y nivel de invitado); sin fila de override =
+  `VIEW`; `Terminal.env` no se persiste por defecto (puede tener secretos);
+  usuarios OAuth reciben `username` generado y editable; el server valida que
+  quien acepta una invitación sea el invitado.
 
 ## Alcance autorizado
 
@@ -84,8 +117,18 @@ sobre el commit work-unit de T1.
 - Ruta: exploración por codegraph (delegación a subagentes no disponible en
   este runtime: el transporte falló con error de free-tier; se sigue inline y
   acotado). Writes directos de archivos nuevos del scaffold.
-- Entrega: `ask-on-risk` (default). T1 es chico (<400 líneas); T2–T4
-  probablemente excedan y se trocean al llegar.
+- Ruta T2+: delegado directo (la delegación vuelve a funcionar el
+  2026-10-06; el mapeo del dominio se hizo con un Explore). Cada tarea toca
+  2+ archivos no triviales → un writer por tarea. Límite revisado vigente:
+  `b5e5efe` (review de T1 acknowledged).
+- Entrega: `ask-on-risk` (default). T1 es chico (<400 líneas). Pronóstico
+  T2–T4: ~2000+ líneas (dominio+tests ~700, persistencia ~600, auth ~900),
+  excede el presupuesto. Estrategia de cadena elegida: **stacked-to-develop**
+  (cada PR apunta a la anterior, la primera a `develop`). Slices:
+  `feature/nest-server` (T1) ← `feature/nest-domain` (T2) ←
+  `feature/nest-persistence` (T3) ← `feature/nest-auth` (T4).
+- Alcance autorizado T2–T4: `apps/server/**`, `docker-compose.yml` raíz
+  (Postgres local), job `server` de `ci.yml`, este documento.
 
 ## Progreso
 
