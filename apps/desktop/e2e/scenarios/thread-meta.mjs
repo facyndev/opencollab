@@ -76,7 +76,7 @@ export default async function threadMeta(page, checks) {
   await wait(150);
   heads = await titles(page);
   checks["enfocar la terminal limpia la atención"] =
-    heads[0].includes("Idle") && !heads[0].includes("Needs attention");
+    heads[0]?.includes("Idle") && !heads[0]?.includes("Needs attention");
 
   await page.evaluate(() => {
     window.__mock.agentState("t1", { status: "working" });
@@ -88,7 +88,7 @@ export default async function threadMeta(page, checks) {
   await wait(150);
   heads = await titles(page);
   checks["idle con la terminal enfocada no pide atención"] =
-    heads[0].includes("Idle") && !heads[0].includes("Needs attention");
+    heads[0]?.includes("Idle") && !heads[0]?.includes("Needs attention");
 
   await page.evaluate(() =>
     window.__mock.emit("terminal-agent", { terminalId: "t1", agents: [] }),
@@ -120,7 +120,7 @@ export default async function threadMeta(page, checks) {
   await wait(150);
   heads = await titles(page);
   checks["muestra la aprobación pendiente con su descripción"] =
-    heads[0].includes("Needs approval: run rm -rf build");
+    heads[0]?.includes("Needs approval: run rm -rf build");
   checks["la aprobación se resalta con el acento"] =
     (await page.$$(".thread-state--approval")).length === 1;
 
@@ -130,7 +130,7 @@ export default async function threadMeta(page, checks) {
   await wait(150);
   heads = await titles(page);
   lines = await metaLines(page);
-  checks["muestra el error"] = heads[0].includes("Error");
+  checks["muestra el error"] = heads[0]?.includes("Error");
   checks["el detalle del error va en la línea secundaria"] =
     lines[0]?.includes("exited with code 2") ?? false;
   checks["el error se marca distinto"] = (await page.$$(".thread-state--error")).length === 1;
@@ -140,7 +140,7 @@ export default async function threadMeta(page, checks) {
   heads = await titles(page);
   lines = await metaLines(page);
   checks["tras completar vuelve a Idle y conserva el tiempo"] =
-    heads[0].includes("Idle") && /12m/.test(lines[0] ?? "");
+    heads[0]?.includes("Idle") && /12m/.test(lines[0] ?? "");
 
   // El contador avanza solo, sin nuevos eventos del núcleo.
   await page.evaluate(() => {
@@ -163,7 +163,7 @@ export default async function threadMeta(page, checks) {
   refs = await branches(page);
   dots = await hasDot(page);
   checks["sin agente detectado vuelve el punto y desaparece el estado"] =
-    dots[0] === true && !/Working|Idle|Needs|·/.test(heads[0]) && lines[0] === null;
+    dots[0] === true && !/Working|Idle|Needs|·/.test(heads[0] ?? "") && lines[0] === null;
   checks["sin agente detectado queda la rama"] = refs[0]?.includes("main") ?? false;
 
   // Cambiar de carpeta (OSC 7) actualiza la rama: HEAD desacoplado y fuera de un repo.

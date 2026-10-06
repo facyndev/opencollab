@@ -3,10 +3,11 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-import { applyActivity, applyFocus, initialActivity, type ActivityState } from "../activity";
+import { applyActivity, applyFocus, initialActivity, isWatching, type ActivityState } from "../activity";
 import { agentInfo, type AgentId } from "../agents";
 import type { AgentState } from "../agentState";
 import { useGitBranch } from "../useGitBranch";
+import { useWindowFocus } from "../useWindowFocus";
 import { cdCommand, parseOsc7 } from "../cwd";
 import { Close, Maximize, Minus } from "../icons";
 import { localUser, statusLabel, type PaneMeta, type PaneStatus } from "../model";
@@ -72,9 +73,18 @@ export function TerminalPane(props: Props) {
   const [cwd, setCwd] = useState<string | null>(null);
   const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
-  /// El handler de actividad se registra una vez: lee el foco vigente desde acá.
-  const focusedRef = useRef(props.focused);
-  focusedRef.current = props.focused;
+  const windowFocused = useWindowFocus();
+  /// "Mirando" = enfocado, visible y con la ventana en primer plano; no basta con ser el
+  /// último panel clickeado.
+  const watching = isWatching({
+    focused: props.focused,
+    hidden: props.hidden,
+    minimized: props.minimized,
+    windowFocused,
+  });
+  /// El handler de actividad se registra una vez: lee si se está mirando desde acá.
+  const focusedRef = useRef(watching);
+  focusedRef.current = watching;
   // Se vuelve a leer al quedar inactivo: un agente pudo cambiar de rama.
   const branch = useGitBranch(cwd, activityState.activity === "idle");
   const [status, setStatus] = useState<PaneStatus>("starting");
@@ -95,10 +105,11 @@ export function TerminalPane(props: Props) {
       }),
     [paneId, info?.name, agents, cwd, startedAt, branch, agentState, activityState, onMeta],
   );
-  // Enfocar el panel es "mirar": lo que pedía atención ya se vio.
+  // Mirar el panel (enfocarlo, volver a la ventana, a su sesión o restaurarlo): lo que
+  // pedía atención ya se vio.
   useEffect(() => {
-    if (props.focused) setActivityState(applyFocus);
-  }, [props.focused]);
+    if (watching) setActivityState(applyFocus);
+  }, [watching]);
 
   useEffect(() => {
     const container = containerRef.current;
