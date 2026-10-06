@@ -114,3 +114,12 @@ sobre el commit work-unit de T1.
   `cwd = worktree || directory` de la SESIÓN, y esta sesión no está bindeada
   al proyecto del repo. Veredicto: defecto ambiental de la sesión, no del
   candidato; la única recuperación es sesión nueva bindeada a opencollab.
+- 2026-10-06: Rama rebaseada sobre `develop` (v0.2.0). Review de T1 contra
+  `v0.2.0` (lineage `review-85b8d7227cca8c5c`, 4 lentes): pidió una
+  corrección por `R3-wire-parity-envelope-validation` (CRITICAL: el TS solo
+  miraba `version === 1`; serde valida el `Envelope` completo). Corregido en
+  `b5e5efe` (validación completa + `1.0`/`1e0` rechazados vía `context.source`
+  del reviver, Node 24), tests 8/8, typecheck y build OK; validación dirigida
+  aprobada y acknowledged. Avisos no bloqueantes pendientes: parseo de
+  `RELAY_ADDR` más laxo que `SocketAddr`, gateway/health sin test, buffer de
+  envío sin límite, versión de pnpm en CI.
