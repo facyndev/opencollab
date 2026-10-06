@@ -92,3 +92,25 @@ sobre el commit work-unit de T1.
 - 2026-10-05: T1 iniciado. Stash previo en `stash@{0}`
   ("wip(agent-adapters)...", sobre la otra rama; recuperar con pop ahí, no acá).
   Rama base: `8604838`.
+- 2026-10-05: T1 completado y commiteado (`6c43918`). Checks observados:
+  typecheck, vitest (4/4), build, paridad viva contra contratos reales
+  (PARITY OK: health 200+`ok` por TCP crudo, eco idéntico, errores de
+  versión/mensaje, binarios ignorados), `cargo check --workspace`, gitleaks
+  limpio. Hallazgo: Nest 11 exige adapter WS explícito (`@nestjs/platform-ws`;
+  sin él el gateway no arranca).
+- 2026-10-05: Review del candidato: consent granted, lineage
+  `review-49c532c43c7cfddd`, pero las 4 lentes no lanzan
+  (`opencode_review_transport_binding_invalid`, defecto conocido de binding
+  sesión/proyecto). Reintento de un slot confirmó determinismo. Sin capturas
+  no hay acknowledgement ni receipt: el candidato queda NO revisado y el
+  límite revisado NO avanza. Transacción preservada sin quemar autoridad.
+- 2026-10-05: Upgrade gentle-ai 3.7.0→4.0.0 a pedido del usuario. El `upgrade`
+  gestionado falló (construyó `.../v3/cmd/gentle-ai@v4.0.0`, revisión inválida);
+  se instaló manual con `go install .../v4/cmd/gentle-ai@v4.0.0` (Go 1.26.5).
+  engram 3.0.0→3.1.0 OK; gga queda manual en Windows (fuera de pedido).
+  `sync --agent opencode` (28 archivos, incl. `opencode-review-transport.ts`)
+  levantó el `stop(managed_assets_outdated)` y el STATUS reofreció los 4 slots,
+  pero los 4 revisores fallan idéntico: el plugin lanza el transporte con
+  `cwd = worktree || directory` de la SESIÓN, y esta sesión no está bindeada
+  al proyecto del repo. Veredicto: defecto ambiental de la sesión, no del
+  candidato; la única recuperación es sesión nueva bindeada a opencollab.
