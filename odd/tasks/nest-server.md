@@ -192,5 +192,10 @@ sobre el commit work-unit de T1.
   sin `packageManager`, `pnpm/action-setup` no resolvía versión → el job
   `server` del CI no corría). Corregido en `4a391ad` (`pnpm@11.1.1`, igual
   que el desktop), install frozen + tests 48/48 OK; validación dirigida
-  aprobada y acknowledged. Ojo: el fix vive en `feature/nest-domain`; la PR
-  de T1 (`feature/nest-server`) no lo tiene → cherry-pick o mergear en orden.
+  aprobada y acknowledged.
+- 2026-10-06: Historial local reordenado (sin push previo): el fix se
+  cherry-pickeó a `feature/nest-server` (`cb00aeb`) y `feature/nest-domain`
+  se rebaseó encima (el `4a391ad` original se descartó por ya estar abajo;
+  árbol final idéntico). Hashes nuevos de T2: `8f9ef23` (código), `bbfb2df`
+  y este doc. Los hashes citados arriba (`58be74e`, `8f7a68b`, `4a391ad`)
+  son los previos al rebase.
