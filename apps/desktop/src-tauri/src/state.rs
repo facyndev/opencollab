@@ -76,7 +76,8 @@ impl AppState {
             send_input: SendTerminalInput::new(repo.clone(), pty.clone()),
             resize_terminal: ResizeTerminal::new(repo.clone(), pty.clone()),
             close_terminal: CloseTerminal::new(repo.clone(), pty.clone()),
-            detect_agents: DetectTerminalAgents::new(repo.clone(), pty, inspector),
+            detect_agents: DetectTerminalAgents::new(repo.clone(), pty, inspector)
+                .stopping_at(own_executable_name().into_iter().collect()),
             list_subdirectories: ListSubdirectories::new(Arc::new(FsDirectoryBrowser::new())),
             inspect_branch: InspectBranch::new(Arc::new(FsRepositoryInspector::new())),
             activity: Arc::new(ActivityTracker::new(ACTIVITY_IDLE_AFTER)),
@@ -86,4 +87,13 @@ impl AppState {
             session_collaborators: SessionCollaborators::new(repo),
         })
     }
+}
+
+/// Nombre del ejecutable de esta app: la detección de agentes no baja por otra
+/// instancia suya (por ejemplo, una build de desarrollo que corre un agente).
+fn own_executable_name() -> Option<String> {
+    std::env::current_exe()
+        .ok()?
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
 }

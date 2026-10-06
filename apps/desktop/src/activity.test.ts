@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyActivity, applyFocus, initialActivity } from "./activity";
+import { applyActivity, applyFocus, initialActivity, isWatching } from "./activity";
 
 describe("activity", () => {
   it("starts unknown and without attention", () => {
@@ -36,5 +36,22 @@ describe("activity", () => {
   it("focus does not change an unchanged state object", () => {
     const state = applyActivity(initialActivity, "working", true);
     expect(applyFocus(state)).toBe(state);
+  });
+
+  describe("isWatching", () => {
+    const all = { focused: true, hidden: false, minimized: false, windowFocused: true };
+
+    it("is true only when focused, visible, not minimized and the window has focus", () => {
+      expect(isWatching(all)).toBe(true);
+    });
+
+    it.each([
+      ["not the focused pane", { focused: false }],
+      ["hidden (other session)", { hidden: true }],
+      ["minimized", { minimized: true }],
+      ["window without focus", { windowFocused: false }],
+    ])("is false when %s", (_name, patch) => {
+      expect(isWatching({ ...all, ...patch })).toBe(false);
+    });
   });
 });

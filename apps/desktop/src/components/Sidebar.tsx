@@ -16,7 +16,8 @@ import { modKey } from "../shortcuts";
 import { IconButton } from "./Button";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
-import { ThreadMeta } from "./ThreadMeta";
+import { describeAgent } from "../agentState";
+import { ThreadBranch, ThreadMeta, ThreadState } from "./ThreadMeta";
 
 type Props = {
   workspaces: Workspace[];
@@ -172,42 +173,40 @@ export function Sidebar(props: Props) {
                       : (m?.shellName ?? `Terminal ${i + 1}`);
                     const status = statuses[pane.id] ?? "starting";
                     const focused = isActive && props.focusedPaneId === pane.id;
+                    const agentState = agent ? (m?.agentState ?? null) : null;
+                    const attention = agent ? !!m?.attention : false;
+                    // Con un agente de estado conocido, el estado va junto al título
+                    // y reemplaza al punto.
+                    const { tone, label: stateLabel } = describeAgent(agentState, attention);
+                    const branch = m?.branch ?? null;
+                    const select = () => props.onSelectTerminal(s.id, pane.id);
                     return (
                       <li key={pane.id}>
                         <button
                           type="button"
                           className={`thread-item ${focused ? "thread-item--focused" : ""}`}
                           title={label}
-                          onClick={() => props.onSelectTerminal(s.id, pane.id)}
+                          onClick={select}
                         >
                           <TerminalIcon agent={agent} shellName={m?.shellName ?? ""} size={14} />
-                          <span className="thread-label">{label}</span>
-                          <span className={`dot dot--${status}`} />
+                          <span className="thread-heading">
+                            <span className="thread-label">{label}</span>
+                            <ThreadState tone={tone} label={stateLabel} />
+                          </span>
+                          {tone === "none" && <span className={`dot dot--${status}`} />}
                         </button>
-                        {/* Línea secundaria agnóstica: actividad y tiempo (solo con agente
-                            detectado) y rama de git (cualquier terminal en un repo). */}
+                        {/* Línea secundaria agnóstica: herramienta y tiempo corriendo
+                            (solo con agente detectado). */}
                         <ThreadMeta
-                          agent={agent ? (m?.agentState ?? null) : null}
-                          attention={agent ? !!m?.attention : false}
+                          agent={agentState}
+                          attention={attention}
                           startedAt={agent ? (m?.startedAt ?? null) : null}
-                          branch={m?.branch ?? null}
                         />
-                        {/* Agentes anidados: cuelgan de su terminal y abren la misma. */}
-                        {agents.length > 1 ? (
+                        {/* Hijo del hilo: la rama de git (cualquier terminal en un repo);
+                            abre la misma terminal. Los agentes anidados no se listan. */}
+                        {branch ? (
                           <ul className="thread thread--sub">
-                            {agents.slice(1).map((sub) => (
-                              <li key={sub}>
-                                <button
-                                  type="button"
-                                  className="thread-item thread-item--sub"
-                                  title={`${label} → ${agentInfo(sub).name}`}
-                                  onClick={() => props.onSelectTerminal(s.id, pane.id)}
-                                >
-                                  <TerminalIcon agent={sub} shellName="" size={11} />
-                                  <span className="thread-label">{agentInfo(sub).name}</span>
-                                </button>
-                              </li>
-                            ))}
+                            <ThreadBranch branch={branch} onClick={select} />
                           </ul>
                         ) : undefined}
                       </li>

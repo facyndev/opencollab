@@ -28,7 +28,8 @@ export default async function cwdAndThread(page, checks) {
 
   checks["el header muestra la ruta que reporta la shell"] = (await cwdOf(page, 0)) === "C:\\Users\\facun";
 
-  // Agente detectado en la terminal 2, con Codex anidado debajo.
+  // Agente detectado en la terminal 2, con Codex anidado: el sidebar solo
+  // muestra el principal.
   await page.evaluate(() => {
     window.__mock.emit("terminal-agent", {
       terminalId: "t2",
@@ -37,29 +38,16 @@ export default async function cwdAndThread(page, checks) {
   });
   await wait(200);
   const thread = await page.$$eval(".thread-label", (els) => els.map((e) => e.textContent));
-  checks["el hilo lista las terminales con su shell/agente"] =
-    thread.includes("PowerShell") && thread.includes("Claude Code") && thread.includes("Codex");
+  checks["el hilo lista las terminales con su shell/agente principal"] =
+    thread.includes("PowerShell") && thread.includes("Claude Code");
+  checks["el hilo no lista agentes anidados"] =
+    !thread.includes("Codex") &&
+    (await page.$$(".thread-item--sub:not(.thread-branch)")).length === 0;
   checks["el hilo muestra el logo del agente"] =
-    (await page.$$(".thread-item .terminal-icon--logo")).length === 2;
-  checks["el agente anidado cuelga de su terminal, en otro nivel"] = await page.evaluate(() => {
-    const items = [...document.querySelectorAll(".thread-item")];
-    const codex = items.find((e) => e.textContent === "Codex");
-    if (!codex) return false;
-    // Vive dentro del <ul class="thread--sub"> que cuelga del <li> de su terminal.
-    if (!codex.closest(".thread--sub")) return false;
-    const owner = codex.closest("li").parentElement.closest("li");
-    return !!owner && [...owner.querySelectorAll(".thread-item--sub")].includes(codex);
-  });
-  checks["el agente anidado abre la terminal que lo tiene"] = await page.evaluate(() => {
-    const codex = [...document.querySelectorAll(".thread-item--sub")].find(
-      (e) => e.textContent === "Codex",
-    );
-    if (!codex) return false;
-    codex.click();
-    return true;
-  });
+    (await page.$$(".thread-item .terminal-icon--logo")).length === 1;
+  await page.$$eval(".thread-item:not(.thread-item--sub)", (els) => els[1].click());
   await wait(100);
-  checks["el clic en el agente anidado enfoca su terminal"] = await page.$$eval(
+  checks["el clic en el hilo enfoca su terminal con agente"] = await page.$$eval(
     ".pane:not([hidden])",
     (els) => els[1].classList.contains("pane--focused") && !els[0].classList.contains("pane--focused"),
   );

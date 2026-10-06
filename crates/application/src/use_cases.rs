@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace};
 
-use crate::agent_detection::{detect_agents, AgentTree};
+use crate::agent_detection::{detect_agents_within, AgentTree};
 use crate::error::AppError;
 use crate::git::Branch;
 use crate::ports::{
@@ -168,6 +168,8 @@ pub struct DetectTerminalAgents {
     repo: Arc<dyn WorkspaceRepository>,
     pty: Arc<dyn PtyPort>,
     inspector: Arc<dyn ProcessInspector>,
+    /// Ejecutables en los que el recorrido se detiene (otras instancias de la app).
+    stop_at: Vec<String>,
 }
 
 impl DetectTerminalAgents {
@@ -180,7 +182,15 @@ impl DetectTerminalAgents {
             repo,
             pty,
             inspector,
+            stop_at: Vec::new(),
         }
+    }
+
+    /// No baja por procesos con estos nombres de ejecutable (sin distinguir
+    /// mayúsculas ni `.exe`): una instancia de la propia app tiene sus terminales.
+    pub fn stopping_at(mut self, executables: Vec<String>) -> Self {
+        self.stop_at = executables;
+        self
     }
 
     pub fn execute(&self, session_id: SessionId) -> Result<Vec<(TerminalId, AgentTree)>, AppError> {
@@ -200,7 +210,12 @@ impl DetectTerminalAgents {
         let processes = self.inspector.snapshot()?;
         Ok(live
             .into_iter()
-            .map(|(terminal, pid)| (terminal, detect_agents(&processes, pid)))
+            .map(|(terminal, pid)| {
+                (
+                    terminal,
+                    detect_agents_within(&processes, pid, &self.stop_at),
+                )
+            })
             .collect())
     }
 }
@@ -541,6 +556,31 @@ mod tests {
                 }
             )]
         );
+    }
+
+    #[test]
+    fn does_not_report_agents_of_another_app_instance() {
+        let w = world();
+        let p = |pid, parent, name: &str| crate::agent_detection::ProcessInfo {
+            pid,
+            parent: Some(parent),
+            name: name.into(),
+            args: vec![],
+            started_at: None,
+        };
+        let inspector = Arc::new(FakeInspector(vec![
+            p(2000, 1000, "claude.exe"),
+            p(2001, 2000, "desktop.exe"),
+            p(2002, 2001, "opencode.exe"),
+        ]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .stopping_at(vec!["Desktop".into()])
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(detected[0].1.primary, Some(KnownAgent::ClaudeCode));
+        assert!(detected[0].1.nested.is_empty());
     }
 
     #[test]

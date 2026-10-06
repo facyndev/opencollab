@@ -5,6 +5,7 @@ import type { GitBranch } from "./terminalApi";
 
 const main: GitBranch = { name: "main", detached: false };
 const develop: GitBranch = { name: "develop", detached: false };
+const cwd = String.raw`C:\repo`;
 
 describe("sameBranch", () => {
   it("compara por nombre y por HEAD desacoplado", () => {
@@ -53,14 +54,42 @@ describe("watchBranch", () => {
     expect(onBranch).not.toHaveBeenCalled();
   });
 
-  it("un error de la consulta informa null y sigue consultando", async () => {
+  it("un error sin rama conocida informa null y sigue consultando", async () => {
     const query = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue(main);
     const onBranch = vi.fn();
-    const stop = watchBranch("C:\repo", query, onBranch);
+    const stop = watchBranch(cwd, query, onBranch);
     await vi.advanceTimersByTimeAsync(0);
     expect(onBranch).toHaveBeenLastCalledWith(null);
     await vi.advanceTimersByTimeAsync(BRANCH_POLL_MS);
     expect(onBranch).toHaveBeenLastCalledWith(main);
+    stop();
+  });
+
+  it("un error posterior conserva la última rama conocida", async () => {
+    const query = vi.fn().mockResolvedValueOnce(main).mockRejectedValueOnce(new Error("boom"));
+    const onBranch = vi.fn();
+    const stop = watchBranch(cwd, query, onBranch);
+    await vi.advanceTimersByTimeAsync(BRANCH_POLL_MS);
+    expect(onBranch).toHaveBeenCalledTimes(1);
+    expect(onBranch).toHaveBeenLastCalledWith(main);
+    stop();
+  });
+
+  it("una respuesta vieja que llega después de una nueva se ignora", async () => {
+    const resolvers: Array<(b: GitBranch) => void> = [];
+    const query = vi.fn().mockImplementation(
+      () => new Promise<GitBranch>((r) => resolvers.push(r)),
+    );
+    const onBranch = vi.fn();
+    const stop = watchBranch(cwd, query, onBranch);
+    await vi.advanceTimersByTimeAsync(BRANCH_POLL_MS);
+    expect(query).toHaveBeenCalledTimes(2);
+    resolvers[1](develop);
+    await vi.advanceTimersByTimeAsync(0);
+    resolvers[0](main);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onBranch).toHaveBeenCalledTimes(1);
+    expect(onBranch).toHaveBeenLastCalledWith(develop);
     stop();
   });
 });
