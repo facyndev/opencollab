@@ -25,3 +25,14 @@ export function applyActivity(state: ActivityState, next: Activity, focused: boo
 export function applyFocus(state: ActivityState): ActivityState {
   return state.attention ? { ...state, attention: false } : state;
 }
+
+/// El usuario está mirando el panel: enfocado, visible (no oculto ni minimizado) y con
+/// la ventana de la app en primer plano. Solo entonces un cambio de actividad cuenta como visto.
+export function isWatching(v: {
+  focused: boolean;
+  hidden: boolean;
+  minimized: boolean;
+  windowFocused: boolean;
+}): boolean {
+  return v.focused && !v.hidden && !v.minimized && v.windowFocused;
+}
