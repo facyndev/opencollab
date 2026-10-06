@@ -38,25 +38,68 @@ export interface Envelope {
 export const INCOMPATIBLE_PROTOCOL_VERSION = '{"error":"incompatible_protocol_version"}';
 export const INVALID_MESSAGE = '{"error":"invalid_message"}';
 
-function isCompatibleEnvelope(value: unknown): value is Envelope {
-  if (typeof value !== 'object' || value === null) {
-    return false;
+type Fields = Record<string, unknown>;
+
+const isObject = (value: unknown): value is Fields =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+const isUint = (value: unknown, max: number): boolean =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
+
+const isBytes = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((byte) => isUint(byte, 255));
+
+const ACCESS_LEVELS: readonly unknown[] = ['none', 'view', 'write'];
+
+/** Same shape check serde runs for `Message`; unknown fields are ignored. */
+function isMessage(value: unknown): value is Message {
+  if (!isObject(value) || !isString(value.session_id)) return false;
+  switch (value.type) {
+    case 'terminal_output':
+      return isString(value.terminal_id) && isBytes(value.data);
+    case 'terminal_input':
+      return isString(value.terminal_id) && isString(value.user_id) && isBytes(value.data);
+    case 'access_changed':
+      return isString(value.user_id) && ACCESS_LEVELS.includes(value.access);
+    default:
+      return false;
   }
-  return (value as { version?: unknown }).version === PROTOCOL_VERSION;
+}
+
+/** Equivalent of `serde_json::from_str::<Envelope>` succeeding (`version: u16`). */
+function isEnvelope(value: unknown): value is Envelope {
+  return isObject(value) && isUint(value.version, 0xffff) && isMessage(value.message);
 }
 
 /**
- * Reply semantics, mirroring the Rust relay exactly: a compatible envelope
- * echoes back byte-identically (the ORIGINAL text, not re-serialized), any
- * other version gets the version error, and unparsable input gets the
- * message error.
+ * `JSON.parse` turns `1.0` and `1e0` into the integer 1, but serde rejects
+ * them for integer fields. Every number in the wire is an integer, so a
+ * number whose source text is not an integer literal becomes NaN and fails
+ * the integer checks (the reviver context needs Node 21+; CI runs Node 24).
+ */
+function parseWire(text: string): unknown {
+  return JSON.parse(text, (_key, value: unknown, context?: { source?: string }) =>
+    typeof value === 'number' && context?.source !== undefined && !/^-?\d+$/.test(context.source)
+      ? Number.NaN
+      : value,
+  );
+}
+
+/**
+ * Reply semantics, mirroring the Rust relay exactly: a frame that does not
+ * deserialize into a complete `Envelope` gets the message error, an envelope
+ * of another version gets the version error, and a compatible envelope
+ * echoes back byte-identically (the ORIGINAL text, not re-serialized).
  */
 export function replyForTextFrame(text: string): string {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseWire(text);
   } catch {
     return INVALID_MESSAGE;
   }
-  return isCompatibleEnvelope(parsed) ? text : INCOMPATIBLE_PROTOCOL_VERSION;
+  if (!isEnvelope(parsed)) return INVALID_MESSAGE;
+  return parsed.version === PROTOCOL_VERSION ? text : INCOMPATIBLE_PROTOCOL_VERSION;
 }
