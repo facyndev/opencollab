@@ -277,7 +277,7 @@ export function TerminalPane(props: Props) {
           <span className={`dot dot--${status}`} />
           {statusLabel[status]}
         </span>
-        <span className="avatar avatar--sm avatar--me" title={`${localUser.name} (host)`}>
+        <span className="avatar avatar--sm avatar--me" title={`${localUser.name} (host)`} hidden>
           {localUser.initials}
         </span>
         <span className="pane-controls">

@@ -220,7 +220,8 @@ export function Sidebar(props: Props) {
         {sessions.length === 0 && <p className="sessions-empty">No sessions match.</p>}
       </nav>
 
-      <div className="user">
+      {/* Oculta hasta que exista autenticación: `localUser` sigue fijo en el código. */}
+      <div className="user" hidden>
         <span className="avatar avatar--me">{localUser.initials}</span>
         <span className="user-text">
           <span className="user-name">{localUser.name}</span>
