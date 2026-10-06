@@ -202,24 +202,11 @@ export function Sidebar(props: Props) {
                           attention={attention}
                           startedAt={agent ? (m?.startedAt ?? null) : null}
                         />
-                        {/* Hijos del hilo: la rama de git (cualquier terminal en un repo) y
-                            los agentes anidados; abren la misma terminal. */}
-                        {branch || agents.length > 1 ? (
+                        {/* Hijo del hilo: la rama de git (cualquier terminal en un repo);
+                            abre la misma terminal. Los agentes anidados no se listan. */}
+                        {branch ? (
                           <ul className="thread thread--sub">
-                            {branch && <ThreadBranch branch={branch} onClick={select} />}
-                            {agents.slice(1).map((sub) => (
-                              <li key={sub}>
-                                <button
-                                  type="button"
-                                  className="thread-item thread-item--sub"
-                                  title={`${label} → ${agentInfo(sub).name}`}
-                                  onClick={select}
-                                >
-                                  <TerminalIcon agent={sub} shellName="" size={11} />
-                                  <span className="thread-label">{agentInfo(sub).name}</span>
-                                </button>
-                              </li>
-                            ))}
+                            <ThreadBranch branch={branch} onClick={select} />
                           </ul>
                         ) : undefined}
                       </li>
