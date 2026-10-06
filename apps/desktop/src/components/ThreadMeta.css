@@ -17,23 +17,59 @@
   white-space: nowrap;
 }
 
-.thread-meta--working .thread-meta-activity {
+/* Estado del agente junto al título: "Claude Code · Working". El nombre se
+   recorta antes que el estado. */
+.thread-heading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.thread-heading .thread-label {
+  flex: 0 1 auto;
+}
+
+.thread-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 100 auto;
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+.thread-state-sep {
+  white-space: pre;
+}
+
+.thread-state-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-state svg {
+  flex: none;
+}
+
+.thread-state--working {
   color: var(--text-muted);
 }
 
-.thread-meta--working .thread-meta-activity svg {
+.thread-state--working svg {
   color: var(--accent-soft);
   animation: thread-meta-pulse 1.4s ease-in-out infinite;
 }
 
 /* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
-.thread-meta--attention .thread-meta-activity,
-.thread-meta--approval .thread-meta-activity {
+.thread-state--attention,
+.thread-state--approval {
   color: var(--accent-soft);
   font-weight: 600;
 }
 
-.thread-meta--error .thread-meta-activity {
+.thread-state--error {
   color: var(--red);
   font-weight: 600;
 }
@@ -54,25 +90,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thread-meta--working .thread-meta-activity svg {
+  .thread-state--working svg {
     animation: none;
   }
 }
 
-/* Separador entre partes: "Working · 12m". */
+/* Separador entre partes: "Bash: echo hi · 12m". */
 .thread-meta-part + .thread-meta-part::before {
   content: "·";
   margin-right: 6px;
   color: var(--text-faint);
-}
-
-/* Los nombres de rama largos se cortan; el resto de la línea no se mueve. */
-.thread-meta-branch {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.thread-meta-branch-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
