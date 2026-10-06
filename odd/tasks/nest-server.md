@@ -186,3 +186,11 @@ sobre el commit work-unit de T1.
   ser miembro (`session.ts:135`); `setAccess` no valida el nivel en runtime;
   `AgentProfile` comparte los arrays recibidos (aliasing). Verificar si
   Rust tiene el mismo comportamiento antes de corregir.
+- 2026-10-06: Review de la rama completa contra `v0.2.0` (lineage
+  `review-6c225b960e5e679a`, 4 lentes) pidió una corrección:
+  `R3-ci-pnpm-version-unresolvable` (CRITICAL, real: `apps/server/package.json`
+  sin `packageManager`, `pnpm/action-setup` no resolvía versión → el job
+  `server` del CI no corría). Corregido en `4a391ad` (`pnpm@11.1.1`, igual
+  que el desktop), install frozen + tests 48/48 OK; validación dirigida
+  aprobada y acknowledged. Ojo: el fix vive en `feature/nest-domain`; la PR
+  de T1 (`feature/nest-server`) no lo tiene → cherry-pick o mergear en orden.
