@@ -57,11 +57,29 @@ jobs:
           retention-days: 1
 
   server:
-    name: Server · unit + build
-    runs-on: windows-latest
+    name: Server · unit + integration + build
+    # Linux: GitHub service containers (Postgres) do not run on Windows
+    # runners, and the server is not Windows-bound.
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/server
+    env:
+      DATABASE_URL: postgresql://opencollab:opencollab@localhost:5432/opencollab
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: opencollab
+          POSTGRES_PASSWORD: opencollab
+          POSTGRES_DB: opencollab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opencollab -d opencollab"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -77,8 +95,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Prisma client
+        run: pnpm db:generate
+
+      - name: Migraciones
+        run: pnpm db:deploy
+
       - name: Tests unitarios (Vitest)
         run: pnpm test
+
+      - name: Tests de integración (Postgres)
+        run: pnpm test:integration
 
       - name: Typecheck
         run: pnpm typecheck

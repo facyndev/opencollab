@@ -26,3 +26,7 @@ Thumbs.db
 
 # Caché local del registro de skills de gentle-ai
 .atl/
+
+# Server: local env and generated Prisma client
+apps/server/.env
+apps/server/src/generated/
