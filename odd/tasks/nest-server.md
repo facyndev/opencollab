@@ -53,7 +53,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   - [x] Retoque factual de `AGENTS.md` (stack + comando del relay)
   - [x] Job `server` en `ci.yml` (install + test + build)
   - Evidencia: commit work-unit en esta rama
-- [ ] **T2** — Dominio colaborativo en Nest (`apps/server/src/domain`, TS puro,
+- [x] **T2** — Dominio colaborativo en Nest (`apps/server/src/domain`, TS puro,
   sin Nest ni Prisma): `AccessLevel` ordenado, `Workspace`, `Session`
   (`accessOf`, overrides lazy, invitados), `Invitation`, `Terminal`/
   `AgentProfile`, errores. Portar los tests de `crates/domain` como specs
@@ -166,3 +166,15 @@ sobre el commit work-unit de T1.
   aprobada y acknowledged. Avisos no bloqueantes pendientes: parseo de
   `RELAY_ADDR` más laxo que `SocketAddr`, gateway/health sin test, buffer de
   envío sin límite, versión de pnpm en CI.
+- 2026-10-06: Replan (commit `48074a4`) re-revisado junto con T1 contra
+  `v0.2.0` (lineage `review-9d0264b188540866`, 4 lentes): aprobado sin
+  correcciones y acknowledged (autoridad quemada). Avisos nuevos no
+  bloqueantes: socket WS sin listener de `error` (gateway), niveles de acceso
+  duplicados en `protocol.ts` vs dominio, contradicción de autoridad en
+  `AGENTS.md` (se resuelve en T7), numeración de tareas en "Alcance".
+- 2026-10-06: T2 completado en `feature/nest-domain` (writer delegado,
+  TDD estricto). RED: 5 specs fallando por módulos inexistentes; GREEN:
+  `pnpm --dir apps/server test` 48/48 (8 protocolo + 40 dominio, todos los
+  tests de `crates/domain` portados + extras), typecheck y build limpios
+  (re-corridos por el parent). ~860 líneas (mayoría specs). Pendiente para
+  T3: constructor de rehidratación de `Workspace`/`Session` desde la DB.
