@@ -221,3 +221,24 @@ sobre el commit work-unit de T1.
   `setStatus` no valida transiciones (solo desde `PENDING`); `Session.save`
   reemplaza hijos sin control de concurrencia; `Postgres` local expuesto en
   `0.0.0.0:5432` (atar a `127.0.0.1`).
+- 2026-10-06: T4 implementado en `feature/nest-auth` (writer delegado, TDD
+  estricto). Commits `4f16dd9` (follow-ups de T3: invitaciones vencidas,
+  transiciones solo desde `PENDING`, Postgres en `127.0.0.1`) y `62dbdcc`
+  (auth: argon2id, JWT 15 min, refresh rotado con detección de reuso,
+  OAuth GitHub/Google por fetch detrás de un puerto, PKCE + state firmado,
+  sin unión automática por email, vinculación explícita, `DesktopLoginCode`
+  para `opencollab://auth/callback`, throttling, fail-fast de config; zod
+  para validación). GREEN re-corrido por el parent: unit 85/85, integración
+  66/66, typecheck y build limpios; boot smoke del writer OK. Desvío de TDD:
+  `compose.spec.ts` se escribió después del cambio (nunca vio RED). Sin
+  probar contra GitHub/Google reales (faltan credenciales OAuth).
+- 2026-10-06: Review de T4 (base `ae79c8d`, lineage
+  `review-810a4189c17108cb`, riesgo alto, 4 lentes):
+  aprobada y acknowledged. Límite revisado → `62dbdcc`. Avisos (no
+  bloqueantes) a resolver: **R1-001** el `state` de vinculación no está
+  atado al navegador → un atacante puede hacer que la identidad de GitHub/
+  Google de la víctima quede vinculada a la cuenta del atacante (login CSRF
+  de vinculación); rotación de refresh no atómica (falla al insertar el
+  nuevo → reintento revoca la familia); fetch a proveedores sin timeout;
+  throttling por IP sin `trust proxy`; username con sondeo lineal;
+  `ProviderKey` y `databaseUrl` duplicados/muertos.
