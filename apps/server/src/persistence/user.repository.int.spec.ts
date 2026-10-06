@@ -27,6 +27,7 @@ describe('UserRepository', () => {
       username: 'Ana',
       email: 'ana@example.com',
       displayName: 'Ana P',
+      emailVerifiedAt: null,
     });
   });
 
@@ -50,6 +51,37 @@ describe('UserRepository', () => {
     expect((await users.findByUsernameOrEmail('ANA'))?.id).toBe(created.id);
     expect((await users.findByUsernameOrEmail('ana@example.COM'))?.id).toBe(created.id);
     expect(await users.findByUsernameOrEmail('nobody')).toBeUndefined();
+  });
+
+  it('treats an identifier with @ as an email only, never as a username', async () => {
+    const holder = await users.create({ username: 'a@b.com', displayName: 'Odd' });
+    const owner = await users.create({ username: 'real', email: 'a@b.com', displayName: 'Real' });
+    expect(holder.id).not.toBe(owner.id);
+    expect((await users.findByUsernameOrEmail('a@b.com'))?.id).toBe(owner.id);
+  });
+
+  it('treats an identifier without @ as a username only', async () => {
+    await users.create({ username: 'other', email: 'ana@example.com', displayName: 'O' });
+    expect(await users.findByUsernameOrEmail('ana')).toBeUndefined();
+  });
+
+  it('reports taken usernames and emails ignoring case', async () => {
+    await users.create({ username: 'Ana', email: 'Ana@Example.com', displayName: 'A' });
+    expect(await users.isUsernameTaken('aNA')).toBe(true);
+    expect(await users.isUsernameTaken('bob')).toBe(false);
+    expect(await users.isEmailTaken('ana@example.COM')).toBe(true);
+    expect(await users.isEmailTaken('zed@example.com')).toBe(false);
+  });
+
+  it('stores emailVerifiedAt when given', async () => {
+    const at = new Date('2026-01-01T00:00:00Z');
+    const created = await users.create({
+      username: 'v',
+      email: 'v@example.com',
+      emailVerifiedAt: at,
+      displayName: 'V',
+    });
+    expect(created.emailVerifiedAt).toEqual(at);
   });
 
   it('rejects a username that differs only by case', async () => {

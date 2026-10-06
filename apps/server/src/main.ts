@@ -21,6 +21,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   // Raw `ws` frames (NOT socket.io): our wire is plain-text `Envelope` JSON.
   app.useWebSocketAdapter(new WsAdapter(app));
+  app.enableShutdownHooks();
   const { host, port } = parseAddr();
   await app.listen(port, host);
 }

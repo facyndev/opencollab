@@ -7,8 +7,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "node dist/main.js",
-    "start:dev": "tsx watch src/main.ts",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "start:dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "test": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.mts",
     "db:generate": "prisma generate",
@@ -21,15 +21,21 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/platform-ws": "^11.2.7",
+    "@nestjs/throttler": "^6.7.1",
     "@nestjs/websockets": "^11.0.0",
     "@prisma/adapter-pg": "7.10.0",
     "@prisma/client": "7.10.0",
+    "argon2": "^0.45.1",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
-    "ws": "^8.17.0"
+    "ws": "^8.17.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@nestjs/testing": "^11.2.7",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.5.0",
