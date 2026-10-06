@@ -3,13 +3,13 @@
 // que no es el real.
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/// `true` si ningún elemento que coincide con `selector` se ve en pantalla.
+/// `true` si hay al menos un elemento que coincide con `selector` y ninguno se
+/// ve en pantalla (sin elementos, el chequeo no probaría nada).
 const allHidden = (page, selector) =>
-  page.evaluate(
-    (selector) =>
-      [...document.querySelectorAll(selector)].every((el) => el.offsetParent === null),
-    selector,
-  );
+  page.evaluate((selector) => {
+    const els = [...document.querySelectorAll(selector)];
+    return els.length > 0 && els.every((el) => el.offsetParent === null);
+  }, selector);
 
 /// `true` si el elemento existe en el DOM (se oculta, no se elimina).
 const exists = (page, selector) =>
