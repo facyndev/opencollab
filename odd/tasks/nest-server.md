@@ -178,3 +178,11 @@ sobre el commit work-unit de T1.
   tests de `crates/domain` portados + extras), typecheck y build limpios
   (re-corridos por el parent). ~860 líneas (mayoría specs). Pendiente para
   T3: constructor de rehidratación de `Workspace`/`Session` desde la DB.
+- 2026-10-06: Review de T2 (`58be74e`, base `48074a4`, lineage
+  `review-49312da2b2ae9c15`, riesgo medio, 1 lente): aprobada y
+  acknowledged. Límite revisado → `58be74e`. Avisos no bloqueantes para T3:
+  un invitado promovido a miembro aparece duplicado en `participants`
+  (`session.ts:115`); un override de miembro removido sobrevive si vuelve a
+  ser miembro (`session.ts:135`); `setAccess` no valida el nivel en runtime;
+  `AgentProfile` comparte los arrays recibidos (aliasing). Verificar si
+  Rust tiene el mismo comportamiento antes de corregir.
