@@ -53,6 +53,28 @@ export class Session {
     return new Session(newSessionId(), workspace.id, name);
   }
 
+  // Rebuilds an aggregate from persisted state: no creation-time checks.
+  // Only explicit overrides are restored; members without one stay at the default.
+  static restore(state: {
+    id: SessionId;
+    workspaceId: WorkspaceId;
+    name: string;
+    terminals: readonly Terminal[];
+    overrides: readonly (readonly [UserId, AccessLevel])[];
+    guests: readonly SessionGuest[];
+  }): Session {
+    const session = new Session(state.id, state.workspaceId, state.name);
+    session._terminals.push(...state.terminals);
+    for (const [user, level] of state.overrides) session.memberOverrides.set(user, level);
+    session._guests.push(...state.guests.map((g) => ({ ...g })));
+    return session;
+  }
+
+  // Explicit overrides, for persistence. Effective access is never derived from this.
+  get overrides(): [UserId, AccessLevel][] {
+    return [...this.memberOverrides];
+  }
+
   get terminals(): readonly Terminal[] {
     return this._terminals;
   }

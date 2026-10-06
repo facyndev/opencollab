@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { newUserId } from './ids';
+import { newUserId, newWorkspaceId } from './ids';
 import { expectDomainError } from './test-helpers';
 import { Workspace } from './workspace';
 
@@ -59,5 +59,26 @@ describe('Workspace', () => {
     const b = new Workspace(owner, 'b');
     const inv = a.inviteMember(owner, newUserId());
     expectDomainError(() => b.acceptInvitation(inv), { code: 'InvitationTargetMismatch' });
+  });
+
+  it('restore rebuilds persisted state without creation-time checks', () => {
+    const id = newWorkspaceId();
+    const owner = newUserId();
+    const member = newUserId();
+    const ws = Workspace.restore({ id, owner, name: 'proyecto', members: [member] });
+    expect(ws.id).toBe(id);
+    expect(ws.owner).toBe(owner);
+    expect(ws.name).toBe('proyecto');
+    expect(ws.isMember(member)).toBe(true);
+    expect(ws.members).toEqual([{ userId: member }]);
+  });
+
+  it('restored workspace keeps enforcing owner rules', () => {
+    const owner = newUserId();
+    const ws = Workspace.restore({ id: newWorkspaceId(), owner, name: 'p', members: [] });
+    expectDomainError(() => ws.addMember(newUserId(), newUserId()), { code: 'NotOwner' });
+    const invitee = newUserId();
+    ws.addMember(owner, invitee);
+    expect(ws.isMember(invitee)).toBe(true);
   });
 });

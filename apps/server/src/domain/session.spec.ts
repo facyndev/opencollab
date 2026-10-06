@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { newUserId, type UserId } from './ids';
-import { Session } from './session';
+import { newSessionId, newTerminalId, newUserId, type UserId } from './ids';
+import { Session, type SessionGuest } from './session';
 import { newAgentProfile } from './terminal';
 import { expectDomainError } from './test-helpers';
 import { Workspace } from './workspace';
@@ -250,5 +250,54 @@ describe('Session', () => {
     expect(find(f.owner).role).toBe('owner');
     expect(find(f.member).access).toBe('view');
     expect(find(guest).role).toBe('guest');
+  });
+
+  it('restore rebuilds terminals, overrides and guests as persisted', () => {
+    const f = fixture();
+    const guest = newUserId();
+    const profile = newAgentProfile('shell', 'sh');
+    const terminal = { id: newTerminalId(), profile };
+    const session = Session.restore({
+      id: newSessionId(),
+      workspaceId: f.workspace.id,
+      name: 'restored',
+      terminals: [terminal],
+      overrides: [[f.member, 'none']],
+      guests: [{ userId: guest, access: 'write' }],
+    });
+    expect(session.name).toBe('restored');
+    expect(session.terminals).toEqual([terminal]);
+    expect(session.accessOf(f.workspace, f.member)).toBe('none');
+    expect(session.accessOf(f.workspace, guest)).toBe('write');
+    expect(session.accessOf(f.workspace, f.owner)).toBe('write');
+  });
+
+  it('restored member without override resolves the default view', () => {
+    const f = fixture();
+    const session = Session.restore({
+      id: newSessionId(),
+      workspaceId: f.workspace.id,
+      name: 's',
+      terminals: [],
+      overrides: [],
+      guests: [],
+    });
+    expect(session.accessOf(f.workspace, f.member)).toBe('view');
+  });
+
+  it('restore does not share the input arrays', () => {
+    const f = fixture();
+    const guests: SessionGuest[] = [{ userId: newUserId(), access: 'view' }];
+    const session = Session.restore({
+      id: newSessionId(),
+      workspaceId: f.workspace.id,
+      name: 's',
+      terminals: [],
+      overrides: [],
+      guests,
+    });
+    guests[0].access = 'write';
+    guests.push({ userId: newUserId(), access: 'view' });
+    expect(session.guests).toEqual([{ userId: guests[0].userId, access: 'view' }]);
   });
 });

@@ -16,7 +16,10 @@ export function newAgentProfile(
   opts: { args?: string[]; env?: [string, string][]; cwd?: string } = {},
 ): AgentProfile {
   if (command.trim() === '') throw new DomainError({ code: 'EmptyCommand' });
-  const profile = { name, command, args: opts.args ?? [], env: opts.env ?? [] };
+  // Copies, so the caller keeps no handle on the profile's internals.
+  const args = [...(opts.args ?? [])];
+  const env = (opts.env ?? []).map(([k, v]): [string, string] => [k, v]);
+  const profile = { name, command, args, env };
   return opts.cwd === undefined ? profile : { ...profile, cwd: opts.cwd };
 }
 

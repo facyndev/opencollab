@@ -8,13 +8,25 @@ export interface WorkspaceMember {
 }
 
 export class Workspace {
-  readonly id: WorkspaceId = newWorkspaceId();
   private readonly _members: WorkspaceMember[] = [];
 
   constructor(
     readonly owner: UserId,
     readonly name: string,
+    readonly id: WorkspaceId = newWorkspaceId(),
   ) {}
+
+  // Rebuilds an aggregate from persisted state: no creation-time checks.
+  static restore(state: {
+    id: WorkspaceId;
+    owner: UserId;
+    name: string;
+    members: readonly UserId[];
+  }): Workspace {
+    const ws = new Workspace(state.owner, state.name, state.id);
+    ws._members.push(...state.members.map((userId) => ({ userId })));
+    return ws;
+  }
 
   get members(): readonly WorkspaceMember[] {
     return this._members;

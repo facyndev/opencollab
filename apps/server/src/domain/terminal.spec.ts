@@ -25,4 +25,15 @@ describe('AgentProfile', () => {
     });
     expect(p).toMatchObject({ args: ['--x'], env: [['K', 'V']], cwd: '/tmp' });
   });
+
+  it('does not alias the input arrays', () => {
+    const args = ['--x'];
+    const env: [string, string][] = [['K', 'V']];
+    const p = newAgentProfile('claude', 'claude', { args, env });
+    args.push('--y');
+    env[0][1] = 'changed';
+    env.push(['A', 'B']);
+    expect(p.args).toEqual(['--x']);
+    expect(p.env).toEqual([['K', 'V']]);
+  });
 });
