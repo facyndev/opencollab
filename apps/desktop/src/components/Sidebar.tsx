@@ -180,11 +180,14 @@ export function Sidebar(props: Props) {
                     const { tone, label: stateLabel } = describeAgent(agentState, attention);
                     const branch = m?.branch ?? null;
                     const select = () => props.onSelectTerminal(s.id, pane.id);
+                    const hasUptime = agent !== null && m?.startedAt != null;
                     return (
                       <li key={pane.id}>
                         <button
                           type="button"
-                          className={`thread-item ${focused ? "thread-item--focused" : ""}`}
+                          className={`thread-item ${focused ? "thread-item--focused" : ""} ${
+                            hasUptime ? "thread-item--has-uptime" : ""
+                          }`}
                           title={label}
                           onClick={select}
                         >
