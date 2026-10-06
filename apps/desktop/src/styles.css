@@ -713,6 +713,14 @@ kbd {
   display: none;
 }
 
+/* La cuenta local está fija en el código hasta que exista autenticación: se
+   oculta sin quitarla del marcado. */
+.user[hidden],
+.avatars[hidden],
+.avatar[hidden] {
+  display: none;
+}
+
 .pane--focused {
   border-color: var(--border-strong);
   box-shadow: 0 0 0 1px rgb(124 92 255 / 0.35);

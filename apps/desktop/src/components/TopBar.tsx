@@ -26,7 +26,7 @@ export function TopBar(props: Props) {
       </nav>
 
       <div className="topbar-actions">
-        <div className="avatars" title="Participantes conectados">
+        <div className="avatars" title="Participantes conectados" hidden>
           <span className="avatar avatar--me">{localUser.initials}</span>
         </div>
         <Button icon={<UserPlus />} disabled title="Requiere el relay: todavía no está conectado">
