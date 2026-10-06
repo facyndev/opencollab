@@ -135,6 +135,15 @@ pub struct AgentTree {
 /// terminal). El recorrido es en anchura, así que el primero encontrado es el más
 /// cercano a la shell y ese es el principal; los demás son los que él lanzó.
 pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
+    detect_agents_within(processes, root, &[])
+}
+
+/// Igual que [`detect_agents`], pero el recorrido se detiene en cualquier proceso
+/// cuyo ejecutable figure en `stop_at` (sin distinguir mayúsculas ni `.exe`): ni
+/// se lo cuenta ni se baja por él. Sirve para no entrar en otra instancia de la
+/// propia app, que aloja sus propias terminales.
+pub fn detect_agents_within(processes: &[ProcessInfo], root: u32, stop_at: &[String]) -> AgentTree {
+    let stop_at: Vec<String> = stop_at.iter().map(|name| stem(name)).collect();
     let mut children: HashMap<u32, Vec<&ProcessInfo>> = HashMap::new();
     for process in processes {
         if let Some(parent) = process.parent {
@@ -154,6 +163,10 @@ pub fn detect_agents(processes: &[ProcessInfo], root: u32) -> AgentTree {
         let mut next = Vec::new();
         for pid in level {
             for child in children.get(&pid).into_iter().flatten() {
+                // Otra instancia de la app: aloja sus propias terminales, no es nuestra.
+                if stop_at.contains(&stem(&child.name)) {
+                    continue;
+                }
                 if let Some(agent) = identify(child) {
                     if !found.contains(&agent) {
                         if found.is_empty() {
@@ -415,5 +428,57 @@ mod tests {
     fn no_agent_means_no_start_time() {
         let list = vec![started(proc(SHELL, 1, "powershell.exe", &[]), 1_000)];
         assert_eq!(detect_agents(&list, SHELL).primary_started_at, None);
+    }
+
+    #[test]
+    fn agents_below_another_app_instance_are_not_reported() {
+        // claude -> cargo -> desktop (otra instancia) -> powershell -> opencode / agy
+        let list = tree(vec![
+            proc(200, SHELL, "claude.exe", &[]),
+            proc(300, 200, "cargo.exe", &[]),
+            proc(400, 300, "desktop.exe", &[]),
+            proc(500, 400, "powershell.exe", &[]),
+            proc(600, 500, "opencode.exe", &[]),
+            proc(700, 500, "agy.exe", &[]),
+        ]);
+        let detected = detect_agents_within(&list, SHELL, &["desktop.exe".to_string()]);
+        assert_eq!(detected.primary, Some(KnownAgent::ClaudeCode));
+        assert!(detected.nested.is_empty());
+    }
+
+    #[test]
+    fn nothing_below_another_app_instance_becomes_primary() {
+        let list = tree(vec![
+            proc(400, SHELL, "desktop.exe", &[]),
+            proc(500, 400, "opencode.exe", &[]),
+        ]);
+        let detected = detect_agents_within(&list, SHELL, &["desktop".to_string()]);
+        assert_eq!(detected, AgentTree::default());
+    }
+
+    #[test]
+    fn boundary_matching_ignores_case_and_exe() {
+        let list = tree(vec![
+            proc(400, SHELL, "Desktop.EXE", &[]),
+            proc(500, 400, "codex.exe", &[]),
+        ]);
+        for stop in ["desktop", "DESKTOP.exe", "desktop.exe", "Desktop"] {
+            let detected = detect_agents_within(&list, SHELL, &[stop.to_string()]);
+            assert_eq!(detected.primary, None, "{stop}");
+        }
+    }
+
+    #[test]
+    fn an_empty_boundary_keeps_the_existing_behavior() {
+        let list = tree(vec![
+            proc(200, SHELL, "claude.exe", &[]),
+            proc(400, 200, "desktop.exe", &[]),
+            proc(500, 400, "codex.exe", &[]),
+        ]);
+        assert_eq!(
+            detect_agents_within(&list, SHELL, &[]),
+            detect_agents(&list, SHELL)
+        );
+        assert_eq!(detect_agents(&list, SHELL).nested, vec![KnownAgent::Codex]);
     }
 }

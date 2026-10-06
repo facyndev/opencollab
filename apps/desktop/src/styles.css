@@ -416,7 +416,7 @@ kbd {
 .thread {
   --thread-line: 2px solid var(--border-strong);
   --thread-x: 12px;
-  /* Alto de una fila. Acota el codo: sin esto, una fila con agentes anidados
+  /* Alto de una fila. Acota el codo: sin esto, una fila con la rama
      debajo calcularía el codo sobre el alto de toda la lista y apuntaría al
      medio en vez de a su terminal. */
   --thread-row: 26px;
@@ -463,7 +463,7 @@ kbd {
   border-top-left-radius: 2px;
 }
 
-/* Nivel interno del hilo: los agentes que la terminal de arriba tiene anidados.
+/* Nivel interno del hilo: la rama de git que cuelga de la terminal de arriba.
    Hereda el codo de `.thread`, con menos sangría, una fila más baja y un cuerpo
    chico para que se lea como hijo y no como otra terminal. */
 .thread--sub {
