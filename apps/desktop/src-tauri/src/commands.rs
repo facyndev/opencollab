@@ -1,14 +1,19 @@
 //! Comandos Tauri: solo traducen entrada/salida y delegan en casos de uso.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use application::ports::{TerminalOutputSink, TerminalSize};
 use domain::TerminalId;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use infrastructure::default_shell_profile;
+use infrastructure::{agent_shell_profile, command_exists, default_shell_profile};
 
+use application::{exit_event, ActivityTracker, AgentAdapters, AgentStates, KnownAgent};
+
+use crate::agent_events::TauriAgentEvents;
+use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
 
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal-output";
@@ -30,10 +35,15 @@ struct TerminalExitPayload {
 /// Reenvía la salida de los PTY al frontend como eventos.
 struct TauriOutputSink {
     app: AppHandle,
+    activity: Arc<ActivityTracker>,
+    events: Arc<TauriAgentEvents>,
+    states: Arc<AgentStates>,
+    adapters: Arc<AgentAdapters>,
 }
 
 impl TerminalOutputSink for TauriOutputSink {
     fn output(&self, terminal: TerminalId, data: &[u8]) {
+        self.activity.record_output(terminal, Instant::now());
         let _ = self.app.emit(
             TERMINAL_OUTPUT_EVENT,
             TerminalOutputPayload {
@@ -44,6 +54,12 @@ impl TerminalOutputSink for TauriOutputSink {
     }
 
     fn exited(&self, terminal: TerminalId) {
+        self.activity.forget(terminal);
+        // Sin código de salida disponible en el puerto del PTY: se asume normal.
+        self.events.emit_generic(terminal, exit_event(None));
+        self.states.forget(terminal);
+        // Los adaptadores sueltan lo suyo (hooks, archivos temporales, sockets).
+        self.adapters.release(terminal);
         let _ = self.app.emit(
             TERMINAL_EXIT_EVENT,
             TerminalExitPayload {
@@ -73,12 +89,43 @@ pub fn open_shell(
     state: State<'_, AppState>,
     cols: u16,
     rows: u16,
+    // Carpeta inicial (p. ej. la de la terminal desde la que se abre); `None` = home.
+    cwd: Option<String>,
+    // Id de un agente conocido a ejecutar dentro de la shell; `None` = solo la shell.
+    agent: Option<String>,
 ) -> Result<OpenedTerminal, String> {
-    let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink { app });
-    let profile = default_shell_profile();
+    let agent = agent
+        .map(|id| KnownAgent::from_id(&id).ok_or_else(|| format!("agente desconocido: {id}")))
+        .transpose()?;
+    let events = Arc::new(TauriAgentEvents::new(
+        app.clone(),
+        state.agent_states.clone(),
+    ));
+    let sink: Arc<dyn TerminalOutputSink> = Arc::new(TauriOutputSink {
+        events: events.clone(),
+        adapters: state.adapters.clone(),
+        app,
+        activity: state.activity.clone(),
+        states: state.agent_states.clone(),
+    });
+    let cwd_path = cwd.as_deref().map(std::path::Path::new);
+    // El adaptador del agente (si lo hay) agrega args/env antes de lanzar.
+    let (profile, prepared) = match agent {
+        Some(agent) => {
+            let prepared = state.adapters.prepare(agent).map_err(|e| e.to_string())?;
+            let profile = agent_shell_profile(
+                cwd_path,
+                agent.launch_command(),
+                &prepared.args,
+                &prepared.env,
+            );
+            (profile, Some(prepared))
+        }
+        None => (default_shell_profile(cwd_path), None),
+    };
     let name = profile.name.clone();
     let cwd = profile.cwd.as_ref().map(|p| p.display().to_string());
-    state
+    let id = state
         .launch_terminal
         .execute(
             state.local_user,
@@ -87,12 +134,30 @@ pub fn open_shell(
             TerminalSize { cols, rows },
             sink,
         )
-        .map(|id| OpenedTerminal {
-            terminal_id: id.to_string(),
-            name,
-            cwd,
-        })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Some(prepared) = prepared {
+        // Con adaptador rico, el estado lo manda él y no la actividad del PTY.
+        if prepared.is_rich() {
+            state.agent_states.mark_rich(id);
+        }
+        prepared.bind(id, events);
+    }
+    Ok(OpenedTerminal {
+        terminal_id: id.to_string(),
+        name,
+        cwd,
+    })
+}
+
+/// Ids de los agentes conocidos que están instalados (su comando está en el `PATH`).
+/// Lee disco: `async`.
+#[tauri::command(async)]
+pub fn available_agents() -> Vec<&'static str> {
+    KnownAgent::ALL
+        .into_iter()
+        .filter(|a| command_exists(a.launch_command()))
+        .map(|a| a.id())
+        .collect()
 }
 
 // Síncrono a propósito: los comandos async corren en un pool y podrían
@@ -126,13 +191,42 @@ pub fn list_subdirectories(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchDto {
+    /// Nombre de la rama, o SHA corto si `HEAD` está desacoplado.
+    name: String,
+    detached: bool,
+}
+
+/// Rama de git de una carpeta (`None` fuera de un repositorio). Lee disco: `async`.
+#[tauri::command(async)]
+pub fn git_branch(state: State<'_, AppState>, path: String) -> Option<BranchDto> {
+    state
+        .inspect_branch
+        .execute(std::path::Path::new(&path))
+        .map(|branch| BranchDto {
+            detached: branch.is_detached(),
+            name: branch.label().to_string(),
+        })
+}
+
+// `async`: sondear el relay bloquea hasta su timeout y no debe frenar la UI.
+#[tauri::command(async)]
+pub fn collab_status(state: State<'_, AppState>) -> Result<CollabStatusPayload, String> {
+    Ok(collab_status::snapshot(&state, None))
+}
+
 #[tauri::command(async)]
 pub fn close_terminal(state: State<'_, AppState>, terminal_id: String) -> Result<(), String> {
     let terminal = parse_terminal(&terminal_id)?;
     state
         .close_terminal
         .execute(state.local_user, state.session_id, terminal)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    state.activity.forget(terminal);
+    state.agent_states.forget(terminal);
+    Ok(())
 }
 
 #[tauri::command]

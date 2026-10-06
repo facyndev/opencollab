@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace};
 
-use crate::agent_detection::{detect_agent, KnownAgent};
+use crate::agent_detection::{detect_agents_within, AgentTree};
 use crate::error::AppError;
+use crate::git::Branch;
 use crate::ports::{
-    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize,
-    WorkspaceRepository,
+    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, RepositoryInspector,
+    TerminalOutputSink, TerminalSize, WorkspaceRepository,
 };
 
 fn load(
@@ -145,11 +146,30 @@ impl ListSubdirectories {
     }
 }
 
-/// Qué agente conocido corre en cada terminal viva de la sesión.
+/// Rama de git de la carpeta en la que está una terminal (`None` fuera de un
+/// repositorio). Vale para cualquier terminal, corra un agente o no.
+pub struct InspectBranch {
+    repositories: Arc<dyn RepositoryInspector>,
+}
+
+impl InspectBranch {
+    pub fn new(repositories: Arc<dyn RepositoryInspector>) -> Self {
+        Self { repositories }
+    }
+
+    pub fn execute(&self, path: &std::path::Path) -> Option<Branch> {
+        self.repositories.current_branch(path)
+    }
+}
+
+/// Qué agentes conocidos corren en cada terminal viva de la sesión: el principal
+/// de cada una y los que ese agente tiene anidados.
 pub struct DetectTerminalAgents {
     repo: Arc<dyn WorkspaceRepository>,
     pty: Arc<dyn PtyPort>,
     inspector: Arc<dyn ProcessInspector>,
+    /// Ejecutables en los que el recorrido se detiene (otras instancias de la app).
+    stop_at: Vec<String>,
 }
 
 impl DetectTerminalAgents {
@@ -162,13 +182,18 @@ impl DetectTerminalAgents {
             repo,
             pty,
             inspector,
+            stop_at: Vec::new(),
         }
     }
 
-    pub fn execute(
-        &self,
-        session_id: SessionId,
-    ) -> Result<Vec<(TerminalId, Option<KnownAgent>)>, AppError> {
+    /// No baja por procesos con estos nombres de ejecutable (sin distinguir
+    /// mayúsculas ni `.exe`): una instancia de la propia app tiene sus terminales.
+    pub fn stopping_at(mut self, executables: Vec<String>) -> Self {
+        self.stop_at = executables;
+        self
+    }
+
+    pub fn execute(&self, session_id: SessionId) -> Result<Vec<(TerminalId, AgentTree)>, AppError> {
         let session = self
             .repo
             .find_session(session_id)?
@@ -185,7 +210,12 @@ impl DetectTerminalAgents {
         let processes = self.inspector.snapshot()?;
         Ok(live
             .into_iter()
-            .map(|(terminal, pid)| (terminal, detect_agent(&processes, pid)))
+            .map(|(terminal, pid)| {
+                (
+                    terminal,
+                    detect_agents_within(&processes, pid, &self.stop_at),
+                )
+            })
             .collect())
     }
 }
@@ -254,6 +284,7 @@ mod tests {
     use domain::{DomainError, WorkspaceId};
 
     use super::*;
+    use crate::agent_detection::KnownAgent;
     use crate::ports::PortError;
 
     #[derive(Default)]
@@ -285,6 +316,7 @@ mod tests {
     #[derive(Default)]
     struct FakePty {
         spawned: Mutex<Vec<TerminalId>>,
+        profiles: Mutex<Vec<AgentProfile>>,
         written: Mutex<Vec<(TerminalId, Vec<u8>)>>,
         killed: Mutex<Vec<TerminalId>>,
     }
@@ -293,11 +325,12 @@ mod tests {
         fn spawn(
             &self,
             terminal: TerminalId,
-            _profile: &AgentProfile,
+            profile: &AgentProfile,
             _size: TerminalSize,
             _sink: Arc<dyn TerminalOutputSink>,
         ) -> Result<(), PortError> {
             self.spawned.lock().unwrap().push(terminal);
+            self.profiles.lock().unwrap().push(profile.clone());
             Ok(())
         }
         fn write(&self, terminal: TerminalId, data: &[u8]) -> Result<(), PortError> {
@@ -422,6 +455,30 @@ mod tests {
         assert_eq!(list, ["apps", "crates", "Docs", "src", ".cache", ".git"]);
     }
 
+    struct FakeRepositories;
+
+    impl crate::ports::RepositoryInspector for FakeRepositories {
+        fn current_branch(&self, path: &std::path::Path) -> Option<crate::Branch> {
+            path.starts_with("repo")
+                .then(|| crate::Branch::Named("main".into()))
+        }
+    }
+
+    #[test]
+    fn reports_the_branch_of_a_folder_inside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(
+            inspect.execute(std::path::Path::new("repo/src")),
+            Some(crate::Branch::Named("main".into()))
+        );
+    }
+
+    #[test]
+    fn reports_no_branch_outside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(inspect.execute(std::path::Path::new("elsewhere")), None);
+    }
+
     #[test]
     fn detects_the_agent_running_in_each_terminal() {
         let w = world();
@@ -440,6 +497,7 @@ mod tests {
             parent: Some(1000),
             name: "claude.exe".into(),
             args: vec![],
+            started_at: Some(1_700_000_000),
         }]));
 
         let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
@@ -448,8 +506,81 @@ mod tests {
 
         assert_eq!(
             detected,
-            vec![(w.terminal, Some(KnownAgent::ClaudeCode)), (second, None)]
+            vec![
+                (
+                    w.terminal,
+                    AgentTree {
+                        primary: Some(KnownAgent::ClaudeCode),
+                        primary_started_at: Some(1_700_000_000),
+                        nested: vec![],
+                    }
+                ),
+                (second, AgentTree::default()),
+            ]
         );
+    }
+
+    #[test]
+    fn reports_the_agents_nested_below_the_main_one() {
+        let w = world();
+        // Claude Code (2000) con Codex (2001) debajo, ambos en la primera terminal.
+        let inspector = Arc::new(FakeInspector(vec![
+            crate::agent_detection::ProcessInfo {
+                pid: 2000,
+                parent: Some(1000),
+                name: "claude.exe".into(),
+                args: vec![],
+                started_at: None,
+            },
+            crate::agent_detection::ProcessInfo {
+                pid: 2001,
+                parent: Some(2000),
+                name: "codex.exe".into(),
+                args: vec![],
+                started_at: None,
+            },
+        ]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(
+            detected,
+            vec![(
+                w.terminal,
+                AgentTree {
+                    primary: Some(KnownAgent::ClaudeCode),
+                    primary_started_at: None,
+                    nested: vec![KnownAgent::Codex],
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn does_not_report_agents_of_another_app_instance() {
+        let w = world();
+        let p = |pid, parent, name: &str| crate::agent_detection::ProcessInfo {
+            pid,
+            parent: Some(parent),
+            name: name.into(),
+            args: vec![],
+            started_at: None,
+        };
+        let inspector = Arc::new(FakeInspector(vec![
+            p(2000, 1000, "claude.exe"),
+            p(2001, 2000, "desktop.exe"),
+            p(2002, 2001, "opencode.exe"),
+        ]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .stopping_at(vec!["Desktop".into()])
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(detected[0].1.primary, Some(KnownAgent::ClaudeCode));
+        assert!(detected[0].1.nested.is_empty());
     }
 
     #[test]

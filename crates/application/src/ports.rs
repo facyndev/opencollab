@@ -2,8 +2,10 @@
 //! capa de aplicación no depende de un runtime async.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::agent_detection::ProcessInfo;
+use crate::git::Branch;
 
 use domain::{
     AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId,
@@ -60,9 +62,23 @@ pub trait DirectoryBrowser: Send + Sync {
     fn subdirectories(&self, path: &std::path::Path) -> Result<Vec<String>, PortError>;
 }
 
+/// Lee el estado de git de una carpeta del disco local.
+pub trait RepositoryInspector: Send + Sync {
+    /// Rama (o commit, si `HEAD` está desacoplado) de la carpeta, buscando hacia
+    /// arriba el repositorio que la contiene. `None` fuera de un repositorio.
+    fn current_branch(&self, path: &std::path::Path) -> Option<Branch>;
+}
+
 /// Foto de los procesos del sistema, para detectar qué corre en cada terminal.
 pub trait ProcessInspector: Send + Sync {
     fn snapshot(&self) -> Result<Vec<ProcessInfo>, PortError>;
+}
+
+/// Sondea al relay de colaboración. Bloquea hasta responder o agotar su timeout,
+/// así que quien lo llame periódicamente debe hacerlo fuera del hilo de la UI.
+pub trait RelayProbe: Send + Sync {
+    /// Tiempo de ida y vuelta si el relay respondió bien; error si no.
+    fn probe(&self) -> Result<Duration, PortError>;
 }
 
 pub trait WorkspaceRepository: Send + Sync {

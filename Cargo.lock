@@ -49,9 +49,11 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "application"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "domain",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -643,11 +645,12 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "application",
  "domain",
  "infrastructure",
+ "protocol",
  "serde",
  "serde_json",
  "tauri",
@@ -748,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.21",
  "uuid",
@@ -1603,12 +1606,14 @@ dependencies = [
 
 [[package]]
 name = "infrastructure"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "application",
  "domain",
  "portable-pty",
+ "serde_json",
  "sysinfo",
+ "uuid",
 ]
 
 [[package]]
@@ -2580,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2721,7 +2726,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "relay"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "protocol",

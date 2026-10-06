@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use application::ports::{PtyPort, TerminalOutputSink, TerminalSize};
 use domain::TerminalId;
-use infrastructure::{default_shell_profile, PortablePtyAdapter};
+use infrastructure::{agent_shell_profile, default_shell_profile, PortablePtyAdapter};
 
 #[derive(Default)]
 struct Sink(Mutex<Vec<u8>>);
@@ -47,7 +47,7 @@ fn wait_for(pty: &PortablePtyAdapter, terminal: TerminalId, sink: &Sink, needle:
 #[test]
 #[ignore = "lanza la shell real del sistema"]
 fn default_shell_reports_its_cwd_with_osc7() {
-    let profile = default_shell_profile();
+    let profile = default_shell_profile(None);
     let home = profile.cwd.clone().expect("la shell arranca en el home");
     let home = home.display().to_string().replace('\\', "/");
 
@@ -73,4 +73,33 @@ fn default_shell_reports_its_cwd_with_osc7() {
     let ok = wait_for(&pty, terminal, &sink, &second);
     let _ = pty.kill(terminal);
     assert!(ok, "no llegó OSC 7 tras cd; salida: {:?}", text(&sink));
+}
+
+/// Un agente lanzado como perfil corre dentro de la shell: al terminar, la shell
+/// sigue viva y llega su primer prompt (con OSC 7 en Windows).
+#[test]
+#[ignore = "lanza la shell real del sistema"]
+fn agent_profile_runs_inside_the_shell_and_leaves_it_alive() {
+    let profile = agent_shell_profile(None, "echo", &["AGENT-RAN".to_string()], &[]);
+    let pty = PortablePtyAdapter::new();
+    let terminal = TerminalId::new();
+    let sink = Arc::new(Sink::default());
+    pty.spawn(terminal, &profile, TerminalSize::default(), sink.clone())
+        .unwrap();
+
+    assert!(
+        wait_for(&pty, terminal, &sink, "AGENT-RAN"),
+        "el agente no corrió; salida: {:?}",
+        text(&sink)
+    );
+    if cfg!(windows) {
+        // El prompt (y con él OSC 7) llega después de que el agente termina.
+        let ok = wait_for(&pty, terminal, &sink, "\u{1b}]7;file://localhost/");
+        let _ = pty.kill(terminal);
+        let out = text(&sink);
+        assert!(ok, "la shell no volvió al prompt; salida: {out:?}");
+        assert!(out.find("AGENT-RAN") < out.find("\u{1b}]7;"));
+    } else {
+        let _ = pty.kill(terminal);
+    }
 }

@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { VscTerminal } from "react-icons/vsc";
 
 import { agentInfo } from "../agents";
-import { Check, ChevronDown, ChevronsUpDown, Logo, Plus, Search, Sliders } from "../icons";
+import { opencollabLogoRounded } from "../assets/brand";
+import { Check, ChevronDown, ChevronsUpDown, Plus, Search } from "../icons";
 import {
   localUser,
   sessionSummary,
@@ -12,8 +13,11 @@ import {
   type Workspace,
 } from "../model";
 import { modKey } from "../shortcuts";
+import { IconButton } from "./Button";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
+import { describeAgent } from "../agentState";
+import { ThreadBranch, ThreadMeta, ThreadState } from "./ThreadMeta";
 
 type Props = {
   workspaces: Workspace[];
@@ -59,7 +63,7 @@ export function Sidebar(props: Props) {
           onClick={() => setSwitcherOpen((o) => !o)}
         >
           <span className="ws-logo">
-            <Logo />
+            <img src={opencollabLogoRounded} alt="OpenCollab" className="ws-logo-img" />
           </span>
           <span className="ws-text">
             <span className="ws-name">{activeWorkspace.name}</span>
@@ -123,9 +127,7 @@ export function Sidebar(props: Props) {
 
       <div className="sessions-header">
         <span>Sessions</span>
-        <button type="button" className="icon-btn" title="New session" onClick={props.onCreateSession}>
-          <Plus />
-        </button>
+        <IconButton icon={<Plus />} title="New session" onClick={props.onCreateSession} />
       </div>
 
       <nav className="sessions">
@@ -137,12 +139,10 @@ export function Sidebar(props: Props) {
                 type="button"
                 className={`session ${isActive ? "session--active" : ""}`}
                 onClick={() => props.onSelectSession(s.id)}
+                title={summary.text}
               >
                 <span className={`dot dot--${summary.tone}`} />
-                <span className="session-text">
-                  <span className="session-name">{s.name}</span>
-                  <span className="session-meta">{summary.text}</span>
-                </span>
+                <span className="session-name">{s.name}</span>
                 <span className="session-count" title={`${s.panes.length} terminales`}>
                   <VscTerminal className="session-count-icon" aria-hidden="true" />
                   {s.panes.length}
@@ -166,24 +166,49 @@ export function Sidebar(props: Props) {
                 <ul className="thread">
                   {s.panes.map((pane, i) => {
                     const m = meta[pane.id];
-                    const agent = m?.agent ?? null;
+                    const agents = m?.agents ?? [];
+                    const agent = agents[0] ?? null;
                     const label = agent
                       ? agentInfo(agent).name
                       : (m?.shellName ?? `Terminal ${i + 1}`);
                     const status = statuses[pane.id] ?? "starting";
                     const focused = isActive && props.focusedPaneId === pane.id;
+                    const agentState = agent ? (m?.agentState ?? null) : null;
+                    const attention = agent ? !!m?.attention : false;
+                    // Con un agente de estado conocido, el estado va junto al título
+                    // y reemplaza al punto.
+                    const { tone, label: stateLabel } = describeAgent(agentState, attention);
+                    const branch = m?.branch ?? null;
+                    const select = () => props.onSelectTerminal(s.id, pane.id);
                     return (
                       <li key={pane.id}>
                         <button
                           type="button"
                           className={`thread-item ${focused ? "thread-item--focused" : ""}`}
                           title={label}
-                          onClick={() => props.onSelectTerminal(s.id, pane.id)}
+                          onClick={select}
                         >
                           <TerminalIcon agent={agent} shellName={m?.shellName ?? ""} size={14} />
-                          <span className="thread-label">{label}</span>
-                          <span className={`dot dot--${status}`} />
+                          <span className="thread-heading">
+                            <span className="thread-label">{label}</span>
+                            <ThreadState tone={tone} label={stateLabel} />
+                          </span>
+                          {tone === "none" && <span className={`dot dot--${status}`} />}
                         </button>
+                        {/* Línea secundaria agnóstica: herramienta y tiempo corriendo
+                            (solo con agente detectado). */}
+                        <ThreadMeta
+                          agent={agentState}
+                          attention={attention}
+                          startedAt={agent ? (m?.startedAt ?? null) : null}
+                        />
+                        {/* Hijo del hilo: la rama de git (cualquier terminal en un repo);
+                            abre la misma terminal. Los agentes anidados no se listan. */}
+                        {branch ? (
+                          <ul className="thread thread--sub">
+                            <ThreadBranch branch={branch} onClick={select} />
+                          </ul>
+                        ) : undefined}
                       </li>
                     );
                   })}
@@ -195,7 +220,8 @@ export function Sidebar(props: Props) {
         {sessions.length === 0 && <p className="sessions-empty">No sessions match.</p>}
       </nav>
 
-      <div className="user">
+      {/* Oculta hasta que exista autenticación: `localUser` sigue fijo en el código. */}
+      <div className="user" hidden>
         <span className="avatar avatar--me">{localUser.initials}</span>
         <span className="user-text">
           <span className="user-name">{localUser.name}</span>
@@ -204,9 +230,6 @@ export function Sidebar(props: Props) {
           </span>
         </span>
         <ChevronsUpDown />
-        <button type="button" className="icon-btn" title="Settings">
-          <Sliders />
-        </button>
       </div>
     </aside>
   );

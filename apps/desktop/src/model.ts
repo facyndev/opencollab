@@ -1,12 +1,31 @@
 // Estado de UI. Workspaces y sesiones viven acá hasta que el núcleo exponga
 // comandos para ellos; las terminales sí son PTYs reales del núcleo.
 
+import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
+import type { AgentState } from "./agentState";
+import type { GitBranch } from "./terminalApi";
 
 export type PaneStatus = "starting" | "running" | "done" | "failed";
 
-/// Qué corre en una terminal: la shell y, si se detectó, el agente.
-export type PaneMeta = { shellName: string | null; agent: AgentId | null };
+/// Qué corre en una terminal: la shell, si se detectó, los agentes, y su carpeta
+/// actual. `agents` viene ordenado del más cercano a la shell al más profundo: el
+/// primero es el agente principal de la terminal y los demás son los que este
+/// tiene anidados.
+export type PaneMeta = {
+  shellName: string | null;
+  agents: AgentId[];
+  cwd: string | null;
+  /// Arranque del agente principal (segundos desde la época Unix); `null` si no hay agente.
+  startedAt?: number | null;
+  /// Rama de git de la carpeta actual; `null` fuera de un repositorio.
+  branch?: GitBranch | null;
+  /// Estado reducido del agente (herramienta, aprobación, error...); `null` hasta que el núcleo informa algo.
+  agentState?: AgentState | null;
+  activity?: Activity | null;
+  /// Terminó de trabajar sin que su panel estuviera enfocado y aún no se miró.
+  attention?: boolean;
+};
 
 export type Pane = {
   id: string;
@@ -15,6 +34,10 @@ export type Pane = {
   seq: number;
   /// Ventana chica que solo muestra el header.
   minimized: boolean;
+  /// Carpeta en la que arranca la shell (`null` = la por defecto del núcleo).
+  initialCwd: string | null;
+  /// Agente que se lanza dentro de la shell al abrir la terminal (`null` = solo la shell).
+  agent: AgentId | null;
 };
 
 export type Session = {
@@ -41,8 +64,15 @@ let counter = 0;
 export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${counter++}`;
 
 let paneSeq = 0;
-export function newPane(): Pane {
-  return { id: newId("pane"), seq: paneSeq++, minimized: false };
+export function newPane(initialCwd: string | null = null, agent: AgentId | null = null): Pane {
+  return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd, agent };
+}
+
+/// Agrega `pane` justo después de `afterId` (o al final si no está).
+export function insertPaneAfter(panes: Pane[], afterId: string | null, pane: Pane): Pane[] {
+  const i = afterId ? panes.findIndex((p) => p.id === afterId) : -1;
+  if (i < 0) return [...panes, pane];
+  return [...panes.slice(0, i + 1), pane, ...panes.slice(i + 1)];
 }
 
 /// Intercambia dos paneles de lugar.

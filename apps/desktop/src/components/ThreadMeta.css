@@ -1,0 +1,103 @@
+/* Línea secundaria bajo cada terminal del hilo del sidebar. */
+.thread-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.thread-meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* Estado del agente junto al título: "Claude Code · Working". El nombre se
+   recorta antes que el estado. */
+.thread-heading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.thread-heading .thread-label {
+  flex: 0 1 auto;
+}
+
+.thread-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 100 auto;
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+.thread-state-sep {
+  white-space: pre;
+}
+
+.thread-state-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-state svg {
+  flex: none;
+}
+
+.thread-state--working {
+  color: var(--text-muted);
+}
+
+.thread-state--working svg {
+  color: var(--accent-soft);
+  animation: thread-meta-pulse 1.4s ease-in-out infinite;
+}
+
+/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
+.thread-state--attention,
+.thread-state--approval {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.thread-state--error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* Herramienta en curso (`Bash: echo hi`) o detalle del error: una línea, recortada. */
+.thread-meta-tool {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+
+@keyframes thread-meta-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-state--working svg {
+    animation: none;
+  }
+}
+
+/* Separador entre partes: "Bash: echo hi · 12m". */
+.thread-meta-part + .thread-meta-part::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--text-faint);
+}

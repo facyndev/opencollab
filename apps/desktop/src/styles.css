@@ -118,8 +118,12 @@ kbd {
 .dot--starting {
   background: var(--accent-soft);
 }
+.dot--connected,
 .dot--done {
   background: var(--green);
+}
+.dot--idle {
+  background: var(--gray);
 }
 .dot--waiting {
   background: var(--amber);
@@ -195,9 +199,17 @@ kbd {
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
+  overflow: hidden;
+  background: transparent;
   flex: none;
+}
+
+.ws-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 7px;
+  display: block;
 }
 
 .ws-text {
@@ -335,7 +347,7 @@ kbd {
   /* Ancho completo: un <button> se achica a su contenido y pegaría el contador al título. */
   width: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 8px;
   border: 1px solid transparent;
@@ -368,27 +380,13 @@ kbd {
   padding: 6px 6px 6px 0;
 }
 
-.session .dot {
-  margin-top: 5px;
-}
-
-.session-text {
-  display: flex;
-  flex-direction: column;
+.session-name {
   flex: 1;
   min-width: 0;
-}
-
-.session-name {
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.session-meta {
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 .session-count {
@@ -418,6 +416,10 @@ kbd {
 .thread {
   --thread-line: 2px solid var(--border-strong);
   --thread-x: 12px;
+  /* Alto de una fila. Acota el codo: sin esto, una fila con la rama
+     debajo calcularía el codo sobre el alto de toda la lista y apuntaría al
+     medio en vez de a su terminal. */
+  --thread-row: 26px;
   list-style: none;
   margin: 0 0 6px;
   padding: 0;
@@ -435,7 +437,7 @@ kbd {
   left: var(--thread-x);
   /* 1px de superposición con el tramo de arriba: sin cortes por redondeo de subpíxeles. */
   top: -1px;
-  height: calc(50% + 1px);
+  height: calc(min(50%, var(--thread-row)) + 1px);
   width: 10px;
   border-left: var(--thread-line);
   border-bottom: var(--thread-line);
@@ -449,7 +451,7 @@ kbd {
   left: var(--thread-x);
   /* Arranca donde empieza la curva del codo (su radio es 8px), no donde termina:
      si no, la línea recta queda cortada a la altura de cada rama. */
-  top: calc(50% - 8px);
+  top: calc(min(50%, var(--thread-row)) - 8px);
   bottom: -1px;
   border-left: var(--thread-line);
 }
@@ -457,8 +459,23 @@ kbd {
 /* El primer tramo no tiene nada arriba con qué superponerse. */
 .thread li:first-child::before {
   top: 0;
-  height: 50%;
+  height: min(50%, var(--thread-row));
   border-top-left-radius: 2px;
+}
+
+/* Nivel interno del hilo: la rama de git que cuelga de la terminal de arriba.
+   Hereda el codo de `.thread`, con menos sangría, una fila más baja y un cuerpo
+   chico para que se lea como hijo y no como otra terminal. */
+.thread--sub {
+  --thread-x: 8px;
+  --thread-row: 22px;
+  margin: 0;
+}
+
+.thread--sub .thread-item {
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .thread-item {
@@ -466,6 +483,7 @@ kbd {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: var(--thread-row);
   padding: 5px 8px;
   border-radius: 6px;
   font-size: 12px;
@@ -646,6 +664,14 @@ kbd {
   color: var(--text-muted);
 }
 
+.grid-empty-logo {
+  width: 56px;
+  height: 56px;
+  opacity: 0.7;
+  filter: drop-shadow(0 0 16px rgba(124, 92, 255, 0.35));
+  margin-bottom: 4px;
+}
+
 /* ---------- Panel: wrapper reutilizable (components/Panel.tsx) ----------
    Marco con la barra de título arriba y el contenido en un bloque interno
    oscuro con radio, envuelto por el padding del marco. */
@@ -684,6 +710,14 @@ kbd {
 }
 
 .pane[hidden] {
+  display: none;
+}
+
+/* La cuenta local está fija en el código hasta que exista autenticación: se
+   oculta sin quitarla del marcado. */
+.user[hidden],
+.avatars[hidden],
+.avatar[hidden] {
   display: none;
 }
 
@@ -953,14 +987,16 @@ button.cwd-item:hover {
   align-items: center;
   gap: 20px;
   height: 36px;
-  margin: 0 8px 8px;
+  margin: 0 8px 0;
   padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  /* Barra sólida, con la misma superficie que los paneles. */
-  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  /* Barra sólida que se despega del fondo, con un brillo sutil arriba. */
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
   font-size: 12px;
-  color: var(--text-muted);
+  color: #a1a1aa;
   white-space: nowrap;
 }
 
@@ -974,4 +1010,28 @@ button.cwd-item:hover {
   margin-left: auto;
   font-family: var(--mono);
   font-size: 11px;
+}
+
+/* Menú "New terminal" del header de una terminal (reusa .cwd-menu / .cwd-item). */
+.new-terminal-menu {
+  min-width: 300px;
+}
+
+.new-terminal-menu .cwd-item {
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.new-terminal-menu .cwd-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.new-terminal-menu .cwd-item-hint {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.new-terminal-label {
+  flex: none;
 }

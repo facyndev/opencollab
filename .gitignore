@@ -7,6 +7,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Artefactos de release (scripts/package-release.ps1)
+/release/
+
 # Tauri
 apps/desktop/src-tauri/gen/schemas/
 
@@ -20,3 +23,6 @@ apps/desktop/src-tauri/gen/schemas/
 .DS_Store
 Thumbs.db
 *.log
+
+# Caché local del registro de skills de gentle-ai
+.atl/

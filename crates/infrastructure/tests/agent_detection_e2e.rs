@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use application::agent_detection::detect_agent;
+use application::agent_detection::detect_agents;
 use application::ports::{ProcessInspector, PtyPort, TerminalOutputSink, TerminalSize};
-use application::KnownAgent;
+use application::{AgentTree, KnownAgent};
 use domain::{AgentProfile, TerminalId};
 use infrastructure::{PortablePtyAdapter, SysinfoProcessInspector};
 
@@ -34,7 +34,7 @@ fn installed(command: &str) -> bool {
 }
 
 /// Lanza `command` dentro de una shell en un PTY y espera a que el detector lo vea.
-fn detect_running(command: &str) -> Option<KnownAgent> {
+fn detect_running(command: &str) -> AgentTree {
     let profile = if cfg!(windows) {
         AgentProfile::new("shell", "powershell.exe")
             .unwrap()
@@ -62,7 +62,7 @@ fn detect_running(command: &str) -> Option<KnownAgent> {
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut answered = 0;
-    let mut detected = None;
+    let mut detected = AgentTree::default();
     while Instant::now() < deadline {
         // Contestar consultas de posición de cursor (ConPTY y algunas TUIs las hacen).
         let queries = sink
@@ -80,8 +80,8 @@ fn detect_running(command: &str) -> Option<KnownAgent> {
         let Some(pid) = pty.process_id(terminal) else {
             break; // la shell terminó
         };
-        detected = detect_agent(&inspector.snapshot().unwrap(), pid);
-        if detected.is_some() {
+        detected = detect_agents(&inspector.snapshot().unwrap(), pid);
+        if detected.primary.is_some() {
             break;
         }
         thread::sleep(Duration::from_millis(300));
@@ -98,6 +98,7 @@ fn detects_installed_agents_in_a_real_pty() {
         ("opencode", KnownAgent::OpenCode),
         ("codex", KnownAgent::Codex),
         ("agy", KnownAgent::AntigravityCli),
+        ("grok", KnownAgent::Grok),
     ];
     let mut checked = 0;
     for (command, expected) in cases {
@@ -106,8 +107,8 @@ fn detects_installed_agents_in_a_real_pty() {
             continue;
         }
         let detected = detect_running(command);
-        println!("{command}: detectado {detected:?}");
-        assert_eq!(detected, Some(expected), "{command}");
+        println!("{command}: detectado {:?}", detected.primary);
+        assert_eq!(detected.primary, Some(expected), "{command}");
         checked += 1;
     }
     assert!(checked > 0, "no hay ningún agente instalado para probar");
@@ -121,5 +122,5 @@ fn a_plain_shell_command_is_not_an_agent() {
     } else {
         "sleep 5"
     };
-    assert_eq!(detect_running(command), None);
+    assert_eq!(detect_running(command).primary, None);
 }

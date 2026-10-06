@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u16 = 1;
 
+/// Dirección donde escucha el relay por defecto. El relay y el desktop la usan
+/// (ambos pisables con `RELAY_ADDR`), así que cambiarla es una sola línea.
+pub const DEFAULT_RELAY_ADDR: &str = "127.0.0.1:8787";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
     pub version: u16,

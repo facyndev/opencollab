@@ -1,5 +1,6 @@
 import { LayoutColumns, LayoutGrid, LayoutSingle, Plus, UserPlus } from "../icons";
 import { localUser, type Layout } from "../model";
+import { Button } from "./Button";
 
 type Props = {
   workspaceName: string;
@@ -25,18 +26,12 @@ export function TopBar(props: Props) {
       </nav>
 
       <div className="topbar-actions">
-        <div className="avatars" title="Participantes conectados">
+        <div className="avatars" title="Participantes conectados" hidden>
           <span className="avatar avatar--me">{localUser.initials}</span>
         </div>
-        <button
-          type="button"
-          className="btn"
-          disabled
-          title="Requiere el relay: todavía no está conectado"
-        >
-          <UserPlus />
+        <Button icon={<UserPlus />} disabled title="Requiere el relay: todavía no está conectado">
           Invite
-        </button>
+        </Button>
         <div className="segmented" role="group" aria-label="Layout">
           {layouts.map(({ id, label, icon: LayoutIcon }) => (
             <button
@@ -51,10 +46,9 @@ export function TopBar(props: Props) {
             </button>
           ))}
         </div>
-        <button type="button" className="btn btn--primary" onClick={props.onNewTerminal}>
-          <Plus />
+        <Button variant="primary" icon={<Plus />} onClick={props.onNewTerminal}>
           New terminal
-        </button>
+        </Button>
       </div>
     </header>
   );
