@@ -65,7 +65,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   `Invitation` (kind + status + `expiresAt`/`respondedAt`); migración inicial con `citext` y CHECK de `Invitation`,
   `docker-compose` local, servicio Postgres en el job `server` del CI,
   repositorios que mapean agregados ↔ filas con tests de integración.
-- [ ] **T4** — Auth: usuario o email + contraseña (argon2id), OAuth GitHub y
+- [x] **T4** — Auth: usuario o email + contraseña (argon2id), OAuth GitHub y
   Google (identidades vinculables), access JWT + refresh rotado con detección
   de reuso, `DesktopLoginCode` (PKCE) para el deep link al desktop.
 - [ ] **T5** — Ruteo por sesión y filtrado por permiso vigente en `/ws`.
@@ -242,3 +242,16 @@ sobre el commit work-unit de T1.
   nuevo → reintento revoca la familia); fetch a proveedores sin timeout;
   throttling por IP sin `trust proxy`; username con sondeo lineal;
   `ProviderKey` y `databaseUrl` duplicados/muertos.
+- 2026-10-06: Correcciones de la review de T4 en `fb550ec` (writer delegado,
+  TDD estricto, RED observado por cada fix): flujo OAuth atado al navegador
+  con cookie `oc_oauth` (httpOnly, SameSite=Lax, path `/auth/oauth`, hash en
+  el state; el ataque de vinculación ahora da 400), rotación de refresh en
+  una transacción (`rotateRefreshToken`), timeout de 10 s a proveedores con
+  502. GREEN re-corrido por el parent: unit 92/92, integración 75/75,
+  typecheck y build. Review (`review-bddce096c09dbde7`, 4 lentes): aprobada
+  y acknowledged; límite revisado → `fb550ec`. Avisos pendientes: cookie de
+  binding única → dos flujos OAuth simultáneos en el mismo navegador hacen
+  fallar el primero; TTL de la cookie no derivado del state; link desde una
+  web en otro origen necesita CORS con credenciales (T6); el timeout es por
+  llamada (GitHub hace 3 → hasta ~30 s); `trust proxy` y sondeo de
+  usernames siguen abiertos.
