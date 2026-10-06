@@ -58,7 +58,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   (`accessOf`, overrides lazy, invitados), `Invitation`, `Terminal`/
   `AgentProfile`, errores. Portar los tests de `crates/domain` como specs
   (RED primero) para que ninguna invariante se pierda.
-- [ ] **T3** — Persistencia completa: Prisma + PostgreSQL. Esquema acordado:
+- [x] **T3** — Persistencia completa: Prisma + PostgreSQL. Esquema acordado:
   `User`, `PasswordCredential`, `OAuthIdentity`, `RefreshToken`,
   `DesktopLoginCode`, `Workspace`, `WorkspaceMember`, `Session`,
   `SessionAccessOverride`, `SessionGuest`, `Terminal` (con `position`),
@@ -199,3 +199,25 @@ sobre el commit work-unit de T1.
   árbol final idéntico). Hashes nuevos de T2: `8f9ef23` (código), `bbfb2df`
   y este doc. Los hashes citados arriba (`58be74e`, `8f7a68b`, `4a391ad`)
   son los previos al rebase.
+- 2026-10-06: T3 completado en `feature/nest-persistence` (writer delegado,
+  TDD estricto). Commits `ad1d083` (rehidratación `Workspace.restore`/
+  `Session.restore` + copia de arrays de `AgentProfile`) y `ae79c8d`
+  (Prisma 7.10.0 con `prisma.config.ts` y adapter `pg`, esquema completo,
+  migración con `citext` + CHECK de `Invitation`, repositorios, Postgres en
+  `docker-compose.yml`, job `server` del CI en `ubuntu-latest` con servicio
+  Postgres porque los service containers no corren en runners Windows).
+  RED observado (unit: `restore` inexistente; integración: repos
+  inexistentes). GREEN re-corrido por el parent: unit 54/54, integración
+  26/26, typecheck y build limpios. Avisos de T2: (a) duplicado en
+  `participants`, (b) override que sobrevive al re-agregar y (c) nivel sin
+  validar en runtime se comportan igual en Rust → se dejan; (d) aliasing
+  era propio de TS → corregido. El YAML del CI no se ejecutó localmente.
+- 2026-10-06: Review de T3 (base `81f08e2`, lineage
+  `review-d8a1451c345b3792`, riesgo alto, 4 lentes; 3 capturas fallaron por
+  límite de uso, se reofrecieron y se relanzaron): aprobada sin correcciones
+  y acknowledged. Límite revisado → `ae79c8d`. Avisos para T4: un `username`
+  puede coincidir con el `email` de otro usuario y volver ambiguo el login
+  (prohibir `@` en usernames); `listPendingFor` ignora `expiresAt`;
+  `setStatus` no valida transiciones (solo desde `PENDING`); `Session.save`
+  reemplaza hijos sin control de concurrencia; `Postgres` local expuesto en
+  `0.0.0.0:5432` (atar a `127.0.0.1`).
