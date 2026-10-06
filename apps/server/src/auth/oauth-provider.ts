@@ -14,6 +14,13 @@ export interface ProviderProfile {
   emailVerified: boolean;
 }
 
+/** The provider could not be reached in time (timeout or network failure). */
+export class ProviderUnavailableError extends Error {
+  constructor() {
+    super('provider unavailable');
+  }
+}
+
 /** Port: the only place that talks to GitHub/Google over HTTP. */
 export interface OAuthProviderPort {
   readonly name: ProviderName;

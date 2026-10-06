@@ -100,13 +100,21 @@ export class AuthRepository {
       : undefined;
   }
 
-  /** Atomically revokes a live token; false means somebody else already did (reuse). */
-  async claimRefreshToken(tokenHash: string, now: Date): Promise<boolean> {
-    const { count } = await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revokedAt: null },
-      data: { revokedAt: now },
+  /**
+   * Rotation in one transaction: revokes the live token and stores its
+   * successor, or does neither. False means the token was already spent
+   * (reuse); nothing is written then.
+   */
+  async rotateRefreshToken(oldHash: string, next: NewRefreshToken, now: Date): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.refreshToken.updateMany({
+        where: { tokenHash: oldHash, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      if (count !== 1) return false;
+      await tx.refreshToken.create({ data: { ...next, userAgent: next.userAgent ?? null } });
+      return true;
     });
-    return count === 1;
   }
 
   async revokeFamily(familyId: string, now: Date): Promise<void> {

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { truncateAll } from '../persistence/test-db';
-import type { ProviderProfile } from './oauth-provider';
+import { ProviderUnavailableError, type ProviderProfile } from './oauth-provider';
 import { startTestApp, type TestApp } from './test-app';
 import { s256 } from './tokens';
 
@@ -18,15 +18,23 @@ interface Res {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any;
   location: string | null;
+  setCookie: string | null;
 }
 
-async function call(method: string, path: string, body?: unknown, token?: string): Promise<Res> {
+async function call(
+  method: string,
+  path: string,
+  body?: unknown,
+  token?: string,
+  cookie?: string,
+): Promise<Res> {
   const res = await fetch(`${t.baseUrl}${path}`, {
     method,
     redirect: 'manual',
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -37,11 +45,20 @@ async function call(method: string, path: string, body?: unknown, token?: string
   } catch {
     parsed = text;
   }
-  return { status: res.status, body: parsed, location: res.headers.get('location') };
+  return { status: res.status, body: parsed, location: res.headers.get('location'),
+    setCookie: res.headers.get('set-cookie'),
+  };
 }
 
 const post = (path: string, body?: unknown, token?: string) => call('POST', path, body ?? {}, token);
-const get = (path: string, token?: string) => call('GET', path, undefined, token);
+const get = (path: string, token?: string, cookie?: string) =>
+  call('GET', path, undefined, token, cookie);
+
+// The `name=value` pair a browser would send back for a Set-Cookie header.
+const cookieOf = (res: Res): string => {
+  expect(res.setCookie).toBeTruthy();
+  return (res.setCookie as string).split(';')[0] as string;
+};
 
 const credentials = {
   username: 'jane',
@@ -71,6 +88,8 @@ async function oauthLogin(code: string, p: ProviderProfile, query = ''): Promise
   expect(start.status).toBe(302);
   return get(
     `/auth/oauth/github/callback?code=${code}&state=${encodeURIComponent(stateFrom(start.location))}`,
+    undefined,
+    cookieOf(start),
   );
 }
 
@@ -271,16 +290,81 @@ describe('oauth', () => {
     expect((await get('/auth/oauth/github/callback?code=c1')).status).toBe(400);
     const start = await get('/auth/oauth/github/start');
     const state = stateFrom(start.location);
-    const denied = await get(`/auth/oauth/github/callback?error=access_denied&state=${state}`);
+    const cookie = cookieOf(start);
+    const denied = await get(`/auth/oauth/github/callback?error=access_denied&state=${state}`, undefined, cookie);
     expect(denied.status).toBe(400);
-    expect((await get(`/auth/oauth/github/callback?code=unknown&state=${state}`)).status).toBe(400);
+    expect((await get(`/auth/oauth/github/callback?code=unknown&state=${state}`, undefined, cookie)).status).toBe(400);
     t.clock.advance(11 * 60_000);
-    expect((await get(`/auth/oauth/github/callback?code=c1&state=${state}`)).status).toBe(400);
+    expect((await get(`/auth/oauth/github/callback?code=c1&state=${state}`, undefined, cookie)).status).toBe(400);
+  });
+
+  describe('browser binding', () => {
+    const cbPath = (code: string, start: Res) =>
+      `/auth/oauth/github/callback?code=${code}&state=${encodeURIComponent(stateFrom(start.location))}`;
+
+    it('sets a hardened, path-scoped cookie when a flow starts', async () => {
+      const start = await get('/auth/oauth/github/start');
+      for (const attr of ['HttpOnly', 'SameSite=Lax', 'Path=/auth/oauth', 'Max-Age=600']) {
+        expect(start.setCookie).toContain(attr);
+      }
+      expect(start.setCookie).not.toContain('Secure'); // the test base URL is http
+    });
+
+    it('answers 502 with a generic message when the provider is unavailable', async () => {
+      t.github.failWith = new ProviderUnavailableError();
+      try {
+        const start = await get('/auth/oauth/github/start');
+        const cb = await get(cbPath('c1', start), undefined, cookieOf(start));
+        expect(cb.status).toBe(502);
+        expect(JSON.stringify(cb.body)).not.toContain('c1');
+      } finally {
+        t.github.failWith = undefined;
+      }
+    });
+
+    it('rejects a callback without the cookie', async () => {
+      t.github.profiles.set('c1', profile());
+      const start = await get('/auth/oauth/github/start');
+      expect((await get(cbPath('c1', start))).status).toBe(400);
+      expect(await t.prisma.user.count()).toBe(0);
+    });
+
+    it('rejects a cookie that belongs to a different flow', async () => {
+      t.github.profiles.set('c1', profile());
+      const start = await get('/auth/oauth/github/start');
+      const other = await get('/auth/oauth/github/start');
+      expect((await get(cbPath('c1', start), undefined, cookieOf(other))).status).toBe(400);
+      expect(await t.prisma.user.count()).toBe(0);
+    });
+
+    it('clears the cookie on the callback', async () => {
+      t.github.profiles.set('c1', profile());
+      const start = await get('/auth/oauth/github/start');
+      const cb = await get(cbPath('c1', start), undefined, cookieOf(start));
+      expect(cb.status).toBe(200);
+      expect(cb.setCookie).toContain('Max-Age=0');
+    });
+
+    it('does not link when the victim browser lacks the attacker cookie', async () => {
+      const attacker = await register();
+      const start = await post('/auth/oauth/github/link/start', {}, attacker.body.accessToken);
+      expect(start.setCookie).toContain('HttpOnly');
+      t.github.profiles.set('victim', profile({ providerUserId: 'victim-gh' }));
+      const victim = await get(
+        `/auth/oauth/github/callback?code=victim&state=${encodeURIComponent(stateFrom(start.body.url))}`,
+      );
+      expect(victim.status).toBe(400);
+      expect(await t.prisma.oAuthIdentity.count()).toBe(0);
+    });
   });
 
   describe('linking', () => {
-    const callback = (code: string, url: string) =>
-      get(`/auth/oauth/github/callback?code=${code}&state=${encodeURIComponent(stateFrom(url))}`);
+    const callback = (code: string, url: string, cookie?: string) =>
+      get(
+        `/auth/oauth/github/callback?code=${code}&state=${encodeURIComponent(stateFrom(url))}`,
+        undefined,
+        cookie,
+      );
 
     it('requires authentication', async () => {
       expect((await post('/auth/oauth/github/link/start')).status).toBe(401);
@@ -291,7 +375,7 @@ describe('oauth', () => {
       const start = await post('/auth/oauth/github/link/start', {}, reg.body.accessToken);
       expect(start.status).toBe(200);
       t.github.profiles.set('c1', profile());
-      const cb = await callback('c1', start.body.url);
+      const cb = await callback('c1', start.body.url, cookieOf(start));
       expect(cb.status).toBe(200);
       expect(cb.body).toEqual({ linked: true, provider: 'github' });
 
@@ -305,7 +389,7 @@ describe('oauth', () => {
       const reg = await register();
       const start = await post('/auth/oauth/github/link/start', {}, reg.body.accessToken);
       t.github.profiles.set('c2', profile());
-      expect((await callback('c2', start.body.url)).status).toBe(409);
+      expect((await callback('c2', start.body.url, cookieOf(start))).status).toBe(409);
     });
 
     it('refuses a second identity of the same provider for one user', async () => {
@@ -317,7 +401,7 @@ describe('oauth', () => {
       for (const [code, id, expected] of cases) {
         const start = await post('/auth/oauth/github/link/start', {}, reg.body.accessToken);
         t.github.profiles.set(code, profile({ providerUserId: id }));
-        expect((await callback(code, start.body.url)).status).toBe(expected);
+        expect((await callback(code, start.body.url, cookieOf(start))).status).toBe(expected);
       }
     });
   });

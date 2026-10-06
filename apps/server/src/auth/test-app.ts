@@ -18,6 +18,8 @@ export class FakeProvider implements OAuthProviderPort {
   /** code -> profile the "provider" returns for it. */
   readonly profiles = new Map<string, ProviderProfile>();
   lastAuthorization?: { state: string; codeChallenge: string; redirectUri: string };
+  /** When set, `exchange` rejects with it (simulates provider outages). */
+  failWith?: Error;
   lastExchange?: { code: string; codeVerifier: string; redirectUri: string };
 
   constructor(readonly name: ProviderName) {}
@@ -29,6 +31,7 @@ export class FakeProvider implements OAuthProviderPort {
 
   async exchange(input: { code: string; codeVerifier: string; redirectUri: string }): Promise<ProviderProfile> {
     this.lastExchange = input;
+    if (this.failWith) throw this.failWith;
     const profile = this.profiles.get(input.code);
     if (!profile) throw new Error('invalid code');
     return profile;

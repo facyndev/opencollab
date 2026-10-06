@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { ProviderUnavailableError } from './oauth-provider';
 import { GithubProvider, GoogleProvider } from './providers';
 
 type Call = { url: string; init?: RequestInit };
@@ -110,5 +111,39 @@ describe('GoogleProvider', () => {
       email: 'jane@example.com',
       emailVerified: true,
     });
+  });
+});
+
+describe('provider timeouts', () => {
+  // Never resolves on its own; rejects only when the caller's signal aborts.
+  const hangingFetch = (() => {
+    const seen: { signal?: AbortSignal | null }[] = [];
+    const fn = ((_input: unknown, init?: RequestInit) => {
+      seen.push({ signal: init?.signal });
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      });
+    }) as unknown as typeof fetch;
+    return { fn, seen };
+  })();
+  const input = { code: 'c', codeVerifier: 'v', redirectUri };
+
+  it.each([
+    ['github', (fn: typeof fetch) => new GithubProvider(creds, fn, 20)],
+    ['google', (fn: typeof fetch) => new GoogleProvider(creds, fn, 20)],
+  ])('%s: aborts a hung request and reports it as unavailable', async (_name, make) => {
+    await expect(make(hangingFetch.fn).exchange(input)).rejects.toBeInstanceOf(
+      ProviderUnavailableError,
+    );
+    expect(hangingFetch.seen[0]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('reports a network failure as unavailable without leaking its message', async () => {
+    const boom = (async () => {
+      throw new Error('connect ECONNREFUSED secret-token-123');
+    }) as typeof fetch;
+    const error = await new GithubProvider(creds, boom, 20).exchange(input).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderUnavailableError);
+    expect(String((error as Error).message)).not.toContain('secret-token-123');
   });
 });

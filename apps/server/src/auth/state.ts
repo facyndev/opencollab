@@ -11,6 +11,8 @@ export interface OAuthState {
   client: 'web' | 'desktop';
   /** Random per flow; also derives the provider-side PKCE verifier. */
   nonce: string;
+  /** Hash of the browser-binding cookie value set when the flow started. */
+  binding: string;
   /** Desktop only: the desktop's own S256 challenge. */
   codeChallenge?: string;
   /** Link intent only: the authenticated user starting the link. */
@@ -36,12 +38,13 @@ export function verifyState(token: string, secret: string, now: Date): OAuthStat
       audience: AUDIENCE,
       clockTimestamp: seconds(now),
     }) as jwt.JwtPayload;
-    const { provider, intent, client, nonce, codeChallenge, linkUserId } = claims;
+    const { provider, intent, client, nonce, binding, codeChallenge, linkUserId } = claims;
     return {
       provider,
       intent,
       client,
       nonce,
+      binding,
       ...(codeChallenge ? { codeChallenge } : {}),
       ...(linkUserId ? { linkUserId } : {}),
     };

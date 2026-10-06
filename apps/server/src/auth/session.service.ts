@@ -4,7 +4,7 @@ import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import jwt from 'jsonwebtoken';
 
 import type { UserId } from '../domain';
-import { AuthRepository } from '../persistence/auth.repository';
+import { AuthRepository, type NewRefreshToken } from '../persistence/auth.repository';
 import { CLOCK, type Clock } from './clock';
 import { AUTH_CONFIG, type AuthConfig } from './config';
 import { deriveKey } from './keys';
@@ -38,6 +38,15 @@ export class SessionService {
 
   /** Mints an access JWT plus a refresh token (new family unless rotating one). */
   async issue(userId: UserId, familyId: string = randomUUID(), userAgent?: string): Promise<TokenPair> {
+    return this.mint(userId, familyId, userAgent, (row) => this.repo.insertRefreshToken(row));
+  }
+
+  private async mint(
+    userId: UserId,
+    familyId: string,
+    userAgent: string | undefined,
+    persist: (row: NewRefreshToken) => Promise<void>,
+  ): Promise<TokenPair> {
     const now = this.clock.now();
     const accessToken = jwt.sign(
       { sub: userId, iat: seconds(now), exp: seconds(now) + ACCESS_TTL_SECONDS },
@@ -45,7 +54,7 @@ export class SessionService {
       { algorithm: 'HS256', audience: AUDIENCE },
     );
     const refreshToken = generateToken();
-    await this.repo.insertRefreshToken({
+    await persist({
       userId,
       familyId,
       tokenHash: hashToken(refreshToken),
@@ -77,12 +86,15 @@ export class SessionService {
     const verdict = classifyRefresh(row, now);
     if (row && verdict === 'reuse') await this.repo.revokeFamily(row.familyId, now);
     if (!row || verdict !== 'valid') throw new UnauthorizedException('Invalid refresh token');
-    // Atomic claim: of two concurrent rotations only one wins; the loser is a reuse.
-    if (!(await this.repo.claimRefreshToken(hash, now))) {
-      await this.repo.revokeFamily(row.familyId, now);
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-    return { userId: row.userId, tokens: await this.issue(row.userId, row.familyId, userAgent) };
+    // Claim + insert are one transaction: a failed insert leaves the old token usable
+    // for the client's retry. Of two concurrent rotations only one wins; the loser is a reuse.
+    const tokens = await this.mint(row.userId, row.familyId, userAgent, async (next) => {
+      if (!(await this.repo.rotateRefreshToken(hash, next, now))) {
+        await this.repo.revokeFamily(row.familyId, now);
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+    });
+    return { userId: row.userId, tokens };
   }
 
   /** Revokes the family of the presented token. Unknown tokens are a silent no-op. */

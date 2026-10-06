@@ -9,6 +9,7 @@ const payload: OAuthState = {
   intent: 'login',
   client: 'web',
   nonce: 'n-1',
+  binding: 'b-1',
 };
 
 describe('oauth state', () => {

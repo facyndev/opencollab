@@ -27,6 +27,7 @@ import {
   startQuerySchema,
   ZodPipe,
 } from './dto';
+import { BINDING_COOKIE, readCookie } from './binding';
 import { OAuthService } from './oauth.service';
 
 // Modest per-IP limit for the credential-guessing surface (the module default is looser).
@@ -34,6 +35,7 @@ const STRICT = { default: { limit: 10, ttl: 60_000 } };
 
 // The slice of the express response this controller needs.
 interface Reply {
+  setHeader(name: string, value: string): void;
   redirect(status: number, url: string): void;
   status(code: number): { json(body: unknown): void };
 }
@@ -104,15 +106,24 @@ export class AuthController {
   start(
     @Param('provider') provider: string,
     @Query(new ZodPipe(startQuerySchema)) query: z.infer<typeof startQuerySchema>,
+    @Res({ passthrough: true }) res: Reply,
   ) {
-    return { url: this.oauth.start(provider, query.client, query.code_challenge) };
+    const flow = this.oauth.start(provider, query.client, query.code_challenge);
+    res.setHeader('Set-Cookie', flow.setCookie);
+    return { url: flow.url };
   }
 
   @Post('oauth/:provider/link/start')
   @HttpCode(200)
   @UseGuards(AccessGuard)
-  linkStart(@Param('provider') provider: string, @CurrentUser() user: UserRecord) {
-    return { url: this.oauth.startLink(provider, user.id) };
+  linkStart(
+    @Param('provider') provider: string,
+    @CurrentUser() user: UserRecord,
+    @Res({ passthrough: true }) res: Reply,
+  ) {
+    const flow = this.oauth.startLink(provider, user.id);
+    res.setHeader('Set-Cookie', flow.setCookie);
+    return { url: flow.url };
   }
 
   // The response is written by hand: the desktop gets a 302 to its deep link,
@@ -122,9 +133,13 @@ export class AuthController {
     @Param('provider') provider: string,
     @Query(new ZodPipe(callbackQuerySchema)) query: z.infer<typeof callbackQuerySchema>,
     @Res() res: Reply,
+    @Headers('cookie') cookies?: string,
     @Headers('user-agent') ua?: string,
   ): Promise<void> {
-    const outcome = await this.oauth.callback(provider, query, agent(ua));
+    // One-shot: the binding cookie is cleared whatever the outcome.
+    res.setHeader('Set-Cookie', this.oauth.clearBindingCookie);
+    const bound = readCookie(cookies, BINDING_COOKIE);
+    const outcome = await this.oauth.callback(provider, query, bound, agent(ua));
     switch (outcome.kind) {
       case 'desktop':
         res.redirect(302, outcome.redirectUrl);

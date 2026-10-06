@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   Inject,
@@ -12,10 +13,12 @@ import type { UserId } from '../domain';
 import { AuthRepository, isUniqueViolation } from '../persistence/auth.repository';
 import { UserRepository, type UserRecord } from '../persistence/user.repository';
 import { AuthService, toUserView, type AuthResult } from './auth.service';
+import { bindingHash, clearCookie, setCookie } from './binding';
 import { CLOCK, type Clock } from './clock';
 import { AUTH_CONFIG, type AuthConfig } from './config';
 import {
   OAUTH_PROVIDERS,
+  ProviderUnavailableError,
   isProviderName,
   type OAuthProviderPort,
   type OAuthProviders,
@@ -28,6 +31,12 @@ import { pickAvailableUsername, sanitizeUsername } from './username';
 
 export const DESKTOP_CODE_TTL_MS = 60_000;
 export const DESKTOP_CALLBACK = 'opencollab://auth/callback';
+
+/** A provider authorization URL plus the Set-Cookie that binds the flow to this browser. */
+export interface FlowStart {
+  url: string;
+  setCookie: string;
+}
 
 export type CallbackOutcome =
   | { kind: 'login'; result: AuthResult }
@@ -59,24 +68,35 @@ export class OAuthService {
     return `${this.config.publicBaseUrl}/auth/oauth/${provider.name}/callback`;
   }
 
+  private get secure(): boolean {
+    return this.config.publicBaseUrl.startsWith('https://');
+  }
+
+  /** Set-Cookie header that expires the binding cookie (sent on every callback). */
+  get clearBindingCookie(): string {
+    return clearCookie(this.secure);
+  }
+
   private authorizationUrl(
     provider: OAuthProviderPort,
-    base: Omit<OAuthState, 'nonce' | 'provider'>,
-  ): string {
+    base: Omit<OAuthState, 'nonce' | 'provider' | 'binding'>,
+  ): FlowStart {
     const nonce = randomBytes(16).toString('base64url');
+    const bindingValue = randomBytes(16).toString('base64url');
     const state = signState(
-      { ...base, provider: provider.name, nonce },
+      { ...base, provider: provider.name, nonce, binding: bindingHash(bindingValue) },
       this.config.jwtSecret,
       this.clock.now(),
     );
-    return provider.authorizationUrl({
+    const url = provider.authorizationUrl({
       state,
       codeChallenge: s256(pkceVerifierFor(this.config.jwtSecret, nonce)),
       redirectUri: this.redirectUri(provider),
     });
+    return { url, setCookie: setCookie(bindingValue, this.secure) };
   }
 
-  start(name: string, client: 'web' | 'desktop', codeChallenge?: string): string {
+  start(name: string, client: 'web' | 'desktop', codeChallenge?: string): FlowStart {
     const provider = this.provider(name);
     if (client === 'desktop' && !codeChallenge) {
       throw new BadRequestException('code_challenge is required for the desktop client');
@@ -88,7 +108,12 @@ export class OAuthService {
     });
   }
 
-  startLink(name: string, userId: UserId): string {
+  /**
+   * The binding cookie is set on this JSON response, so the provider URL must
+   * be opened in the same browser that called this endpoint (the web app, T6).
+   * The desktop never links directly: it links through the web app.
+   */
+  startLink(name: string, userId: UserId): FlowStart {
     return this.authorizationUrl(this.provider(name), {
       intent: 'link',
       client: 'web',
@@ -99,6 +124,7 @@ export class OAuthService {
   async callback(
     name: string,
     query: { code?: string; state?: string; error?: string },
+    bindingCookie: string | undefined,
     userAgent?: string,
   ): Promise<CallbackOutcome> {
     const provider = this.provider(name);
@@ -106,6 +132,10 @@ export class OAuthService {
       ? verifyState(query.state, this.config.jwtSecret, this.clock.now())
       : undefined;
     if (!state || state.provider !== provider.name) throw new BadRequestException('Invalid state');
+    // The flow must finish in the browser that started it (login/link CSRF).
+    if (!bindingCookie || bindingHash(bindingCookie) !== state.binding) {
+      throw new BadRequestException('Invalid state');
+    }
     if (query.error || !query.code) throw new BadRequestException('Authorization was not granted');
 
     let profile: ProviderProfile;
@@ -115,7 +145,10 @@ export class OAuthService {
         codeVerifier: pkceVerifierFor(this.config.jwtSecret, state.nonce),
         redirectUri: this.redirectUri(provider),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof ProviderUnavailableError) {
+        throw new BadGatewayException('The identity provider is unavailable');
+      }
       throw new BadRequestException('Could not complete the provider sign-in');
     }
 
