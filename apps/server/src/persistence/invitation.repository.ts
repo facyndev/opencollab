@@ -93,21 +93,26 @@ export class InvitationRepository {
     return row ? toStored(row) : undefined;
   }
 
-  async listPendingFor(userId: UserId): Promise<StoredInvitation[]> {
+  // Expired invitations (past `expiresAt`) are not pending, whatever their stored status.
+  async listPendingFor(userId: UserId, now: Date = new Date()): Promise<StoredInvitation[]> {
     const rows = await this.prisma.invitation.findMany({
-      where: { inviteeId: userId, status: 'PENDING' },
+      where: {
+        inviteeId: userId,
+        status: 'PENDING',
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     return rows.map(toStored);
   }
 
-  async setStatus(id: InvitationId, status: InvitationStatus): Promise<void> {
-    await this.prisma.invitation.update({
-      where: { id },
-      data: {
-        status: STATUS_TO_DB[status],
-        respondedAt: status === 'pending' ? null : new Date(),
-      },
+  // Responses are final: only a pending invitation can change status.
+  async setStatus(id: InvitationId, status: Exclude<InvitationStatus, 'pending'>): Promise<void> {
+    if ((status as InvitationStatus) === 'pending') throw new Error('cannot set status to pending');
+    const { count } = await this.prisma.invitation.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: STATUS_TO_DB[status], respondedAt: new Date() },
     });
+    if (count === 0) throw new Error(`invitation ${id} not found or not pending`);
   }
 }

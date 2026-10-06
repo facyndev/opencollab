@@ -70,6 +70,36 @@ describe('InvitationRepository', () => {
     expect(pending.map((p) => p.invitation.id)).toEqual([second.id]);
   });
 
+  it('excludes expired invitations from the pending list', async () => {
+    const f = await fixture();
+    const live = f.workspace.inviteMember(f.owner, f.invitee);
+    const expired = f.session.inviteGuest(f.workspace, f.owner, f.invitee);
+    await invitations.save(live, new Date(Date.now() + 3_600_000));
+    await invitations.save(expired, new Date(Date.now() - 1_000));
+
+    const pending = await invitations.listPendingFor(f.invitee);
+    expect(pending.map((p) => p.invitation.id)).toEqual([live.id]);
+    const later = new Date(Date.now() + 2 * 3_600_000);
+    expect(await invitations.listPendingFor(f.invitee, later)).toEqual([]);
+  });
+
+  it('setStatus only transitions from pending', async () => {
+    const f = await fixture();
+    const invitation = f.workspace.inviteMember(f.owner, f.invitee);
+    await invitations.save(invitation);
+    await invitations.setStatus(invitation.id, 'accepted');
+    await expect(invitations.setStatus(invitation.id, 'revoked')).rejects.toThrow(/pending/);
+    expect((await invitations.find(invitation.id))?.status).toBe('accepted');
+  });
+
+  it('setStatus rejects an unknown invitation and a pending target', async () => {
+    const f = await fixture();
+    await expect(invitations.setStatus(newInvitationId(), 'accepted')).rejects.toThrow();
+    const invitation = f.workspace.inviteMember(f.owner, f.invitee);
+    await invitations.save(invitation);
+    await expect(invitations.setStatus(invitation.id, 'pending' as 'accepted')).rejects.toThrow();
+  });
+
   it('setStatus records the response time', async () => {
     const f = await fixture();
     const invitation = f.workspace.inviteMember(f.owner, f.invitee);
