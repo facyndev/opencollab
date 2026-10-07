@@ -63,3 +63,10 @@ Delegado directo: un writer (5 archivos no triviales).
   server/web solo si existe su `package.json` (se activan solos al
   mergear `nest-server` y T6b). Simulado localmente: desktop ok, server y
   web salteados en `develop`. Commit work-unit en esta rama.
+- 2026-10-07: Review de `5752498` (4 lentes, riesgo alto por shell en CI,
+  consent granted): aprobada y acknowledged. Corregido inline: el guard
+  `$LASTEXITCODE` cortaba el loop con éxito antes de la web (variable sin
+  setear → `exit $null`); se quitó (el script corta con error terminante) y
+  se loguea cuando un paquete se saltea; `AGENTS.md` alineado. Simulado en
+  un árbol temporal: desktop y server verificados, web salteada con log,
+  server con versión inválida → exit 1.

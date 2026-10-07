@@ -95,10 +95,12 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/check-version.ps1 -Package desktop
-          # server y web se verifican desde que existen en el repo.
+          # server y web se verifican desde que existen en el repo. El script corta
+          # con un error terminante si algo no coincide, y eso falla el paso.
           foreach ($package in 'server', 'web') {
             if (Test-Path "apps/$package/package.json") {
               ./scripts/check-version.ps1 -Package $package
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            } else {
+              Write-Host "Versión ($package): se saltea, no existe apps/$package/package.json."
             }
           }
