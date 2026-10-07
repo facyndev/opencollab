@@ -26,6 +26,7 @@ describe('CollabGateway', () => {
   let url: string;
   let owner: UserId;
   let member: UserId;
+  let workspace: Workspace;
   let session: Session;
   let terminal: string;
   let tokens: Record<string, { userId: UserId; expiresAt: number; familyId?: string }>;
@@ -40,7 +41,7 @@ describe('CollabGateway', () => {
       'owner-token': { userId: owner, expiresAt: farFuture },
       'member-token': { userId: member, expiresAt: farFuture },
     };
-    const workspace = new Workspace(owner, 'w');
+    workspace = new Workspace(owner, 'w');
     workspace.addMember(owner, member);
     session = Session.create(workspace, owner, 's');
     terminal = session.addTerminal(workspace, owner, newAgentProfile('sh', 'sh'));
@@ -356,6 +357,23 @@ describe('CollabGateway', () => {
       expect(await gone).toEqual({ code: 1008, reason: 'session_revoked' });
     });
 
+    it('keeps the family and the deadline of the token that lives longer when reauth presents an older one', async () => {
+      tokens['long'] = { userId: owner, expiresAt: future() + 900, familyId: 'fam-long' };
+      tokens['older'] = { userId: owner, expiresAt: future(), familyId: 'fam-older' };
+      const socket = await authed('long');
+      const reply = next(socket);
+      socket.send(frame({ type: 'reauth', token: 'older' }));
+      expect(JSON.parse(await reply).message.type).toBe('reauthenticated');
+
+      // Family and deadline come from the same token: revoking the older family changes nothing...
+      revocations.publish('fam-older');
+      expect(JSON.parse(await join(socket)).message.type).toBe('joined');
+      // ...while revoking the family of the token that defines the deadline still closes it.
+      const gone = closed(socket);
+      revocations.publish('fam-long');
+      expect(await gone).toEqual({ code: 1008, reason: 'session_revoked' });
+    });
+
     it('leaves sockets without a family untouched', async () => {
       const socket = await authed('owner-token'); // no familyId claim
       revocations.publish('fam-a');
@@ -423,6 +441,40 @@ describe('CollabGateway', () => {
       host.send(frame({ type: 'terminal_output', session_id: session.id, terminal_id: terminal, data: [1] }));
       expect(await gone).toEqual({ code: 1013, reason: 'slow_consumer' });
       expect(disconnect.mock.calls.some(([conn]) => conn.userId === member)).toBe(true);
+    });
+
+    it('detaches a consumer that became slow mid-broadcast only after every peer was served', async () => {
+      const third = newUserId();
+      const hub = app.get(SessionHub);
+      const events: string[] = [];
+      const disconnect = hub.disconnect.bind(hub);
+      vi.spyOn(hub, 'disconnect').mockImplementation((conn) => {
+        events.push(`disconnect:${conn.userId === member ? 'slow' : 'other'}`);
+        disconnect(conn);
+      });
+      const host = await authed('owner-token');
+      const slow = await authed('member-token');
+      tokens['third-token'] = { userId: third, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
+      workspace.addMember(owner, third);
+      const healthy = await authed('third-token');
+      await join(host);
+      await join(slow);
+      await join(healthy);
+      const [, slowServer, healthyServer] = serverSockets();
+      Object.defineProperty(slowServer, 'bufferedAmount', { get: () => MAX_BUFFERED_BYTES + 1 });
+      const healthySend = healthyServer.send.bind(healthyServer);
+      vi.spyOn(healthyServer, 'send').mockImplementation(((...args: Parameters<WebSocket['send']>) => {
+        events.push('send:healthy');
+        return healthySend(...args);
+      }) as WebSocket['send']);
+
+      const out = frame({ type: 'terminal_output', session_id: session.id, terminal_id: terminal, data: [1] });
+      const received = next(healthy);
+      const gone = closed(slow);
+      host.send(out);
+      expect(await received).toBe(out);
+      expect(await gone).toEqual({ code: 1013, reason: 'slow_consumer' });
+      expect(events).toEqual(['send:healthy', 'disconnect:slow']);
     });
 
     it('keeps delivering to a consumer under the cap', async () => {

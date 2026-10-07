@@ -113,6 +113,70 @@ describe('SessionService family revocation', () => {
   });
 });
 
+describe('SessionService revoked families', () => {
+  const start = new Date('2026-10-06T12:00:00Z');
+  let now = start;
+  const clock: Clock = { now: () => now };
+
+  function setup() {
+    now = start;
+    const rows = new Map<string, RefreshRow>();
+    const repo = {
+      insertRefreshToken: async (row: RefreshRow & { tokenHash: string }) => void rows.set(row.tokenHash, row),
+      findRefreshToken: async (hash: string) => rows.get(hash),
+      revokeFamily: async () => undefined,
+    } as unknown as AuthRepository;
+    return new SessionService(repo, config, clock, new SessionRevocations());
+  }
+
+  it('rejects a still-valid access token of a revoked family, for claims and for the HTTP guard path', async () => {
+    const service = setup();
+    const userId = newUserId();
+    const revoked = await service.issue(userId, 'fam-r');
+    const other = await service.issue(userId, 'fam-ok');
+    expect(service.verifyAccess(revoked.accessToken)).toBe(userId);
+    await service.logout(revoked.refreshToken);
+    expect(service.verifyAccessClaims(revoked.accessToken)).toBeUndefined();
+    expect(service.verifyAccess(revoked.accessToken)).toBeUndefined();
+    expect(service.verifyAccess(other.accessToken)).toBe(userId);
+  });
+
+  it('rejects the family after a refresh-token reuse as well', async () => {
+    const rows = new Map<string, RefreshRow>();
+    const repo = {
+      insertRefreshToken: async (row: RefreshRow & { tokenHash: string }) => void rows.set(row.tokenHash, row),
+      findRefreshToken: async (hash: string) => rows.get(hash),
+      rotateRefreshToken: async (oldHash: string, next: RefreshRow & { tokenHash: string }) => {
+        const old = rows.get(oldHash);
+        if (!old || old.revokedAt) return false;
+        rows.set(oldHash, { ...old, revokedAt: start });
+        rows.set(next.tokenHash, next);
+        return true;
+      },
+      revokeFamily: async () => undefined,
+    } as unknown as AuthRepository;
+    now = start;
+    const service = new SessionService(repo, config, clock, new SessionRevocations());
+    const first = await service.issue(newUserId(), 'fam-reuse');
+    const rotated = await service.refresh(first.refreshToken);
+    await expect(service.refresh(first.refreshToken)).rejects.toThrow();
+    expect(service.verifyAccessClaims(rotated.tokens.accessToken)).toBeUndefined();
+  });
+
+  it('prunes expired records when a new family is revoked, so the set stays bounded', async () => {
+    const service = setup();
+    for (const id of ['f1', 'f2', 'f3']) {
+      const { refreshToken } = await service.issue(newUserId(), id);
+      await service.logout(refreshToken);
+    }
+    expect(service.revokedFamilyCount()).toBe(3);
+    now = new Date(start.getTime() + (ACCESS_TTL_SECONDS + 1) * 1000);
+    const { refreshToken } = await service.issue(newUserId(), 'f4');
+    await service.logout(refreshToken);
+    expect(service.revokedFamilyCount()).toBe(1);
+  });
+});
+
 describe('SessionRevocations', () => {
   it('notifies every subscriber, stops after unsubscribe and survives a throwing listener', () => {
     const revocations = new SessionRevocations();

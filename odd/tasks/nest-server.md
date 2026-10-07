@@ -119,6 +119,15 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   - [x] Usernames generados con sufijo aleatorio en vez de sondeo lineal.
   - Fuera de T5c: membresía del workspace cacheada en el hub (no existe aún
     un camino que la cambie; se resuelve con los comandos de workspace).
+- [x] **T5d** — Avisos de la review de T5c (rama `feature/nest-ws`).
+  - [x] Familias revocadas en memoria con TTL = vida del access token;
+    `verifyAccessClaims` rechaza un `sid` revocado (upgrade y `reauth`).
+  - [x] `reauth` adopta la familia del token nuevo solo si es el que vence
+    más tarde (familia y plazo siempre del mismo token).
+  - [x] Cerrar un consumidor lento no desconecta del hub durante un
+    recorrido de broadcast (se difiere hasta terminar el recorrido).
+  - Se deja: cookies `oc_oauth_<flow>` de flujos abandonados viven hasta su
+    TTL (10 min).
 - [ ] **T6** — `apps/web` + `packages/contracts` como fuente del wire.
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
@@ -432,3 +441,25 @@ sobre el commit work-unit de T1.
   lento desde `send` desconecta del hub mientras éste itera el broadcast
   (reentrancia); (d) cookies `oc_oauth_<flow>` de flujos abandonados se
   acumulan hasta su TTL.
+- 2026-10-07: T5d implementado por el writer delegado (sin commit). (1)
+  `SessionService` guarda las familias revocadas en un `Map` en memoria con
+  vencimiento = instante de revocación + `ACCESS_TTL_SECONDS` (la misma
+  constante que el TTL del JWT, con el reloj inyectado); se poda en cada
+  revocación, así que no crece sin límite; `verifyAccessClaims` rechaza un
+  `sid` revocado, lo que cubre upgrade, `reauth` y `AccessGuard` (HTTP, que
+  usa `verifyAccess`). Es por proceso: un deploy multi-instancia necesitaría
+  un almacén compartido. (2) `reauth` adopta la familia solo si el plazo
+  vigente que devuelve `extend` es el del token presentado (familia y plazo
+  del mismo token). (3) `send` ya no suelta al consumidor lento en el acto:
+  difiere el `drop(1013)` con `queueMicrotask` (una sola vez por conexión) y
+  el hub itera una copia de `live.conns` en output/input. RED observado: 4
+  specs de `session.service` (token de familia revocada aún válido, tras
+  reuso, `revokedFamilyCount` inexistente x2), gateway: reauth con token más
+  viejo (cierre no llegó: la familia vieja capturaba el socket) y orden
+  `disconnect` antes de `send` al peer sano. El test de hub (peer que se
+  desconecta desde `send`) pasó ya en RED: iterar un `Set` mientras se borra
+  es seguro en JS; queda como guarda de regresión. GREEN: unit 185/185,
+  integración 81/81, typecheck y build limpios. Se omitió el test de
+  "olvido por TTL vía verify" (un token vencido falla antes por `exp`); la
+  poda se prueba en la siguiente revocación. Fuera: cookies
+  `oc_oauth_<flow>` abandonadas.

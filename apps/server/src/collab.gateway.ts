@@ -100,6 +100,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       this.untrack(live);
     };
 
+    let slow = false;
     const live: Live = {
       socket,
       familyId: auth.familyId,
@@ -123,15 +124,26 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       send: (text) => {
         if (socket.readyState !== socket.OPEN) return;
         // Closing is loud; dropping terminal output would silently corrupt the viewer's terminal.
-        if (socket.bufferedAmount > MAX_BUFFERED_BYTES) return live.drop(1013, 'slow_consumer');
+        if (socket.bufferedAmount > MAX_BUFFERED_BYTES) {
+          // `send` runs inside the hub's broadcast loop: detaching here would mutate
+          // the hub's connection set mid-iteration, so the drop waits for the loop to end.
+          if (!slow) {
+            slow = true;
+            queueMicrotask(() => live.drop(1013, 'slow_consumer'));
+          }
+          return;
+        }
         socket.send(text);
       },
       reauthenticate: (token) => {
         const claims = this.sessions.verifyAccessClaims(token);
         // Same user only: a token for someone else must not hijack this socket.
         if (claims === undefined || claims.userId !== userId) return undefined;
-        this.setFamily(live, claims.familyId);
-        return deadline.extend(claims.expiresAt);
+        const effective = deadline.extend(claims.expiresAt);
+        // Family and deadline must come from the same token: adopt the family only
+        // when this token is the one that now defines the deadline.
+        if (effective === claims.expiresAt) this.setFamily(live, claims.familyId);
+        return effective;
       },
     };
 

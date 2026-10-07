@@ -183,6 +183,28 @@ describe('SessionHub', () => {
       expect(host.sent).toHaveLength(1); // only its own `joined`
     });
 
+    it('serves every peer even when one disconnects itself from inside send, and detaches it', async () => {
+      const host = connect(owner);
+      const first = connect(member);
+      const slow = new FakeConn(other);
+      hub.connect(slow);
+      const last = connect(member);
+      slow.send = (text) => {
+        slow.sent.push(text);
+        if (text === output()) hub.disconnect(slow); // what a slow-consumer close does
+      };
+      await join(host);
+      await join(slow);
+      await join(first);
+      await join(last);
+      const text = output();
+      await hub.receive(host, text);
+      expect(first.last).toBe(text);
+      expect(last.last).toBe(text);
+      await hub.receive(host, text);
+      expect(slow.sent.filter((sent) => sent === text)).toHaveLength(1);
+    });
+
     it('reaches every joined connection of a viewer', async () => {
       const host = connect(owner);
       const a = connect(member);

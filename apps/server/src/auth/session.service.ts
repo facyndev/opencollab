@@ -35,6 +35,12 @@ const seconds = (d: Date): number => Math.floor(d.getTime() / 1000);
 @Injectable()
 export class SessionService {
   private readonly key: string;
+  /**
+   * Revoked refresh families -> when the record may be dropped (their newest
+   * access token has expired by then). Per process: a multi-instance deploy
+   * would need a shared store for this.
+   */
+  private readonly revokedFamilies = new Map<string, number>();
 
   constructor(
     @Inject(AuthRepository) private readonly repo: AuthRepository,
@@ -82,7 +88,8 @@ export class SessionService {
    * The user, the expiry (unix seconds) and the refresh family (`sid`) of a
    * valid access token, or undefined. A token without `sid` (minted before the
    * claim existed) still verifies; it just has no family, so a family
-   * revocation cannot reach its sockets and it lapses with its own expiry.
+   * revocation cannot reach its sockets and it lapses with its own expiry. A
+   * token whose family was revoked is rejected even before its `exp`.
    */
   verifyAccessClaims(token: string): AccessClaims | undefined {
     try {
@@ -92,6 +99,8 @@ export class SessionService {
         clockTimestamp: seconds(this.clock.now()),
       }) as jwt.JwtPayload;
       if (typeof claims.sub !== 'string' || typeof claims.exp !== 'number') return undefined;
+      const familyId = claims['sid'];
+      if (typeof familyId === 'string' && this.isRevoked(familyId, this.clock.now().getTime())) return undefined;
       return {
         userId: claims.sub as UserId,
         expiresAt: claims.exp,
@@ -130,6 +139,25 @@ export class SessionService {
   /** Revokes in storage first, then tells live listeners to drop that family's sockets. */
   private async revoke(familyId: string, now: Date): Promise<void> {
     await this.repo.revokeFamily(familyId, now);
+    this.prune(now.getTime());
+    // Access tokens of this family are still valid until their `exp`: remember the
+    // revocation for as long as the newest of them can live.
+    this.revokedFamilies.set(familyId, now.getTime() + ACCESS_TTL_SECONDS * 1000);
     this.revocations.publish(familyId);
+  }
+
+  /** Number of revoked families still remembered (bounded by access-token lifetime). */
+  revokedFamilyCount(): number {
+    return this.revokedFamilies.size;
+  }
+
+  private isRevoked(familyId: string, nowMs: number): boolean {
+    return (this.revokedFamilies.get(familyId) ?? 0) > nowMs;
+  }
+
+  private prune(nowMs: number): void {
+    for (const [familyId, until] of this.revokedFamilies) {
+      if (until <= nowMs) this.revokedFamilies.delete(familyId);
+    }
   }
 }

@@ -188,7 +188,7 @@ export class SessionHub {
   private output(conn: HubConnection, live: Live, text: string, terminal: string): void {
     if (!live.workspace.isOwner(conn.userId)) return conn.send(FORBIDDEN);
     if (!live.session.terminal(terminal as TerminalId)) return conn.send(FORBIDDEN);
-    for (const peer of live.conns) {
+    for (const peer of [...live.conns]) {
       if (peer !== conn && live.session.canView(live.workspace, peer.userId)) safeSend(peer, text);
     }
   }
@@ -198,7 +198,7 @@ export class SessionHub {
     if (!live.session.canWrite(live.workspace, conn.userId)) return conn.send(FORBIDDEN);
     if (!live.session.terminal(terminal as TerminalId)) return conn.send(FORBIDDEN);
     // Only the host's machine owns the PTY, so only the owner's sockets get input.
-    for (const peer of live.conns) {
+    for (const peer of [...live.conns]) {
       if (live.workspace.isOwner(peer.userId)) safeSend(peer, text);
     }
   }
