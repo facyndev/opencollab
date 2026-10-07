@@ -70,3 +70,9 @@ Delegado directo: un writer (5 archivos no triviales).
   se loguea cuando un paquete se saltea; `AGENTS.md` alineado. Simulado en
   un árbol temporal: desktop y server verificados, web salteada con log,
   server con versión inválida → exit 1.
+- 2026-10-07: Review de `3d8f5cd` (4 lentes, consent granted): aprobada y
+  acknowledged. Aviso R3-001 (el paso depende del error terminante del
+  script) verificado y aceptado: el script fija `$ErrorActionPreference =
+  'Stop'`, el shell `pwsh` de Actions también, y la simulación con versión
+  inválida dio exit 1. Feature lista para PR a `develop` (cuando el
+  usuario decida el push).
