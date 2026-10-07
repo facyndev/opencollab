@@ -19,7 +19,11 @@ interface Res {
   body: any;
   location: string | null;
   setCookie: string | null;
+  setCookies: string[];
 }
+
+const WEB = 'http://web.test';
+const CSRF = { 'X-OpenCollab-CSRF': '1' };
 
 async function call(
   method: string,
@@ -27,6 +31,7 @@ async function call(
   body?: unknown,
   token?: string,
   cookie?: string,
+  headers: Record<string, string> = {},
 ): Promise<Res> {
   const res = await fetch(`${t.baseUrl}${path}`, {
     method,
@@ -35,6 +40,7 @@ async function call(
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
+      ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -47,10 +53,21 @@ async function call(
   }
   return { status: res.status, body: parsed, location: res.headers.get('location'),
     setCookie: res.headers.get('set-cookie'),
+    setCookies: res.headers.getSetCookie(),
   };
 }
 
 const post = (path: string, body?: unknown, token?: string) => call('POST', path, body ?? {}, token);
+// A browser call to a web route: the refresh cookie plus the anti-CSRF header.
+const webPost = (path: string, body?: unknown, cookie?: string, headers: Record<string, string> = CSRF) =>
+  call('POST', path, body, undefined, cookie, headers);
+
+// The `oc_refresh=...` pair of a response, as a browser would send it back.
+const refreshPair = (res: Res): string => {
+  const header = res.setCookies.find((c) => c.startsWith('oc_refresh='));
+  expect(header, 'no oc_refresh Set-Cookie').toBeTruthy();
+  return (header as string).split(';')[0] as string;
+};
 const get = (path: string, token?: string, cookie?: string) =>
   call('GET', path, undefined, token, cookie);
 
@@ -91,6 +108,16 @@ async function oauthLogin(code: string, p: ProviderProfile, query = ''): Promise
     undefined,
     cookieOf(start),
   );
+}
+
+// Finishes a web OAuth login and resolves the session it opened (via the cookie).
+async function oauthUser(code: string, p: ProviderProfile, query = '') {
+  const cb = await oauthLogin(code, p, query);
+  expect(cb.status).toBe(302);
+  const refreshed = await webPost('/auth/web/refresh', undefined, refreshPair(cb));
+  expect(refreshed.status).toBe(200);
+  const me = await get('/auth/me', refreshed.body.accessToken);
+  return { user: me.body, accessToken: refreshed.body.accessToken as string };
 }
 
 describe('register and login', () => {
@@ -235,16 +262,20 @@ describe('oauth', () => {
     expect(link.status).toBe(404);
   });
 
-  it('creates a new user from the provider profile (web tokens as JSON)', async () => {
-    const res = await oauthLogin('c1', profile());
-    expect(res.status).toBe(200);
-    expect(res.body.user).toMatchObject({
-      username: 'octo',
-      displayName: 'Octo Cat',
-      email: 'octo@example.com',
-    });
-    const me = await get('/auth/me', res.body.accessToken);
-    expect(me.body.emailVerifiedAt).not.toBeNull();
+  it('creates a new user from the provider profile and hands the web a cookie, not tokens', async () => {
+    const cb = await oauthLogin('c1', profile());
+    expect(cb.status).toBe(302);
+    expect(cb.location).toBe(`${WEB}/auth/complete`);
+    const cookie = cb.setCookies.find((c) => c.startsWith('oc_refresh='));
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+    // No token or secret may travel in the redirect URL or the body.
+    expect(cb.location).not.toContain(refreshPair(cb).split('=')[1]);
+    expect(JSON.stringify(cb.body)).not.toContain(refreshPair(cb).split('=')[1]);
+
+    const { user } = await oauthUser('c2', profile());
+    expect(user).toMatchObject({ username: 'octo', displayName: 'Octo Cat', email: 'octo@example.com' });
+    expect(user.emailVerifiedAt).not.toBeNull();
     expect(await t.prisma.oAuthIdentity.count()).toBe(1);
   });
 
@@ -256,32 +287,31 @@ describe('oauth', () => {
   });
 
   it('logs in the same user on a later login with the same identity', async () => {
-    const first = await oauthLogin('c1', profile());
-    const second = await oauthLogin('c2', profile({ displayName: 'Changed' }));
-    expect(second.body.user.id).toBe(first.body.user.id);
+    const first = await oauthUser('c1', profile());
+    const second = await oauthUser('c2', profile({ displayName: 'Changed' }));
+    expect(second.user.id).toBe(first.user.id);
     expect(await t.prisma.user.count()).toBe(1);
   });
 
   it('de-duplicates generated usernames', async () => {
     await post('/auth/register', { username: 'octo', password: 'a long password', displayName: 'X' });
-    const res = await oauthLogin('c1', profile({ login: 'octo' }));
-    expect(res.body.user.username).toMatch(/^octo-[a-z0-9]{6}$/);
+    const res = await oauthUser('c1', profile({ login: 'octo' }));
+    expect(res.user.username).toMatch(/^octo-[a-z0-9]{6}$/);
   });
 
   it('never auto-links by email: a taken email yields a new user with no email', async () => {
     const existing = await register({ email: 'octo@example.com', username: 'someone' });
-    const res = await oauthLogin('c1', profile({ email: 'octo@example.com' }));
-    expect(res.body.user.id).not.toBe(existing.body.user.id);
-    expect(res.body.user.email).toBeNull();
-    const me = await get('/auth/me', res.body.accessToken);
-    expect(me.body.emailVerifiedAt).toBeNull();
+    const res = await oauthUser('c1', profile({ email: 'octo@example.com' }));
+    expect(res.user.id).not.toBe(existing.body.user.id);
+    expect(res.user.email).toBeNull();
+    expect(res.user.emailVerifiedAt).toBeNull();
     const linked = await t.prisma.oAuthIdentity.count({ where: { userId: existing.body.user.id } });
     expect(linked).toBe(0);
   });
 
   it('keeps the email out when the provider does not verify it', async () => {
-    const res = await oauthLogin('c1', profile({ emailVerified: false }));
-    expect(res.body.user.email).toBeNull();
+    const res = await oauthUser('c1', profile({ emailVerified: false }));
+    expect(res.user.email).toBeNull();
   });
 
   it('rejects invalid state, provider errors, bad codes and expired state', async () => {
@@ -291,9 +321,13 @@ describe('oauth', () => {
     const start = await get('/auth/oauth/github/start');
     const state = stateFrom(start.location);
     const cookie = cookieOf(start);
+    // With a verified web state, failures bounce to the web app with a short code (never a token).
     const denied = await get(`/auth/oauth/github/callback?error=access_denied&state=${state}`, undefined, cookie);
-    expect(denied.status).toBe(400);
-    expect((await get(`/auth/oauth/github/callback?code=unknown&state=${state}`, undefined, cookie)).status).toBe(400);
+    expect(denied.status).toBe(302);
+    expect(denied.location).toBe(`${WEB}/login?error=access_denied`);
+    const unknown = await get(`/auth/oauth/github/callback?code=unknown&state=${state}`, undefined, cookie);
+    expect(unknown.status).toBe(302);
+    expect(unknown.location).toBe(`${WEB}/login?error=failed`);
     t.clock.advance(11 * 60_000);
     expect((await get(`/auth/oauth/github/callback?code=c1&state=${state}`, undefined, cookie)).status).toBe(400);
   });
@@ -310,13 +344,14 @@ describe('oauth', () => {
       expect(start.setCookie).not.toContain('Secure'); // the test base URL is http
     });
 
-    it('answers 502 with a generic message when the provider is unavailable', async () => {
+    it('bounces to the web app with a generic code when the provider is unavailable', async () => {
       t.github.failWith = new ProviderUnavailableError();
       try {
         const start = await get('/auth/oauth/github/start');
         const cb = await get(cbPath('c1', start), undefined, cookieOf(start));
-        expect(cb.status).toBe(502);
-        expect(JSON.stringify(cb.body)).not.toContain('c1');
+        expect(cb.status).toBe(302);
+        expect(cb.location).toBe(`${WEB}/login?error=provider_unavailable`);
+        expect(cb.location).not.toContain('c1');
       } finally {
         t.github.failWith = undefined;
       }
@@ -331,9 +366,9 @@ describe('oauth', () => {
       const secondCookie = cookieOf(second);
       expect(firstCookie.split('=')[0]).not.toBe(secondCookie.split('=')[0]);
       const jar = [firstCookie, secondCookie].join('; ');
-      expect((await get(cbPath('c1', first), undefined, jar)).status).toBe(200);
+      expect((await get(cbPath('c1', first), undefined, jar)).location).toBe(`${WEB}/auth/complete`);
       const done = await get(cbPath('c2', second), undefined, jar);
-      expect(done.status).toBe(200);
+      expect(done.location).toBe(`${WEB}/auth/complete`);
       // Each callback expires its own flow's cookie, not the other's.
       expect(done.setCookie).toContain(`${secondCookie.split('=')[0]}=;`);
     });
@@ -341,7 +376,9 @@ describe('oauth', () => {
     it('rejects a callback without the cookie', async () => {
       t.github.profiles.set('c1', profile());
       const start = await get('/auth/oauth/github/start');
-      expect((await get(cbPath('c1', start))).status).toBe(400);
+      const cb = await get(cbPath('c1', start));
+      expect(cb.location).toBe(`${WEB}/login?error=invalid_state`);
+      expect(cb.setCookies.some((c) => c.startsWith('oc_refresh='))).toBe(false);
       expect(await t.prisma.user.count()).toBe(0);
     });
 
@@ -349,16 +386,18 @@ describe('oauth', () => {
       t.github.profiles.set('c1', profile());
       const start = await get('/auth/oauth/github/start');
       const other = await get('/auth/oauth/github/start');
-      expect((await get(cbPath('c1', start), undefined, cookieOf(other))).status).toBe(400);
+      const cb = await get(cbPath('c1', start), undefined, cookieOf(other));
+      expect(cb.location).toBe(`${WEB}/login?error=invalid_state`);
       expect(await t.prisma.user.count()).toBe(0);
     });
 
-    it('clears the cookie on the callback', async () => {
+    it('clears the binding cookie on the callback (next to the refresh cookie)', async () => {
       t.github.profiles.set('c1', profile());
       const start = await get('/auth/oauth/github/start');
       const cb = await get(cbPath('c1', start), undefined, cookieOf(start));
-      expect(cb.status).toBe(200);
-      expect(cb.setCookie).toContain('Max-Age=0');
+      expect(cb.status).toBe(302);
+      expect(cb.setCookies.some((c) => c.startsWith('oc_oauth_') && c.includes('Max-Age=0'))).toBe(true);
+      expect(cb.setCookies.some((c) => c.startsWith('oc_refresh='))).toBe(true);
     });
 
     it('does not link when the victim browser lacks the attacker cookie', async () => {
@@ -369,7 +408,7 @@ describe('oauth', () => {
       const victim = await get(
         `/auth/oauth/github/callback?code=victim&state=${encodeURIComponent(stateFrom(start.body.url))}`,
       );
-      expect(victim.status).toBe(400);
+      expect(victim.location).toBe(`${WEB}/account?error=invalid_state`);
       expect(await t.prisma.oAuthIdentity.count()).toBe(0);
     });
   });
@@ -392,11 +431,13 @@ describe('oauth', () => {
       expect(start.status).toBe(200);
       t.github.profiles.set('c1', profile());
       const cb = await callback('c1', start.body.url, cookieOf(start));
-      expect(cb.status).toBe(200);
-      expect(cb.body).toEqual({ linked: true, provider: 'github' });
+      expect(cb.status).toBe(302);
+      expect(cb.location).toBe(`${WEB}/account?linked=github`);
+      // Linking never opens a session: no refresh cookie.
+      expect(cb.setCookies.some((c) => c.startsWith('oc_refresh='))).toBe(false);
 
-      const login = await oauthLogin('c2', profile());
-      expect(login.body.user.id).toBe(reg.body.user.id);
+      const login = await oauthUser('c2', profile());
+      expect(login.user.id).toBe(reg.body.user.id);
       expect(await t.prisma.user.count()).toBe(1);
     });
 
@@ -405,19 +446,20 @@ describe('oauth', () => {
       const reg = await register();
       const start = await post('/auth/oauth/github/link/start', {}, reg.body.accessToken);
       t.github.profiles.set('c2', profile());
-      expect((await callback('c2', start.body.url, cookieOf(start))).status).toBe(409);
+      const cb = await callback('c2', start.body.url, cookieOf(start));
+      expect(cb.location).toBe(`${WEB}/account?error=conflict`);
     });
 
     it('refuses a second identity of the same provider for one user', async () => {
       const reg = await register();
       const cases = [
-        ['c1', 'gh-1', 200],
-        ['c2', 'gh-2', 409],
+        ['c1', 'gh-1', `${WEB}/account?linked=github`],
+        ['c2', 'gh-2', `${WEB}/account?error=conflict`],
       ] as const;
       for (const [code, id, expected] of cases) {
         const start = await post('/auth/oauth/github/link/start', {}, reg.body.accessToken);
         t.github.profiles.set(code, profile({ providerUserId: id }));
-        expect((await callback(code, start.body.url, cookieOf(start))).status).toBe(expected);
+        expect((await callback(code, start.body.url, cookieOf(start))).location).toBe(expected);
       }
     });
   });
@@ -469,6 +511,157 @@ describe('desktop flow', () => {
     expect((await post('/auth/desktop/token', { code, codeVerifier: verifier })).status).toBe(200);
     expect((await post('/auth/desktop/token', { code, codeVerifier: verifier })).status).toBe(400);
     expect((await post('/auth/desktop/token', { code: 'nope', codeVerifier: verifier })).status).toBe(400);
+  });
+});
+
+describe('web session (cookie)', () => {
+  const login = () =>
+    webPost('/auth/web/login', { identifier: 'jane', password: credentials.password });
+  const webRegister = () => webPost('/auth/web/register', { ...credentials, displayName: 'Jane' });
+
+  it('registers and logs in with the refresh token in a hardened cookie and only the access token in JSON', async () => {
+    const reg = await webRegister();
+    expect(reg.status).toBe(201);
+    expect(reg.body.user).toMatchObject({ username: 'jane' });
+    expect(reg.body.refreshToken).toBeUndefined();
+    expect(reg.body.accessToken).toBeTruthy();
+    for (const attr of ['HttpOnly', 'SameSite=Strict', 'Path=/auth', `Max-Age=${30 * 24 * 3600}`]) {
+      expect(reg.setCookies.find((c) => c.startsWith('oc_refresh='))).toContain(attr);
+    }
+    expect((await get('/auth/me', reg.body.accessToken)).status).toBe(200);
+
+    const res = await login();
+    expect(res.status).toBe(200);
+    expect(res.body.refreshToken).toBeUndefined();
+    expect(res.body.user.id).toBe(reg.body.user.id);
+    expect(refreshPair(res)).toMatch(/^oc_refresh=.+/);
+  });
+
+  it('keeps the JSON-token routes (desktop) untouched', async () => {
+    const reg = await register();
+    expect(reg.body.refreshToken).toBeTruthy();
+    expect(reg.setCookies).toEqual([]);
+  });
+
+  it('answers bad credentials with 401 and no cookie', async () => {
+    await webRegister();
+    const res = await webPost('/auth/web/login', { identifier: 'jane', password: 'wrong password!!' });
+    expect(res.status).toBe(401);
+    expect(res.setCookies).toEqual([]);
+  });
+
+  it('rotates through the cookie and re-sets it', async () => {
+    const reg = await webRegister();
+    const first = refreshPair(reg);
+    const next = await webPost('/auth/web/refresh', undefined, first);
+    expect(next.status).toBe(200);
+    expect(next.body.refreshToken).toBeUndefined();
+    expect(next.body).toMatchObject({ tokenType: 'Bearer' });
+    expect(refreshPair(next)).not.toBe(first);
+    expect((await get('/auth/me', next.body.accessToken)).status).toBe(200);
+  });
+
+  it('keeps reuse detection: a spent cookie revokes the family and is cleared', async () => {
+    const reg = await webRegister();
+    const first = refreshPair(reg);
+    const next = await webPost('/auth/web/refresh', undefined, first);
+    const reuse = await webPost('/auth/web/refresh', undefined, first);
+    expect(reuse.status).toBe(401);
+    expect(reuse.setCookies.find((c) => c.startsWith('oc_refresh='))).toContain('Max-Age=0');
+    expect((await webPost('/auth/web/refresh', undefined, refreshPair(next))).status).toBe(401);
+  });
+
+  it('rejects a missing cookie with 401', async () => {
+    expect((await webPost('/auth/web/refresh')).status).toBe(401);
+  });
+
+  it('logs out: revokes the family and clears the cookie (idempotent)', async () => {
+    const reg = await webRegister();
+    const cookie = refreshPair(reg);
+    const out = await webPost('/auth/web/logout', undefined, cookie);
+    expect(out.status).toBe(204);
+    expect(out.setCookies.find((c) => c.startsWith('oc_refresh='))).toContain('Max-Age=0');
+    expect((await webPost('/auth/web/refresh', undefined, cookie)).status).toBe(401);
+    expect((await webPost('/auth/web/logout', undefined, cookie)).status).toBe(204);
+    expect((await webPost('/auth/web/logout')).status).toBe(204);
+  });
+
+  describe('CSRF header', () => {
+    it('is required on every web route: 403 without it, and nothing happens', async () => {
+      const reg = await webRegister();
+      const cookie = refreshPair(reg);
+      const cases: Array<[string, unknown]> = [
+        ['/auth/web/login', { identifier: 'jane', password: credentials.password }],
+        ['/auth/web/register', { ...credentials, username: 'other', email: 'o@example.com' }],
+        ['/auth/web/refresh', undefined],
+        ['/auth/web/logout', undefined],
+      ];
+      for (const [path, body] of cases) {
+        for (const headers of [{}, { 'X-OpenCollab-CSRF': '0' }] as Array<Record<string, string>>) {
+          const res = await webPost(path, body, cookie, headers);
+          expect(res.status, path).toBe(403);
+          expect(res.setCookies, path).toEqual([]);
+        }
+      }
+      expect(await t.prisma.user.count()).toBe(1);
+      // The cookie was neither rotated nor revoked by the rejected calls.
+      expect((await webPost('/auth/web/refresh', undefined, cookie)).status).toBe(200);
+    });
+  });
+});
+
+describe('desktop code from a session', () => {
+  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+  const challenge = s256(verifier);
+
+  it('requires an access token', async () => {
+    expect((await post('/auth/desktop/code', { code_challenge: challenge })).status).toBe(401);
+  });
+
+  it('issues a code the unchanged exchange accepts, for the same user', async () => {
+    const reg = await register();
+    const res = await post('/auth/desktop/code', { code_challenge: challenge }, reg.body.accessToken);
+    expect(res.status).toBe(200);
+    const url = new URL(res.body.redirectUrl);
+    expect(`${url.protocol}//${url.host}${url.pathname}`).toBe('opencollab://auth/callback');
+    const tokens = await post('/auth/desktop/token', {
+      code: url.searchParams.get('code'),
+      codeVerifier: verifier,
+    });
+    expect(tokens.status).toBe(200);
+    expect(tokens.body.user.id).toBe(reg.body.user.id);
+    // A different session (new family): it is a fresh login, not the web one.
+    expect(tokens.body.refreshToken).toBeTruthy();
+  });
+
+  it('validates the challenge, rejects unknown fields and burns the code on a wrong verifier', async () => {
+    const reg = await register();
+    const token = reg.body.accessToken;
+    expect((await post('/auth/desktop/code', {}, token)).status).toBe(400);
+    expect((await post('/auth/desktop/code', { code_challenge: 'short' }, token)).status).toBe(400);
+    expect((await post('/auth/desktop/code', { code_challenge: challenge, x: 1 }, token)).status).toBe(400);
+    const res = await post('/auth/desktop/code', { code_challenge: challenge }, token);
+    const code = new URL(res.body.redirectUrl).searchParams.get('code');
+    expect((await post('/auth/desktop/token', { code, codeVerifier: `${verifier}x` })).status).toBe(400);
+    expect((await post('/auth/desktop/token', { code, codeVerifier: verifier })).status).toBe(400);
+  });
+
+  it('is throttled like the other auth routes', async () => {
+    const limited = await startTestApp({ rateLimitEnabled: true });
+    try {
+      let last = 0;
+      for (let i = 0; i < 12; i += 1) {
+        const res = await fetch(`${limited.baseUrl}/auth/desktop/code`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code_challenge: challenge }),
+        });
+        last = res.status;
+      }
+      expect(last).toBe(429);
+    } finally {
+      await limited.close();
+    }
   });
 });
 

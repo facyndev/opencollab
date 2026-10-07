@@ -26,6 +26,10 @@ export const refreshSchema = z.object({ refreshToken: opaque }).strict();
 
 export const desktopTokenSchema = z.object({ code: opaque, codeVerifier: opaque }).strict();
 
+export const desktopCodeSchema = z
+  .object({ code_challenge: z.string().refine(isValidCodeChallenge, 'invalid code_challenge') })
+  .strict();
+
 // Query strings are not strict: providers append their own parameters.
 export const startQuerySchema = z.object({
   client: z.enum(['web', 'desktop']).default('web'),

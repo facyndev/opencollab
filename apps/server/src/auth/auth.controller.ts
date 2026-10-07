@@ -4,12 +4,14 @@ import {
   Get,
   Headers,
   HttpCode,
+  HttpException,
   Inject,
   Param,
   Post,
   Query,
   Redirect,
   Res,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
@@ -18,8 +20,10 @@ import type { z } from 'zod';
 import type { UserRecord } from '../persistence/user.repository';
 import { AccessGuard, CurrentUser } from './access.guard';
 import { AuthService, toUserView, type AuthResult } from './auth.service';
+import { AUTH_CONFIG, type AuthConfig } from './config';
 import {
   callbackQuerySchema,
+  desktopCodeSchema,
   desktopTokenSchema,
   loginSchema,
   refreshSchema,
@@ -28,6 +32,13 @@ import {
   ZodPipe,
 } from './dto';
 import { OAuthService } from './oauth.service';
+import {
+  CsrfGuard,
+  clearRefreshCookie,
+  isSecureBase,
+  refreshCookie,
+  setRefreshCookie,
+} from './web-session';
 
 // Modest per-IP limit for the credential-guessing surface (the module default is looser).
 const STRICT = { default: { limit: 10, ttl: 60_000 } };
@@ -35,18 +46,16 @@ const STRICT = { default: { limit: 10, ttl: 60_000 } };
 // The slice of the express response this controller needs.
 interface Reply {
   setHeader(name: string, value: string): void;
+  append(name: string, value: string): void;
   redirect(status: number, url: string): void;
   status(code: number): { json(body: unknown): void };
 }
 
 const agent = (header: string | undefined): string | undefined => header?.slice(0, 200);
 
-/**
- * Web delivery of a finished OAuth login. T6 replaces this (cookie or
- * redirect to the web app); keep every web-specific choice inside it.
- */
-function deliverWebLogin(result: AuthResult): AuthResult {
-  return result;
+/** What a web client gets in the body: the access token only (the refresh token is a cookie). */
+function webBody({ refreshToken: _refreshToken, ...rest }: AuthResult) {
+  return rest;
 }
 
 @Controller('auth')
@@ -55,7 +64,12 @@ export class AuthController {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(OAuthService) private readonly oauth: OAuthService,
-  ) {}
+    @Inject(AUTH_CONFIG) config: AuthConfig,
+  ) {
+    this.secureCookies = isSecureBase(config.publicBaseUrl);
+  }
+
+  private readonly secureCookies: boolean;
 
   @Post('register')
   @Throttle(STRICT)
@@ -94,6 +108,73 @@ export class AuthController {
     await this.auth.logout(body.refreshToken);
   }
 
+  // Web session routes. The refresh token lives in an httpOnly cookie and the
+  // body only carries the access token. Every one needs the CSRF header. CORS is
+  // off on purpose: the web reaches these same-origin through a proxy.
+
+  @Post('web/register')
+  @UseGuards(CsrfGuard)
+  @Throttle(STRICT)
+  async webRegister(
+    @Body(new ZodPipe(registerSchema)) body: z.infer<typeof registerSchema>,
+    @Res({ passthrough: true }) res: Reply,
+    @Headers('user-agent') ua?: string,
+  ) {
+    return this.webSession(res, await this.auth.register(body, agent(ua)));
+  }
+
+  @Post('web/login')
+  @HttpCode(200)
+  @UseGuards(CsrfGuard)
+  @Throttle(STRICT)
+  async webLogin(
+    @Body(new ZodPipe(loginSchema)) body: z.infer<typeof loginSchema>,
+    @Res({ passthrough: true }) res: Reply,
+    @Headers('user-agent') ua?: string,
+  ) {
+    return this.webSession(res, await this.auth.login(body.identifier, body.password, agent(ua)));
+  }
+
+  @Post('web/refresh')
+  @HttpCode(200)
+  @UseGuards(CsrfGuard)
+  @Throttle(STRICT)
+  async webRefresh(
+    @Res({ passthrough: true }) res: Reply,
+    @Headers('cookie') cookies?: string,
+    @Headers('user-agent') ua?: string,
+  ) {
+    const presented = refreshCookie(cookies);
+    try {
+      if (!presented) throw new UnauthorizedException('Invalid refresh token');
+      // Same rotation, reuse detection and family revocation as the JSON route.
+      const { refreshToken, ...rest } = await this.auth.refresh(presented, agent(ua));
+      res.setHeader('Set-Cookie', setRefreshCookie(refreshToken, this.secureCookies));
+      return rest;
+    } catch (error) {
+      // A dead cookie is useless: drop it so the browser stops sending it.
+      if (error instanceof HttpException) res.setHeader('Set-Cookie', clearRefreshCookie(this.secureCookies));
+      throw error;
+    }
+  }
+
+  @Post('web/logout')
+  @HttpCode(204)
+  @UseGuards(CsrfGuard)
+  async webLogout(
+    @Res({ passthrough: true }) res: Reply,
+    @Headers('cookie') cookies?: string,
+  ): Promise<void> {
+    const presented = refreshCookie(cookies);
+    if (presented) await this.auth.logout(presented);
+    res.setHeader('Set-Cookie', clearRefreshCookie(this.secureCookies));
+  }
+
+  private webSession(res: Reply, result: AuthResult) {
+    res.setHeader('Set-Cookie', setRefreshCookie(result.refreshToken, this.secureCookies));
+    return webBody(result);
+  }
+
   @Get('me')
   @UseGuards(AccessGuard)
   me(@CurrentUser() user: UserRecord) {
@@ -125,8 +206,9 @@ export class AuthController {
     return { url: flow.url };
   }
 
-  // The response is written by hand: the desktop gets a 302 to its deep link,
-  // the web gets JSON. (@Redirect would redirect every outcome.)
+  // The response is written by hand: the desktop gets a 302 to its deep link and
+  // the web a 302 to the web app (never tokens in the URL). (@Redirect would
+  // redirect every outcome.) Flows whose state does not verify answer plain HTTP errors.
   @Get('oauth/:provider/callback')
   async callback(
     @Param('provider') provider: string,
@@ -138,16 +220,27 @@ export class AuthController {
     // One-shot: this flow's binding cookie is cleared whatever the outcome.
     const clear = this.oauth.clearBindingCookieFor(query.state);
     if (clear) res.setHeader('Set-Cookie', clear);
-    const outcome = await this.oauth.callback(provider, query, cookies, agent(ua));
+    const web = this.oauth.webTarget(query.state);
+    let outcome;
+    try {
+      outcome = await this.oauth.callback(provider, query, cookies, agent(ua));
+    } catch (error) {
+      if (web && error instanceof HttpException) {
+        res.redirect(302, web.error(error));
+        return;
+      }
+      throw error;
+    }
     switch (outcome.kind) {
       case 'desktop':
         res.redirect(302, outcome.redirectUrl);
         return;
       case 'linked':
-        res.status(200).json({ linked: true, provider: outcome.provider });
+        res.redirect(302, web?.linked(outcome.provider) ?? '/');
         return;
       case 'login':
-        res.status(200).json(deliverWebLogin(outcome.result));
+        res.append('Set-Cookie', setRefreshCookie(outcome.result.refreshToken, this.secureCookies));
+        res.redirect(302, web?.complete ?? '/');
         return;
     }
   }
@@ -160,5 +253,19 @@ export class AuthController {
     @Headers('user-agent') ua?: string,
   ) {
     return this.oauth.exchangeDesktopCode(body.code, body.codeVerifier, agent(ua));
+  }
+
+  // An authenticated session (typically the web, after a password login) asks
+  // for a one-shot code to hand to the desktop; the desktop then trades it at
+  // `desktop/token` exactly as in the OAuth flow.
+  @Post('desktop/code')
+  @HttpCode(200)
+  @UseGuards(AccessGuard)
+  @Throttle(STRICT)
+  async desktopCode(
+    @Body(new ZodPipe(desktopCodeSchema)) body: z.infer<typeof desktopCodeSchema>,
+    @CurrentUser() user: UserRecord,
+  ) {
+    return { redirectUrl: await this.oauth.issueDesktopCode(user.id, body.code_challenge) };
   }
 }

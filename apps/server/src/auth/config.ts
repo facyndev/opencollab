@@ -11,6 +11,8 @@ export interface AuthConfig {
   jwtSecret: string;
   databaseUrl: string;
   publicBaseUrl: string;
+  /** Origin of the web app: where OAuth callbacks for `client=web` redirect to (no trailing slash). */
+  webOrigin: string;
   /** Only providers with both id and secret are present (others answer 404). */
   oauth: Partial<Record<ProviderName, ProviderCredentials>>;
   /** Tests switch it off; production always has it on. */
@@ -52,6 +54,30 @@ function parseTrustProxy(raw: string | undefined): AuthConfig['trustProxy'] {
   return entries;
 }
 
+/** Desktop's Vite owns 1420, so the web dev server takes 1421. */
+const DEFAULT_WEB_ORIGIN = 'http://localhost:1421';
+
+/** `WEB_ORIGIN`: an http(s) origin only (no path, query or credentials), since we redirect to it. */
+function parseWebOrigin(raw: string | undefined): string {
+  const value = (raw ?? DEFAULT_WEB_ORIGIN).trim();
+  let url: URL | undefined;
+  try {
+    url = new URL(value);
+  } catch {
+    url = undefined;
+  }
+  const isOrigin =
+    !!url &&
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    !url.username &&
+    !url.password &&
+    url.pathname === '/' &&
+    !url.search &&
+    !url.hash;
+  if (!url || !isOrigin) throw new Error('WEB_ORIGIN must be an http(s) origin such as https://app.example.com');
+  return url.origin;
+}
+
 /** Throws on missing required settings so the server fails fast at startup. */
 export function loadAuthConfig(env: Env): AuthConfig {
   const jwtSecret = env['JWT_SECRET'];
@@ -72,6 +98,7 @@ export function loadAuthConfig(env: Env): AuthConfig {
     jwtSecret,
     databaseUrl,
     publicBaseUrl: (env['PUBLIC_BASE_URL'] ?? 'http://127.0.0.1:8787').replace(/\/+$/, ''),
+    webOrigin: parseWebOrigin(env['WEB_ORIGIN']),
     oauth,
     rateLimitEnabled: true,
     trustProxy: parseTrustProxy(env['TRUST_PROXY']),

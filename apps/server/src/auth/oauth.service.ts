@@ -4,6 +4,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -38,12 +39,32 @@ export interface FlowStart {
   setCookie: string;
 }
 
+/** Redirect targets for a web OAuth flow (all under `WEB_ORIGIN`; never carry tokens). */
+export interface WebTarget {
+  complete: string;
+  linked(provider: string): string;
+  error(error: HttpException): string;
+}
+
 export type CallbackOutcome =
   | { kind: 'login'; result: AuthResult }
   | { kind: 'desktop'; redirectUrl: string }
   | { kind: 'linked'; provider: string };
 
 const MAX_CREATE_ATTEMPTS = 3;
+
+const INVALID_STATE = 'Invalid state';
+const NOT_GRANTED = 'Authorization was not granted';
+
+/** A short, safe code for the web app's `?error=` (never the exception's message or details). */
+function webErrorCode(error: HttpException): string {
+  const status = error.getStatus();
+  if (status === 409) return 'conflict';
+  if (status === 502) return 'provider_unavailable';
+  if (status === 400 && error.message === INVALID_STATE) return 'invalid_state';
+  if (status === 400 && error.message === NOT_GRANTED) return 'access_denied';
+  return 'failed';
+}
 
 @Injectable()
 export class OAuthService {
@@ -70,6 +91,24 @@ export class OAuthService {
 
   private get secure(): boolean {
     return this.config.publicBaseUrl.startsWith('https://');
+  }
+
+  /**
+   * Where a callback for a `client=web` state sends the browser: `undefined`
+   * for desktop flows and for states that do not verify (those keep answering
+   * with the plain HTTP error, as nothing about them can be trusted).
+   */
+  webTarget(stateToken: string | undefined): WebTarget | undefined {
+    const state = stateToken ? verifyState(stateToken, this.config.jwtSecret, this.clock.now()) : undefined;
+    if (!state || state.client !== 'web') return undefined;
+    // Linking is started from the account page, so that is where it lands again.
+    const page = state.intent === 'link' ? '/account' : '/login';
+    const origin = this.config.webOrigin;
+    return {
+      complete: `${origin}/auth/complete`,
+      linked: (provider) => `${origin}/account?linked=${encodeURIComponent(provider)}`,
+      error: (error) => `${origin}${page}?error=${webErrorCode(error)}`,
+    };
   }
 
   /**
@@ -137,13 +176,13 @@ export class OAuthService {
     const state = query.state
       ? verifyState(query.state, this.config.jwtSecret, this.clock.now())
       : undefined;
-    if (!state || state.provider !== provider.name) throw new BadRequestException('Invalid state');
+    if (!state || state.provider !== provider.name) throw new BadRequestException(INVALID_STATE);
     // The flow must finish in the browser that started it (login/link CSRF).
     const bindingCookie = readCookie(cookieHeader, bindingCookieName(state.flow));
     if (!bindingCookie || bindingHash(bindingCookie) !== state.binding) {
-      throw new BadRequestException('Invalid state');
+      throw new BadRequestException(INVALID_STATE);
     }
-    if (query.error || !query.code) throw new BadRequestException('Authorization was not granted');
+    if (query.error || !query.code) throw new BadRequestException(NOT_GRANTED);
 
     let profile: ProviderProfile;
     try {
@@ -162,7 +201,9 @@ export class OAuthService {
     if (state.intent === 'link') return this.link(provider, state, profile);
 
     const user = await this.resolveUser(provider, profile);
-    if (state.client === 'desktop') return this.desktopRedirect(user.id, state.codeChallenge ?? '');
+    if (state.client === 'desktop') {
+      return { kind: 'desktop', redirectUrl: await this.issueDesktopCode(user.id, state.codeChallenge ?? '') };
+    }
     return { kind: 'login', result: await this.authService.start(user, userAgent) };
   }
 
@@ -173,7 +214,7 @@ export class OAuthService {
   ): Promise<CallbackOutcome> {
     const userId = state.linkUserId as UserId | undefined;
     if (!userId || !(await this.users.findById(userId))) {
-      throw new BadRequestException('Invalid state');
+      throw new BadRequestException(INVALID_STATE);
     }
     const owner = await this.auth.findIdentityUser(provider.name, profile.providerUserId);
     if (owner && owner !== userId) {
@@ -238,7 +279,12 @@ export class OAuthService {
     );
   }
 
-  private async desktopRedirect(userId: UserId, codeChallenge: string): Promise<CallbackOutcome> {
+  /**
+   * Stores a one-shot, PKCE-bound desktop login code for `userId` and returns
+   * the deep link that carries it. Shared by the OAuth desktop flow and by
+   * `POST /auth/desktop/code` (an already authenticated web session).
+   */
+  async issueDesktopCode(userId: UserId, codeChallenge: string): Promise<string> {
     const code = generateToken();
     await this.auth.insertDesktopCode({
       codeHash: hashToken(code),
@@ -246,7 +292,7 @@ export class OAuthService {
       codeChallenge,
       expiresAt: new Date(this.clock.now().getTime() + DESKTOP_CODE_TTL_MS),
     });
-    return { kind: 'desktop', redirectUrl: `${DESKTOP_CALLBACK}?code=${encodeURIComponent(code)}` };
+    return `${DESKTOP_CALLBACK}?code=${encodeURIComponent(code)}`;
   }
 
   /** Any attempt burns the code first, so a wrong verifier cannot be retried. */

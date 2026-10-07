@@ -77,6 +77,7 @@ export async function startTestApp(
     jwtSecret: TEST_SECRET,
     databaseUrl: 'unused',
     publicBaseUrl: 'http://api.test',
+    webOrigin: 'http://web.test',
     oauth: {},
     rateLimitEnabled: options.rateLimitEnabled ?? false,
     trustProxy: options.trustProxy ?? false,

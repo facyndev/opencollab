@@ -54,6 +54,25 @@ describe('loadAuthConfig', () => {
     });
   });
 
+  describe('WEB_ORIGIN', () => {
+    it('defaults to the web dev server (the desktop owns 1420)', () => {
+      expect(loadAuthConfig(base).webOrigin).toBe('http://localhost:1421');
+    });
+
+    it('keeps only the origin of a valid http(s) URL', () => {
+      expect(loadAuthConfig({ ...base, WEB_ORIGIN: 'https://app.x.com/' }).webOrigin).toBe('https://app.x.com');
+      expect(loadAuthConfig({ ...base, WEB_ORIGIN: 'https://app.x.com:8443' }).webOrigin).toBe(
+        'https://app.x.com:8443',
+      );
+    });
+
+    it('fails fast on anything that is not an http(s) origin', () => {
+      for (const value of ['nope', 'ftp://x.com', 'javascript:alert(1)', 'https://x.com/path', 'https://u:p@x.com']) {
+        expect(() => loadAuthConfig({ ...base, WEB_ORIGIN: value }), value).toThrow(/WEB_ORIGIN/);
+      }
+    });
+  });
+
   it('defaults and trims PUBLIC_BASE_URL', () => {
     expect(loadAuthConfig(base).publicBaseUrl).toBe('http://127.0.0.1:8787');
     expect(loadAuthConfig({ ...base, PUBLIC_BASE_URL: 'https://api.x.com/' }).publicBaseUrl).toBe(

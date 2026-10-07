@@ -128,7 +128,29 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     recorrido de broadcast (se difiere hasta terminar el recorrido).
   - Se deja: cookies `oc_oauth_<flow>` de flujos abandonados viven hasta su
     TTL (10 min).
-- [ ] **T6** — `apps/web` + `packages/contracts` como fuente del wire.
+- [ ] **T6** — `apps/web` como puerta de autenticación (rama
+  `feature/nest-web`, apilada sobre `feature/nest-ws`). Stack elegido por el
+  usuario: Vite + React + TS (mismo toolchain que el desktop).
+  `packages/contracts` queda para una tarea aparte.
+  - Decisión de sesión web (recomendada, mismo origen): el refresh token de
+    la web vive en una cookie httpOnly (`SameSite=Strict`, `path=/auth`,
+    `Secure` fuera de localhost) y el access token solo en memoria. En dev
+    Vite hace proxy de `/auth` al server, así la web y la API comparten
+    origen; en producción, reverse proxy. Nada de tokens en `localStorage`
+    ni en la URL. Los clientes no web (desktop) siguen con tokens en JSON.
+  - [x] **T6a (server)**: login/registro/refresh/logout web con la cookie
+    (+ cabecera anti-CSRF obligatoria en las rutas que leen la cookie);
+    el callback OAuth `client=web` setea la cookie y redirige a la web
+    (`WEB_ORIGIN`, reemplaza `deliverWebLogin`); `POST /auth/desktop/code`
+    (autenticado, con `code_challenge` PKCE) emite un `DesktopLoginCode` y
+    devuelve la URL `opencollab://auth/callback?code=…`, así login por
+    contraseña también llega al desktop.
+  - [ ] **T6b (web)**: `apps/web` con su propio `package.json` + lockfile
+    (sin `pnpm-workspace` raíz): rutas `/login`, `/register`, `/account`
+    (datos de `me`, vincular GitHub/Google); con
+    `?client=desktop&code_challenge=…` tras autenticar pide el código y
+    redirige al deep link. Vitest + Testing Library; job `web` en el CI;
+    `AGENTS.md` (estructura y comandos).
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
@@ -474,3 +496,39 @@ sobre el commit work-unit de T1.
   integración 81/81, typecheck y build limpios. Sugerencias no aplicadas:
   test del empate en `reauth`, test de upgrade con familia revocada a
   nivel gateway, fake de repo duplicado en specs.
+- 2026-10-07: T6a implementado por el writer delegado (sin commit). Rutas
+  nuevas (todas bajo `/auth`; las de `web/*` exigen `X-OpenCollab-CSRF: 1`,
+  si no 403 sin efectos):
+  - `POST web/register` (201) y `POST web/login` (200): mismo body que las
+    JSON; respuesta `{ user, accessToken, expiresIn, tokenType }` y
+    `Set-Cookie: oc_refresh=<token>; Path=/auth; HttpOnly; SameSite=Strict;
+    Max-Age=30d` (+ `Secure` salvo http en localhost/127.0.0.1/[::1]).
+  - `POST web/refresh` (200, sin body): lee la cookie, rota con el mismo
+    `SessionService.refresh` (reuso revoca la familia), responde
+    `{ accessToken, expiresIn, tokenType }` y re-setea la cookie; sin cookie o
+    con una muerta → 401 y la cookie se borra.
+  - `POST web/logout` (204): revoca la familia de la cookie y la borra
+    (idempotente, también sin cookie).
+  - `POST desktop/code` (200, `AccessGuard`, STRICT): body `{ code_challenge }`
+    → `{ redirectUrl: "opencollab://auth/callback?code=…" }`; usa
+    `OAuthService.issueDesktopCode`, el mismo camino del flujo OAuth desktop;
+    `POST desktop/token` no cambia.
+  - OAuth `client=web`: el callback ya no devuelve JSON. Éxito de login →
+    cookie `oc_refresh` + 302 a `${WEB_ORIGIN}/auth/complete`; link → 302 a
+    `${WEB_ORIGIN}/account?linked=<provider>`; fallo con state verificado → 302
+    a `${WEB_ORIGIN}/login?error=<code>` (`/account?error=<code>` si era un
+    link), con código `access_denied | invalid_state | conflict |
+    provider_unavailable | failed`. State inválido/vencido sigue siendo un 400
+    plano. Desktop sin cambios. `deliverWebLogin` eliminado.
+  - Config nueva `WEB_ORIGIN` (default `http://localhost:1421`; 1420 es el
+    Vite del desktop; solo origen http(s), falla al arrancar si no). CORS
+    sigue apagado (mismo origen vía proxy). Archivos: `web-session.ts`
+    (cookie + `CsrfGuard`), `config.ts`, `dto.ts`, `oauth.service.ts`,
+    `auth.controller.ts`, `test-app.ts` y sus specs.
+  - Decisión: la cabecera CSRF se exige también en login/register web (no solo
+    en las que leen la cookie) para que el contrato sea uniforme.
+  - RED (antes de implementar): unit 3 tests de `WEB_ORIGIN` + `web-session.spec`
+    sin módulo (2 archivos en rojo); integración 26 tests en rojo (rutas web,
+    CSRF, `desktop/code`, callbacks OAuth web). GREEN: unit 194/194,
+    integración 93/93, typecheck y build limpios. Los tests OAuth previos que
+    asumían JSON en el callback web se reescribieron al nuevo contrato.
