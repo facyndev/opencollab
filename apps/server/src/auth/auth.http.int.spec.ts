@@ -565,10 +565,52 @@ describe('web session (cookie)', () => {
     const reg = await webRegister();
     const first = refreshPair(reg);
     const next = await webPost('/auth/web/refresh', undefined, first);
+    t.clock.advance(10_000); // past the second-tab grace window
     const reuse = await webPost('/auth/web/refresh', undefined, first);
     expect(reuse.status).toBe(401);
     expect(reuse.setCookies.find((c) => c.startsWith('oc_refresh='))).toContain('Max-Age=0');
     expect((await webPost('/auth/web/refresh', undefined, refreshPair(next))).status).toBe(401);
+  });
+
+  describe('refresh grace window (second tab)', () => {
+    const rotateOnce = async () => {
+      const reg = await webRegister();
+      const first = refreshPair(reg);
+      const winner = await webPost('/auth/web/refresh', undefined, first);
+      return { reg, first, winner };
+    };
+    const sid = (token: string): string =>
+      JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString()).sid;
+
+    it('answers a token rotated seconds ago with only an access token of the same family, no cookie', async () => {
+      const { reg, first, winner } = await rotateOnce();
+      t.clock.advance(5_000);
+      const replay = await webPost('/auth/web/refresh', undefined, first);
+      expect(replay.status).toBe(200);
+      expect(replay.setCookies).toEqual([]);
+      expect(Object.keys(replay.body).sort()).toEqual(['accessToken', 'expiresIn', 'tokenType']);
+      expect((await get('/auth/me', replay.body.accessToken)).status).toBe(200);
+      expect(sid(replay.body.accessToken)).toBe(sid(reg.body.accessToken));
+      // The winner's successor is intact and keeps rotating.
+      expect((await webPost('/auth/web/refresh', undefined, refreshPair(winner))).status).toBe(200);
+    });
+
+    it('past the window it is reuse: 401, cookie cleared, family revoked', async () => {
+      const { first, winner } = await rotateOnce();
+      t.clock.advance(10_000);
+      const reuse = await webPost('/auth/web/refresh', undefined, first);
+      expect(reuse.status).toBe(401);
+      expect(reuse.setCookies.find((c) => c.startsWith('oc_refresh='))).toContain('Max-Age=0');
+      expect((await webPost('/auth/web/refresh', undefined, refreshPair(winner))).status).toBe(401);
+    });
+
+    it('does not apply to the JSON route (desktop): a replay revokes the family at once', async () => {
+      const reg = await register();
+      const first = reg.body.refreshToken;
+      const next = await post('/auth/refresh', { refreshToken: first });
+      expect((await post('/auth/refresh', { refreshToken: first })).status).toBe(401);
+      expect((await post('/auth/refresh', { refreshToken: next.body.refreshToken })).status).toBe(401);
+    });
   });
 
   it('rejects a missing cookie with 401', async () => {
@@ -610,18 +652,34 @@ describe('web session (cookie)', () => {
   });
 });
 
-describe('desktop code from a session', () => {
+describe('desktop code from a web session', () => {
   const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
   const challenge = s256(verifier);
+  const PATH = '/auth/web/desktop-code';
+  const webRegister = () => webPost('/auth/web/register', { ...credentials, displayName: 'Jane' });
 
-  it('requires an access token', async () => {
-    expect((await post('/auth/desktop/code', { code_challenge: challenge })).status).toBe(401);
+  it('rejects a bearer access token alone: a stolen access token cannot mint a code', async () => {
+    const reg = await webRegister();
+    const token = reg.body.accessToken;
+    expect((await call('POST', PATH, { code_challenge: challenge }, token, undefined, CSRF)).status).toBe(401);
+    expect((await post(PATH, { code_challenge: challenge }, token)).status).toBe(403);
+    expect((await post('/auth/desktop/code', { code_challenge: challenge }, token)).status).toBe(404);
   });
 
-  it('issues a code the unchanged exchange accepts, for the same user', async () => {
-    const reg = await register();
-    const res = await post('/auth/desktop/code', { code_challenge: challenge }, reg.body.accessToken);
+  it('needs the CSRF header and a live cookie', async () => {
+    const cookie = refreshPair(await webRegister());
+    expect((await webPost(PATH, { code_challenge: challenge }, cookie, {})).status).toBe(403);
+    expect((await webPost(PATH, { code_challenge: challenge })).status).toBe(401);
+    await webPost('/auth/web/logout', undefined, cookie);
+    expect((await webPost(PATH, { code_challenge: challenge }, cookie)).status).toBe(401);
+  });
+
+  it('issues a code from the cookie without rotating it, and the unchanged exchange accepts it', async () => {
+    const reg = await webRegister();
+    const cookie = refreshPair(reg);
+    const res = await webPost(PATH, { code_challenge: challenge }, cookie);
     expect(res.status).toBe(200);
+    expect(res.setCookies).toEqual([]);
     const url = new URL(res.body.redirectUrl);
     expect(`${url.protocol}//${url.host}${url.pathname}`).toBe('opencollab://auth/callback');
     const tokens = await post('/auth/desktop/token', {
@@ -632,15 +690,16 @@ describe('desktop code from a session', () => {
     expect(tokens.body.user.id).toBe(reg.body.user.id);
     // A different session (new family): it is a fresh login, not the web one.
     expect(tokens.body.refreshToken).toBeTruthy();
+    // The web cookie was only read: it still rotates.
+    expect((await webPost('/auth/web/refresh', undefined, cookie)).status).toBe(200);
   });
 
   it('validates the challenge, rejects unknown fields and burns the code on a wrong verifier', async () => {
-    const reg = await register();
-    const token = reg.body.accessToken;
-    expect((await post('/auth/desktop/code', {}, token)).status).toBe(400);
-    expect((await post('/auth/desktop/code', { code_challenge: 'short' }, token)).status).toBe(400);
-    expect((await post('/auth/desktop/code', { code_challenge: challenge, x: 1 }, token)).status).toBe(400);
-    const res = await post('/auth/desktop/code', { code_challenge: challenge }, token);
+    const cookie = refreshPair(await webRegister());
+    expect((await webPost(PATH, {}, cookie)).status).toBe(400);
+    expect((await webPost(PATH, { code_challenge: 'short' }, cookie)).status).toBe(400);
+    expect((await webPost(PATH, { code_challenge: challenge, x: 1 }, cookie)).status).toBe(400);
+    const res = await webPost(PATH, { code_challenge: challenge }, cookie);
     const code = new URL(res.body.redirectUrl).searchParams.get('code');
     expect((await post('/auth/desktop/token', { code, codeVerifier: `${verifier}x` })).status).toBe(400);
     expect((await post('/auth/desktop/token', { code, codeVerifier: verifier })).status).toBe(400);
@@ -651,9 +710,9 @@ describe('desktop code from a session', () => {
     try {
       let last = 0;
       for (let i = 0; i < 12; i += 1) {
-        const res = await fetch(`${limited.baseUrl}/auth/desktop/code`, {
+        const res = await fetch(`${limited.baseUrl}/auth/web/desktop-code`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...CSRF },
           body: JSON.stringify({ code_challenge: challenge }),
         });
         last = res.status;

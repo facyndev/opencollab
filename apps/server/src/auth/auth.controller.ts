@@ -147,8 +147,11 @@ export class AuthController {
     const presented = refreshCookie(cookies);
     try {
       if (!presented) throw new UnauthorizedException('Invalid refresh token');
-      // Same rotation, reuse detection and family revocation as the JSON route.
-      const { refreshToken, ...rest } = await this.auth.refresh(presented, agent(ua));
+      // Same rotation, reuse detection and family revocation as the JSON route,
+      // except a token rotated seconds ago (another tab) only gets an access token.
+      const outcome = await this.auth.refreshWeb(presented, agent(ua));
+      if (outcome.kind === 'grace') return outcome.access;
+      const { refreshToken, ...rest } = outcome.tokens;
       res.setHeader('Set-Cookie', setRefreshCookie(refreshToken, this.secureCookies));
       return rest;
     } catch (error) {
@@ -255,17 +258,21 @@ export class AuthController {
     return this.oauth.exchangeDesktopCode(body.code, body.codeVerifier, agent(ua));
   }
 
-  // An authenticated session (typically the web, after a password login) asks
-  // for a one-shot code to hand to the desktop; the desktop then trades it at
-  // `desktop/token` exactly as in the OAuth flow.
-  @Post('desktop/code')
+  // The web session (cookie + CSRF header, never a bearer access token: a stolen
+  // access token must not be able to mint a new session) asks for a one-shot code
+  // to hand to the desktop; the desktop then trades it at `desktop/token` exactly
+  // as in the OAuth flow. The cookie is only read: it is neither rotated nor cleared.
+  @Post('web/desktop-code')
   @HttpCode(200)
-  @UseGuards(AccessGuard)
+  @UseGuards(CsrfGuard)
   @Throttle(STRICT)
   async desktopCode(
     @Body(new ZodPipe(desktopCodeSchema)) body: z.infer<typeof desktopCodeSchema>,
-    @CurrentUser() user: UserRecord,
+    @Headers('cookie') cookies?: string,
   ) {
-    return { redirectUrl: await this.oauth.issueDesktopCode(user.id, body.code_challenge) };
+    const presented = refreshCookie(cookies);
+    const userId = presented ? await this.auth.sessionUser(presented) : undefined;
+    if (!userId) throw new UnauthorizedException('Invalid session');
+    return { redirectUrl: await this.oauth.issueDesktopCode(userId, body.code_challenge) };
   }
 }

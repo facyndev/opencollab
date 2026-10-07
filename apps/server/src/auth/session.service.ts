@@ -8,7 +8,7 @@ import { AuthRepository, type NewRefreshToken } from '../persistence/auth.reposi
 import { CLOCK, type Clock } from './clock';
 import { AUTH_CONFIG, type AuthConfig } from './config';
 import { deriveKey } from './keys';
-import { classifyRefresh } from './refresh-policy';
+import { classifyRefresh, classifyWebRefresh } from './refresh-policy';
 import { SessionRevocations } from './session-revocations';
 import { generateToken, hashToken } from './tokens';
 
@@ -22,6 +22,10 @@ export interface TokenPair {
   expiresIn: number;
   tokenType: 'Bearer';
 }
+
+export type WebRefreshResult =
+  | { kind: 'rotated'; userId: UserId; tokens: TokenPair }
+  | ({ kind: 'grace'; userId: UserId } & Omit<TokenPair, 'refreshToken'>);
 
 export interface AccessClaims {
   userId: UserId;
@@ -79,6 +83,15 @@ export class SessionService {
     return { accessToken, refreshToken, expiresIn: ACCESS_TTL_SECONDS, tokenType: 'Bearer' };
   }
 
+  private signAccess(userId: UserId, familyId: string, now: Date) {
+    const accessToken = jwt.sign(
+      { sub: userId, sid: familyId, iat: seconds(now), exp: seconds(now) + ACCESS_TTL_SECONDS },
+      this.key,
+      { algorithm: 'HS256', audience: AUDIENCE },
+    );
+    return { accessToken, expiresIn: ACCESS_TTL_SECONDS, tokenType: 'Bearer' as const };
+  }
+
   /** The user id of a valid access token, or undefined. */
   verifyAccess(token: string): UserId | undefined {
     return this.verifyAccessClaims(token)?.userId;
@@ -113,21 +126,67 @@ export class SessionService {
 
   /** Rotates a refresh token; presenting a spent one revokes its whole family. */
   async refresh(presented: string, userAgent?: string): Promise<{ userId: UserId; tokens: TokenPair }> {
+    const result = await this.rotate(presented, userAgent, false);
+    if (result.kind !== 'rotated') throw new UnauthorizedException('Invalid refresh token');
+    return { userId: result.userId, tokens: result.tokens };
+  }
+
+  /**
+   * Web variant of `refresh`: a token rotated less than `WEB_REFRESH_GRACE_MS` ago
+   * (a second tab sharing the cookie) gets only a fresh access token of the same
+   * family. Nothing rotates and no refresh token is returned, so a replay inside
+   * the window never yields one; the browser already holds the successor.
+   */
+  async refreshWeb(presented: string, userAgent?: string): Promise<WebRefreshResult> {
+    const result = await this.rotate(presented, userAgent, true);
+    if (result.kind === 'invalid') throw new UnauthorizedException('Invalid refresh token');
+    return result;
+  }
+
+  /**
+   * The user behind a live refresh token (exists, unrevoked, unexpired, family
+   * alive), without rotating or touching it. For routes that only need to know
+   * who holds the web session.
+   */
+  async sessionUser(presented: string): Promise<UserId | undefined> {
+    const row = await this.repo.findRefreshToken(hashToken(presented));
+    return classifyRefresh(row, this.clock.now()) === 'valid' ? row?.userId : undefined;
+  }
+
+  private async rotate(
+    presented: string,
+    userAgent: string | undefined,
+    grace: boolean,
+  ): Promise<WebRefreshResult | { kind: 'invalid' }> {
     const now = this.clock.now();
     const hash = hashToken(presented);
     const row = await this.repo.findRefreshToken(hash);
-    const verdict = classifyRefresh(row, now);
+    const verdict = grace
+      ? classifyWebRefresh(row, row ? await this.repo.familyHasLiveToken(row.familyId, now) : false, now)
+      : classifyRefresh(row, now);
+    if (row && verdict === 'grace') return this.graceAccess(row.userId, row.familyId, now);
     if (row && verdict === 'reuse') await this.revoke(row.familyId, now);
-    if (!row || verdict !== 'valid') throw new UnauthorizedException('Invalid refresh token');
+    if (!row || verdict !== 'valid') return { kind: 'invalid' };
     // Claim + insert are one transaction: a failed insert leaves the old token usable
     // for the client's retry. Of two concurrent rotations only one wins; the loser is a reuse.
+    let lost = false;
     const tokens = await this.mint(row.userId, row.familyId, userAgent, async (next) => {
       if (!(await this.repo.rotateRefreshToken(hash, next, now))) {
-        await this.revoke(row.familyId, now);
+        lost = true;
+        // On the web the loser is just a second tab: the winner's successor must survive.
+        if (!grace) await this.revoke(row.familyId, now);
         throw new UnauthorizedException('Invalid refresh token');
       }
+    }).catch((error: unknown) => {
+      if (lost && grace) return undefined;
+      throw error;
     });
-    return { userId: row.userId, tokens };
+    if (!tokens) return this.graceAccess(row.userId, row.familyId, now);
+    return { kind: 'rotated', userId: row.userId, tokens };
+  }
+
+  private graceAccess(userId: UserId, familyId: string, now: Date): WebRefreshResult {
+    return { kind: 'grace', userId, ...this.signAccess(userId, familyId, now) };
   }
 
   /** Revokes the family of the presented token. Unknown tokens are a silent no-op. */

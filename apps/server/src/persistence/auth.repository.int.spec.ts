@@ -47,3 +47,37 @@ describe('AuthRepository.rotateRefreshToken', () => {
     expect(await prisma.refreshToken.count({ where: { revokedAt: { not: null } } })).toBe(0);
   });
 });
+
+describe('AuthRepository.familyHasLiveToken', () => {
+  let prisma: PrismaClient;
+  let repo: AuthRepository;
+  const FAMILY = '3f2b8c1e-5a4d-4e6f-9a7b-1c2d3e4f5a6b';
+  const now = new Date('2026-01-01T00:00:00Z');
+  const expiresAt = new Date('2026-02-01T00:00:00Z');
+  let userId: Awaited<ReturnType<UserRepository['create']>>['id'];
+
+  beforeAll(() => {
+    prisma = openTestClient();
+    repo = new AuthRepository(prisma);
+  });
+  afterAll(() => prisma.$disconnect());
+  beforeEach(async () => {
+    await truncateAll(prisma);
+    userId = (await new UserRepository(prisma).create({ username: 'ana', displayName: 'Ana' })).id;
+    await repo.insertRefreshToken({ userId, familyId: FAMILY, tokenHash: 'old', expiresAt });
+  });
+
+  it('is true while a token of the family is live, also after a rotation', async () => {
+    expect(await repo.familyHasLiveToken(FAMILY, now)).toBe(true);
+    await repo.rotateRefreshToken('old', { userId, familyId: FAMILY, tokenHash: 'new', expiresAt }, now);
+    expect(await repo.familyHasLiveToken(FAMILY, now)).toBe(true);
+  });
+
+  it('is false once the family is revoked, for an unknown family and when every token expired', async () => {
+    await repo.rotateRefreshToken('old', { userId, familyId: FAMILY, tokenHash: 'new', expiresAt }, now);
+    expect(await repo.familyHasLiveToken(FAMILY, expiresAt)).toBe(false);
+    await repo.revokeFamily(FAMILY, now);
+    expect(await repo.familyHasLiveToken(FAMILY, now)).toBe(false);
+    expect(await repo.familyHasLiveToken('00000000-0000-4000-8000-000000000000', now)).toBe(false);
+  });
+});

@@ -43,8 +43,9 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   private server!: WsServer;
 
-  /** Who each pending upgrade authenticated as, handed from verifyClient to `connection`. */
   private readonly logger = new Logger(CollabGateway.name);
+
+  /** Who each pending upgrade authenticated as, handed from verifyClient to `connection`. */
   private readonly authenticated = new WeakMap<IncomingMessage, AccessClaims>();
   private readonly connections = new Set<Live>();
   private readonly families = new Map<string, Set<Live>>();

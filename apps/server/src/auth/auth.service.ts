@@ -14,6 +14,10 @@ export interface UserView {
   emailVerifiedAt: string | null;
 }
 
+export type WebRefreshOutcome =
+  | { kind: 'rotated'; tokens: TokenPair }
+  | { kind: 'grace'; access: Omit<TokenPair, 'refreshToken'> };
+
 export type AuthResult = { user: UserView } & TokenPair;
 
 export const toUserView = (u: UserRecord): UserView => ({
@@ -78,6 +82,19 @@ export class AuthService {
 
   async refresh(refreshToken: string, userAgent?: string): Promise<TokenPair> {
     return (await this.sessions.refresh(refreshToken, userAgent)).tokens;
+  }
+
+  /** Web refresh: like `refresh`, but a just-rotated token (second tab) gets only an access token. */
+  async refreshWeb(refreshToken: string, userAgent?: string): Promise<WebRefreshOutcome> {
+    const result = await this.sessions.refreshWeb(refreshToken, userAgent);
+    if (result.kind === 'rotated') return { kind: 'rotated', tokens: result.tokens };
+    const { kind: _kind, userId: _userId, ...access } = result;
+    return { kind: 'grace', access };
+  }
+
+  /** The user holding a live web session, read without rotating its refresh token. */
+  sessionUser(refreshToken: string): Promise<UserId | undefined> {
+    return this.sessions.sessionUser(refreshToken);
   }
 
   logout(refreshToken: string): Promise<void> {

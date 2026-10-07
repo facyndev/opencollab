@@ -117,6 +117,15 @@ export class AuthRepository {
     });
   }
 
+  /** True while some token of the family is unrevoked and unexpired (the family was not revoked). */
+  async familyHasLiveToken(familyId: string, now: Date): Promise<boolean> {
+    const live = await this.prisma.refreshToken.findFirst({
+      where: { familyId, revokedAt: null, expiresAt: { gt: now } },
+      select: { id: true },
+    });
+    return live !== null;
+  }
+
   async revokeFamily(familyId: string, now: Date): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: { familyId, revokedAt: null },

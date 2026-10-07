@@ -145,6 +145,13 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     (autenticado, con `code_challenge` PKCE) emite un `DesktopLoginCode` y
     devuelve la URL `opencollab://auth/callback?code=…`, así login por
     contraseña también llega al desktop.
+  - [x] **T6a-fix (server)**: (a) ventana de gracia de 10 s en
+    `/auth/web/refresh`: un refresh rotado hace menos de 10 s, de familia
+    no revocada, recibe solo un access token (sin rotar, sin tocar la
+    cookie); pasado el plazo, reuso = revocación como hoy (la web además
+    serializa el refresh entre pestañas con Web Locks en T6b); (b)
+    `/auth/desktop/code` pasa a exigir la cookie de sesión web + cabecera
+    CSRF en vez del bearer; (c) JSDoc desplazado en `collab.gateway.ts`.
   - [ ] **T6b (web)**: `apps/web` con su propio `package.json` + lockfile
     (sin `pnpm-workspace` raíz): rutas `/login`, `/register`, `/account`
     (datos de `me`, vincular GitHub/Google); con
@@ -541,3 +548,28 @@ sobre el commit work-unit de T1.
   (b) `POST /auth/desktop/code` acepta solo un access token: un access
   robado (15 min) se convierte en una familia de refresh nueva vía el
   desktop; (c) JSDoc desplazado por el `logger` en `collab.gateway.ts`.
+- 2026-10-07: T6a-fix implementado por el writer delegado (sin commit).
+  (a) `POST /auth/web/refresh`: `WEB_REFRESH_GRACE_MS` = 10 s y `classifyWebRefresh`
+  (pura, en `refresh-policy.ts`, reloj inyectado). Sin migración: `revokedAt` de
+  un token rotado ya es el instante de rotación; la revocación de familia se
+  distingue con el nuevo `AuthRepository.familyHasLiveToken` (queda algún token
+  sin revocar y vigente). Token rotado hace <10 s y familia viva → 200 con
+  `{ accessToken, expiresIn, tokenType }` (mismo `sid`), sin rotar y sin tocar la
+  cookie; nunca devuelve refresh token. Desde los 10 s (borde incluido) rige
+  reuso → revoca familia → 401 + cookie borrada. Un perdedor de rotación
+  concurrente en la web también recibe gracia (no mata la familia del ganador).
+  `/auth/refresh` (desktop) queda estricto, sin gracia.
+  (b) Ruta final: `POST /auth/web/desktop-code` (reemplaza a
+  `/auth/desktop/code`, que ahora da 404; la cookie `Path=/auth` la cubre).
+  Exige cookie `oc_refresh` + `X-OpenCollab-CSRF: 1` (`CsrfGuard`); el usuario
+  sale de `SessionService.sessionUser` (solo lectura: existe, no revocado, no
+  vencido; no rota ni toca la cookie). Bearer solo → 403 sin cabecera / 401 con
+  ella. Body `{ code_challenge }`, respuesta `{ redirectUrl }`; el canje en
+  `/auth/desktop/token` no cambia. (c) JSDoc de `authenticated` restituido en
+  `collab.gateway.ts`.
+  RED: `refresh-policy.spec` 5 fallos (`classifyWebRefresh` inexistente);
+  `session.service.spec` 7 fallos (`refreshWeb`/`sessionUser` inexistentes);
+  integración 6 fallos (gracia + 5 de `desktop-code`: ruta inexistente/bearer).
+  `familyHasLiveToken` (int) se escribió junto con el método (RED no observado
+  por separado). GREEN: unit 207/207, integración 99/99, typecheck y build
+  limpios. El test existente de reuso web ahora avanza el reloj 10 s.
