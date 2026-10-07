@@ -93,6 +93,16 @@ export function installTauriMock() {
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
           return { connected: false, syncMs: null, collaborators: 1 };
+        case "auth_begin_login":
+          // Como el núcleo: guarda el verifier y abre la web (acá solo devuelve la URL).
+          return `http://localhost:1421/login?client=desktop&code_challenge=${args.challenge}`;
+        case "auth_finish":
+          return { id: "u1", username: "tester", email: null, displayName: "Tester" };
+        case "auth_status":
+          // Sin sesión: anónimo (los E2E emiten `auth-changed` para simular el login).
+          return null;
+        case "auth_logout":
+          return null;
         case "git_branch":
           return branches[args.path] ?? null;
         case "list_subdirectories":

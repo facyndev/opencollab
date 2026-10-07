@@ -550,6 +550,22 @@ kbd {
   font-size: 12px;
 }
 
+/* Tarjeta de cuenta con acciones (Sign in / Cancel): envuelve el botón abajo. */
+.user--auth {
+  flex-wrap: wrap;
+}
+
+.user--auth .user-text {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.user-link {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--accent-soft);
+}
+
 /* ---------- Main ---------- */
 
 .main {

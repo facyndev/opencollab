@@ -18,7 +18,7 @@ import threadMeta from "./scenarios/thread-meta.mjs";
 import statusBarLive from "./scenarios/status-bar-live.mjs";
 import newTerminalHere from "./scenarios/new-terminal-here.mjs";
 import launchAgent from "./scenarios/launch-agent.mjs";
-import hiddenAccount from "./scenarios/hidden-account.mjs";
+import authSignin from "./scenarios/auth-signin.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
@@ -28,7 +28,7 @@ const scenarios = {
   "lanzar un agente como perfil": launchAgent,
   "exit en la shell cierra el panel": exitClosesPane,
   "status bar con estado real": statusBarLive,
-  "cuenta local oculta": hiddenAccount,
+  "login vía la web": authSignin,
 };
 
 function chromePath() {

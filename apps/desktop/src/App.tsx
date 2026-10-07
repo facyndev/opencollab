@@ -21,6 +21,7 @@ import {
   type Workspace,
 } from "./model";
 import { isMod } from "./shortcuts";
+import { useAuth } from "./useAuth";
 import { useCollabStatus } from "./useCollabStatus";
 import { usePaneDrag } from "./usePaneDrag";
 
@@ -32,6 +33,7 @@ function initialWorkspaces(): Workspace[] {
 
 export function App() {
   const collab = useCollabStatus();
+  const auth = useAuth();
   const [workspaces, setWorkspaces] = useState<Workspace[]>(initialWorkspaces);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => workspaces[0].id);
   // Sesión activa recordada por workspace, para volver a la misma al cambiar.
@@ -225,6 +227,13 @@ export function App() {
         onCreateWorkspace={createWorkspace}
         onSelectSession={selectSession}
         onCreateSession={createSession}
+        auth={auth.state}
+        authBusy={auth.busy}
+        authError={auth.error}
+        loginUrl={auth.loginUrl}
+        onSignIn={() => void auth.beginLogin()}
+        onCancelLogin={auth.cancelLogin}
+        onSignOut={() => void auth.logout()}
       />
 
       <div className="main">
