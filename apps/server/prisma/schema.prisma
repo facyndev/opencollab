@@ -1,0 +1,203 @@
+// Persistence model. The connection URL lives in prisma.config.ts (Prisma 7).
+// Date fields end in `At`. Effective session access is never stored: only
+// overrides (SessionAccessOverride) and the guest's own level; no override
+// row means VIEW, resolved lazily by the domain.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OAuthProvider {
+  GITHUB
+  GOOGLE
+}
+
+enum AccessLevel {
+  NONE
+  VIEW
+  WRITE
+}
+
+enum InvitationKind {
+  WORKSPACE
+  SESSION
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  REVOKED
+  EXPIRED
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  username        String    @unique @db.Citext
+  email           String?   @unique @db.Citext
+  emailVerifiedAt DateTime?
+  displayName     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  password          PasswordCredential?
+  oauthIdentities   OAuthIdentity[]
+  refreshTokens     RefreshToken[]
+  desktopLoginCodes DesktopLoginCode[]
+  ownedWorkspaces   Workspace[]            @relation("WorkspaceOwner")
+  memberships       WorkspaceMember[]
+  accessOverrides   SessionAccessOverride[]
+  guestSpots        SessionGuest[]
+  invitationsIn     Invitation[]           @relation("Invitee")
+  invitationsOut    Invitation[]           @relation("InvitedBy")
+}
+
+model PasswordCredential {
+  userId    String   @id @db.Uuid
+  hash      String
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OAuthIdentity {
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String        @db.Uuid
+  provider       OAuthProvider
+  providerUserId String
+  email          String?
+  createdAt      DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@unique([userId, provider])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  familyId  String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  userAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model DesktopLoginCode {
+  codeHash      String    @id
+  userId        String    @db.Uuid
+  codeChallenge String
+  expiresAt     DateTime
+  usedAt        DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Workspace {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  ownerId   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members     WorkspaceMember[]
+  sessions    Session[]
+  invitations Invitation[]
+}
+
+model WorkspaceMember {
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+}
+
+model Session {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  name        String
+  createdAt   DateTime @default(now())
+
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  overrides   SessionAccessOverride[]
+  guests      SessionGuest[]
+  terminals   Terminal[]
+  invitations Invitation[]
+}
+
+// Only explicit overrides; a member without a row has VIEW.
+model SessionAccessOverride {
+  sessionId String      @db.Uuid
+  userId    String      @db.Uuid
+  access    AccessLevel
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, userId])
+}
+
+model SessionGuest {
+  sessionId String      @db.Uuid
+  userId    String      @db.Uuid
+  access    AccessLevel @default(VIEW)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, userId])
+}
+
+model Terminal {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @db.Uuid
+  position  Int
+  name      String
+  command   String
+  args      String[]
+  cwd       String?
+  // Always written as [] by the repository: env may hold secrets.
+  env       Json     @default("[]")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, position])
+}
+
+// A CHECK (added by hand in the migration) enforces that exactly one of
+// workspaceId/sessionId is set and matches `kind`.
+model Invitation {
+  id          String           @id @default(uuid()) @db.Uuid
+  kind        InvitationKind
+  workspaceId String?          @db.Uuid
+  sessionId   String?          @db.Uuid
+  inviteeId   String           @db.Uuid
+  invitedById String           @db.Uuid
+  status      InvitationStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  expiresAt   DateTime?
+  respondedAt DateTime?
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  session   Session?   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  invitee   User       @relation("Invitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+  invitedBy User       @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([inviteeId, status])
+}

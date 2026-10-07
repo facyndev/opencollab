@@ -1,0 +1,59 @@
+# `docker compose up -d --build` levanta Postgres + server + web (requiere JWT_SECRET en .env;
+# sin él, el contenedor del server sale al arrancar: verlo con `docker compose logs server`).
+# `docker compose up -d postgres` levanta solo la base para los tests de integración del server.
+# Todo se publica únicamente en 127.0.0.1.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: opencollab
+      POSTGRES_PASSWORD: opencollab
+      POSTGRES_DB: opencollab
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencollab -d opencollab"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build: ./apps/server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://opencollab:opencollab@postgres:5432/opencollab
+      # Sin valor por defecto: el server se niega a arrancar con menos de 32 caracteres.
+      # No se usa `${JWT_SECRET:?}` porque Compose interpola todos los servicios y
+      # rompería `docker compose up -d postgres` para los tests.
+      JWT_SECRET: ${JWT_SECRET:-}
+      RELAY_ADDR: 0.0.0.0:8787
+      # nginx es el único salto delante del server.
+      TRUST_PROXY: "1"
+      # Los callbacks de OAuth pasan por el origen de la web (nginx proxea /auth).
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      # OAuth obligatorio (GitHub y Google): igual que JWT_SECRET, el server no arranca sin ellos.
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    ports:
+      # El desktop habla directo con 127.0.0.1:8787 (/health y /auth/desktop/token).
+      - "127.0.0.1:8787:8787"
+    restart: on-failure:5
+
+  web:
+    build: ./apps/web
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

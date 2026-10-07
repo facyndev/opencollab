@@ -4,16 +4,16 @@ import { VscTerminal } from "react-icons/vsc";
 
 import { agentInfo } from "../agents";
 import { opencollabLogoRounded } from "../assets/brand";
-import { Check, ChevronDown, ChevronsUpDown, Plus, Search } from "../icons";
+import { initialsOf, type AuthState } from "../auth";
+import { Check, ChevronDown, ChevronsUpDown, Plus, Search, SignOut } from "../icons";
 import {
-  localUser,
   sessionSummary,
   type PaneMeta,
   type PaneStatus,
   type Workspace,
 } from "../model";
 import { modKey } from "../shortcuts";
-import { IconButton } from "./Button";
+import { Button, IconButton } from "./Button";
 import { Panel } from "./Panel";
 import { TerminalIcon } from "./TerminalIcon";
 import { describeAgent } from "../agentState";
@@ -32,6 +32,13 @@ type Props = {
   onSelectSession: (id: string) => void;
   onSelectTerminal: (sessionId: string, paneId: string) => void;
   onCreateSession: () => void;
+  auth: AuthState;
+  authBusy: boolean;
+  authError: string | null;
+  loginUrl: string | null;
+  onSignIn: () => void;
+  onCancelLogin: () => void;
+  onSignOut: () => void;
 };
 
 export function Sidebar(props: Props) {
@@ -220,17 +227,79 @@ export function Sidebar(props: Props) {
         {sessions.length === 0 && <p className="sessions-empty">No sessions match.</p>}
       </nav>
 
-      {/* Oculta hasta que exista autenticación: `localUser` sigue fijo en el código. */}
-      <div className="user" hidden>
-        <span className="avatar avatar--me">{localUser.initials}</span>
+      {/* Cuenta del desktop: anónima ofrece el login vía la web; autenticada
+          muestra el usuario real (antes era la cuenta local fija, oculta). */}
+      <AuthCard
+        auth={props.auth}
+        busy={props.authBusy}
+        error={props.authError}
+        loginUrl={props.loginUrl}
+        onSignIn={props.onSignIn}
+        onCancelLogin={props.onCancelLogin}
+        onSignOut={props.onSignOut}
+      />
+    </aside>
+  );
+}
+
+function AuthCard(props: {
+  auth: AuthState;
+  busy: boolean;
+  error: string | null;
+  loginUrl: string | null;
+  onSignIn: () => void;
+  onCancelLogin: () => void;
+  onSignOut: () => void;
+}) {
+  const { auth, busy } = props;
+  if (auth.status === "authenticated") {
+    return (
+      <div className="user">
+        <span className="avatar avatar--me">{initialsOf(auth.user)}</span>
         <span className="user-text">
-          <span className="user-name">{localUser.name}</span>
+          <span className="user-name">{auth.user.displayName || auth.user.username}</span>
           <span className="user-status">
-            <span className="dot dot--done" /> Local
+            <span className="dot dot--done" /> Online
           </span>
         </span>
-        <ChevronsUpDown />
+        <IconButton icon={<SignOut />} title="Sign out" onClick={props.onSignOut} />
       </div>
-    </aside>
+    );
+  }
+  return (
+    <div className="user user--auth">
+      <span className="user-text">
+        <span className="user-name">
+          {auth.status === "unknown" ? "Loading…" : busy ? "Waiting for browser…" : "Not signed in"}
+        </span>
+        {props.error ? (
+          <span className="user-status" role="alert">
+            {props.error}
+          </span>
+        ) : (
+          <span className="user-status">
+            {busy ? "Finish sign-in in your browser" : "Sign in to collaborate"}
+          </span>
+        )}
+      </span>
+      {busy ? (
+        <Button onClick={props.onCancelLogin}>Cancel</Button>
+      ) : (
+        <Button
+          variant="primary"
+          onClick={props.onSignIn}
+          disabled={auth.status === "unknown"}
+          title="Opens the browser to sign in"
+        >
+          Sign in
+        </Button>
+      )}
+      {busy && props.loginUrl ? (
+        <a className="user-link" href={props.loginUrl} target="_blank" rel="noreferrer">
+          Browser didn&apos;t open? Open manually
+        </a>
+      ) : undefined}
+      <ChevronsUpDown />
+    </div>
   );
 }
