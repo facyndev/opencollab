@@ -308,3 +308,14 @@ sobre el commit work-unit de T1.
   (`docker compose up -d`): `test:integration` 78/78 (incluye
   `session-store.int.spec.ts`); unit 129/129 re-corrido por el parent. T5
   cerrado con commit work-unit en `feature/nest-ws`.
+- 2026-10-06: Commit de T5 `eb27470`. Review (base `fb550ec`, lineage
+  `review-72f3528a90e2b644`, riesgo alto por `auth.module.ts`, 4 lentes,
+  consent granted): aprobada sin correcciones y acknowledged (autoridad
+  quemada). Límite revisado → `eb27470`. Avisos no bloqueantes a resolver:
+  el JWT solo se valida en el upgrade (un socket sobrevive al vencimiento o
+  a la revocación del refresh); membresía del workspace cacheada en el hub
+  (cambios por fuera de `access_changed` no se ven); cola por conexión sin
+  límite y una promesa rechazada puede envenenarla; fan-out sin
+  backpressure; sin heartbeat (sockets medio abiertos); el revert de un
+  `access_changed` fallido puede pisar un cambio concurrente; tests con
+  `sleep` y un `FakeStore` compartido entre specs.
