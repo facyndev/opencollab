@@ -265,7 +265,7 @@ describe('oauth', () => {
   it('de-duplicates generated usernames', async () => {
     await post('/auth/register', { username: 'octo', password: 'a long password', displayName: 'X' });
     const res = await oauthLogin('c1', profile({ login: 'octo' }));
-    expect(res.body.user.username).toBe('octo2');
+    expect(res.body.user.username).toMatch(/^octo-[a-z0-9]{6}$/);
   });
 
   it('never auto-links by email: a taken email yields a new user with no email', async () => {
@@ -320,6 +320,22 @@ describe('oauth', () => {
       } finally {
         t.github.failWith = undefined;
       }
+    });
+
+    it('keeps two simultaneous flows in one browser apart (one cookie per flow)', async () => {
+      t.github.profiles.set('c1', profile());
+      t.github.profiles.set('c2', profile({ providerUserId: 'gh-2', login: 'second' }));
+      const first = await get('/auth/oauth/github/start');
+      const second = await get('/auth/oauth/github/start');
+      const firstCookie = cookieOf(first);
+      const secondCookie = cookieOf(second);
+      expect(firstCookie.split('=')[0]).not.toBe(secondCookie.split('=')[0]);
+      const jar = [firstCookie, secondCookie].join('; ');
+      expect((await get(cbPath('c1', first), undefined, jar)).status).toBe(200);
+      const done = await get(cbPath('c2', second), undefined, jar);
+      expect(done.status).toBe(200);
+      // Each callback expires its own flow's cookie, not the other's.
+      expect(done.setCookie).toContain(`${secondCookie.split('=')[0]}=;`);
     });
 
     it('rejects a callback without the cookie', async () => {
@@ -473,5 +489,35 @@ describe('rate limiting', () => {
     } finally {
       await limited.close();
     }
+  });
+
+  describe('behind a reverse proxy', () => {
+    const loginFrom = (baseUrl: string, ip: string): Promise<number> =>
+      fetch(`${baseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': ip },
+        body: JSON.stringify({ identifier: 'x', password: 'y'.repeat(12) }),
+      }).then((res) => res.status);
+
+    it('throttles per forwarded client IP when TRUST_PROXY trusts the hop', async () => {
+      const limited = await startTestApp({ rateLimitEnabled: true, trustProxy: 1 });
+      try {
+        for (let i = 0; i < 10; i += 1) await loginFrom(limited.baseUrl, '203.0.113.1');
+        expect(await loginFrom(limited.baseUrl, '203.0.113.1')).toBe(429);
+        expect(await loginFrom(limited.baseUrl, '203.0.113.2')).toBe(401);
+      } finally {
+        await limited.close();
+      }
+    });
+
+    it('ignores X-Forwarded-For by default, so a client cannot dodge the limit by spoofing it', async () => {
+      const limited = await startTestApp({ rateLimitEnabled: true });
+      try {
+        for (let i = 0; i < 10; i += 1) await loginFrom(limited.baseUrl, `203.0.113.${i}`);
+        expect(await loginFrom(limited.baseUrl, '203.0.113.99')).toBe(429);
+      } finally {
+        await limited.close();
+      }
+    });
   });
 });

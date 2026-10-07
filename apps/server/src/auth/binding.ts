@@ -1,14 +1,21 @@
 import { createHash } from 'node:crypto';
 
+import { STATE_TTL_SECONDS } from './state';
+
 /**
- * Browser binding for OAuth flows. A flow start sets this cookie with a random
+ * Browser binding for OAuth flows. A flow start sets a cookie with a random
  * value; the signed state carries only its hash, and the callback must present
  * the cookie. A state URL forwarded to another browser (login/link CSRF) is
  * therefore useless: that browser has no matching cookie.
+ *
+ * The cookie is named after the flow (the state carries the flow id), so two
+ * logins started in the same browser keep separate cookies instead of the
+ * second overwriting the first. It lives exactly as long as the state.
  */
-export const BINDING_COOKIE = 'oc_oauth';
-export const BINDING_TTL_SECONDS = 10 * 60; // same lifetime as the signed state
+const COOKIE_PREFIX = 'oc_oauth_';
 const PATH = '/auth/oauth';
+
+export const bindingCookieName = (flow: string): string => `${COOKIE_PREFIX}${flow}`;
 
 export const bindingHash = (value: string): string =>
   createHash('sha256').update(value).digest('base64url');
@@ -16,11 +23,11 @@ export const bindingHash = (value: string): string =>
 const attributes = (secure: boolean): string =>
   `Path=${PATH}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 
-export const setCookie = (value: string, secure: boolean): string =>
-  `${BINDING_COOKIE}=${value}; ${attributes(secure)}; Max-Age=${BINDING_TTL_SECONDS}`;
+export const setCookie = (flow: string, value: string, secure: boolean): string =>
+  `${bindingCookieName(flow)}=${value}; ${attributes(secure)}; Max-Age=${STATE_TTL_SECONDS}`;
 
-export const clearCookie = (secure: boolean): string =>
-  `${BINDING_COOKIE}=; ${attributes(secure)}; Max-Age=0`;
+export const clearCookie = (flow: string, secure: boolean): string =>
+  `${bindingCookieName(flow)}=; ${attributes(secure)}; Max-Age=0`;
 
 /** Minimal Cookie header parser: returns the value of `name`, if present. */
 export function readCookie(header: string | undefined, name: string): string | undefined {

@@ -12,6 +12,7 @@ import { OAUTH_PROVIDERS, type OAuthProviders } from './oauth-provider';
 import { OAuthService } from './oauth.service';
 import { PasswordService } from './password.service';
 import { GithubProvider, GoogleProvider } from './providers';
+import { SessionRevocations } from './session-revocations';
 import { SessionService } from './session.service';
 
 function buildProviders(config: AuthConfig): OAuthProviders {
@@ -40,11 +41,12 @@ function buildProviders(config: AuthConfig): OAuthProviders {
     { provide: CLOCK, useValue: systemClock },
     { provide: OAUTH_PROVIDERS, useFactory: buildProviders, inject: [AUTH_CONFIG] },
     PasswordService,
+    SessionRevocations,
     SessionService,
     AuthService,
     OAuthService,
     AccessGuard,
   ],
-  exports: [SessionService],
+  exports: [SessionService, SessionRevocations],
 })
 export class AuthModule {}

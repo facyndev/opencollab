@@ -3,6 +3,8 @@ import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
 
 import { AppModule } from './app.module';
+import { AUTH_CONFIG, type AuthConfig } from './auth/config';
+import { applyHttpConfig } from './auth/http-config';
 
 /** Same default as `protocol::DEFAULT_RELAY_ADDR` on the Rust side. */
 const DEFAULT_RELAY_ADDR = '127.0.0.1:8787';
@@ -19,6 +21,7 @@ function parseAddr(): { host: string; port: number } {
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  applyHttpConfig(app, app.get<AuthConfig>(AUTH_CONFIG, { strict: false }));
   // Raw `ws` frames (NOT socket.io): our wire is plain-text `Envelope` JSON.
   app.useWebSocketAdapter(new WsAdapter(app));
   app.enableShutdownHooks();

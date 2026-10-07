@@ -27,7 +27,6 @@ import {
   startQuerySchema,
   ZodPipe,
 } from './dto';
-import { BINDING_COOKIE, readCookie } from './binding';
 import { OAuthService } from './oauth.service';
 
 // Modest per-IP limit for the credential-guessing surface (the module default is looser).
@@ -136,10 +135,10 @@ export class AuthController {
     @Headers('cookie') cookies?: string,
     @Headers('user-agent') ua?: string,
   ): Promise<void> {
-    // One-shot: the binding cookie is cleared whatever the outcome.
-    res.setHeader('Set-Cookie', this.oauth.clearBindingCookie);
-    const bound = readCookie(cookies, BINDING_COOKIE);
-    const outcome = await this.oauth.callback(provider, query, bound, agent(ua));
+    // One-shot: this flow's binding cookie is cleared whatever the outcome.
+    const clear = this.oauth.clearBindingCookieFor(query.state);
+    if (clear) res.setHeader('Set-Cookie', clear);
+    const outcome = await this.oauth.callback(provider, query, cookies, agent(ua));
     switch (outcome.kind) {
       case 'desktop':
         res.redirect(302, outcome.redirectUrl);

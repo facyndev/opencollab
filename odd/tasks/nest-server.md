@@ -100,6 +100,25 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   - [x] La cola por conexión nunca queda rechazada (un error se registra y
     los mensajes siguientes se procesan); el gateway no deja promesas sin
     capturar.
+- [x] **T5c** — Avisos pendientes de las reviews de T4/T5/T5b (rama
+  `feature/nest-ws`). Orden acordado con el usuario: T5c → T6 → T7 → push.
+  - [x] Token vencido: soltar la conexión del hub en el acto y `terminate()`
+    si el cierre no se completa en un plazo corto.
+  - [x] `reauth` nunca acorta el plazo (se toma el máximo).
+  - [x] Logout y detección de reuso cierran los sockets de esa familia de
+    refresh (el access JWT lleva el id de familia; otros dispositivos
+    siguen conectados).
+  - [x] Heartbeat: ping periódico; sin pong a tiempo → `terminate()`.
+  - [x] Backpressure: un consumidor lento (`bufferedAmount` sobre un tope)
+    se cierra con 1013 en vez de acumular memoria (descartar salida de
+    terminal corrompería su estado).
+  - [x] OAuth: cookie de binding por flujo (dos logins simultáneos en el
+    mismo navegador no se pisan) con TTL igual al del state.
+  - [x] Timeout total por intercambio con el proveedor (no por llamada).
+  - [x] `trust proxy` configurable por entorno (apagado por defecto).
+  - [x] Usernames generados con sufijo aleatorio en vez de sondeo lineal.
+  - Fuera de T5c: membresía del workspace cacheada en el hub (no existe aún
+    un camino que la cambie; se resuelve con los comandos de workspace).
 - [ ] **T6** — `apps/web` + `packages/contracts` como fuente del wire.
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
@@ -361,3 +380,43 @@ sobre el commit work-unit de T1.
   (soltar del hub en el acto y `terminate()` tras un plazo); un `reauth` con
   un token más viejo pero vigente acorta el plazo (tomar el máximo); listener
   de `error` sin test; logs de errores sin contexto.
+- 2026-10-06: T5c implementado por el writer delegado (sin commit; retomado
+  tras un corte por límite de uso, el estado en disco se re-verificó). Diseño:
+  (1-2) `ConnectionDeadline.extend` (solo mueve el plazo más tarde y devuelve
+  el vigente; `reauthenticated` informa ese); al vencer, el gateway suelta la
+  conexión del hub en el acto, `close(1008,'token_expired')` y `terminate()`
+  tras `CLOSE_HANDSHAKE_TIMEOUT_MS` (5 s). (3) el access JWT lleva `sid`
+  (familia de refresh); `SessionRevocations` (puerto en proceso, sin Nest en
+  el dominio) lo publica `SessionService` tras `revokeFamily` (logout, reuso,
+  perdedor de rotación concurrente); el gateway indexa sockets por familia y
+  cierra `1008 session_revoked`; `reauth` adopta la familia del token nuevo.
+  Tokens sin `sid` (previos al claim) siguen verificando pero no tienen
+  familia: ninguna revocación los alcanza y caducan con su `exp` (≤15 min).
+  (4) heartbeat (`HEARTBEAT_INTERVAL_MS` 30 s) arrancado al primer socket y
+  detenido al irse el último y en `onModuleDestroy`; sin pong al siguiente
+  tick → `terminate` + soltar del hub. (5) `MAX_BUFFERED_BYTES` 4 MiB: sobre
+  el tope se cierra `1013 slow_consumer` y se suelta del hub (el cliente
+  debe reconectar y resincronizar; nada se descarta en silencio). (6) cookie
+  `oc_oauth_<flow>` por flujo (el state lleva `flow`; un state sin `flow`
+  es inválido), `Max-Age` = `STATE_TTL_SECONDS`, se limpia solo la de ese
+  flujo; el ataque de vinculación sigue dando 400. (7) una sola señal
+  `AbortSignal.timeout` por `exchange` (10 s en total), timeout → 502.
+  (8) `TRUST_PROXY` (false por defecto; cantidad de saltos o lista de
+  IP/CIDR/presets; `true` se rechaza por permitir falsificar la IP), aplicado
+  con `applyHttpConfig` en `main.ts` y la app de test. (9) usernames
+  `base-<6 [a-z0-9]>` con 5 reintentos acotados.
+  RED observado por ítem: gateway spec 9 fallos (detach al vencer, terminate,
+  máximo del plazo, familia x2, heartbeat x3, backpressure) antes de
+  implementar; `connection-deadline` `extend is not a function`;
+  session.service.spec 4 fallos (sid, anuncio en logout/reuso) tras módulo
+  faltante; binding/state specs 7 fallos; providers.spec 2 fallos (3 y 2
+  señales distintas); config.spec 4 fallos; integración `trust proxy`: 429
+  en vez de 401; username.spec 4 fallos. Límite: el RED de integración de las
+  dos cookies simultáneas no se observó por separado (el cambio de
+  `binding`/`state` ya había roto el servicio; el RED es el unitario).
+  GREEN: unit 179/179 (gateway spec corrido 3 veces, estable), integración
+  81/81, typecheck, build, clippy `-D warnings` y `fmt --check` limpios.
+  `AGENTS.md` sin cambios (ningún hecho de relay/auth quedó falso). Abiertos:
+  membresía del workspace cacheada en el hub (fuera de alcance); si se agota
+  `pickAvailableUsername` el callback responde 500 (probabilidad
+  despreciable); el timer de cierre usa `unref`.

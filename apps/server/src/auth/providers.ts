@@ -3,13 +3,13 @@ import { ProviderUnavailableError, type OAuthProviderPort, type ProviderProfile 
 
 type Fetch = typeof fetch;
 
-/** Upper bound for every outbound provider call. */
+/** Upper bound for a whole code exchange (all of its provider calls together). */
 export const PROVIDER_TIMEOUT_MS = 10_000;
 
-/** Aborts after `timeoutMs`; any transport failure becomes a generic unavailable error. */
-async function send(fetchFn: Fetch, timeoutMs: number, url: string, init: RequestInit): Promise<Response> {
+/** Aborts with the exchange's shared `signal`; any transport failure becomes a generic unavailable error. */
+async function send(fetchFn: Fetch, signal: AbortSignal, url: string, init: RequestInit): Promise<Response> {
   try {
-    return await fetchFn(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    return await fetchFn(url, { ...init, signal });
   } catch {
     // Drop the cause: transport errors can carry URLs or request details.
     throw new ProviderUnavailableError();
@@ -22,8 +22,8 @@ const readJson = (res: Response): Promise<unknown> =>
     throw new ProviderUnavailableError();
   });
 
-async function postForm(fetchFn: Fetch, timeoutMs: number, url: string, form: Record<string, string>): Promise<Record<string, unknown>> {
-  const res = await send(fetchFn, timeoutMs, url, {
+async function postForm(fetchFn: Fetch, signal: AbortSignal, url: string, form: Record<string, string>): Promise<Record<string, unknown>> {
+  const res = await send(fetchFn, signal, url, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(form).toString(),
@@ -36,8 +36,8 @@ async function postForm(fetchFn: Fetch, timeoutMs: number, url: string, form: Re
   return json;
 }
 
-async function getJson<T>(fetchFn: Fetch, timeoutMs: number, url: string, accessToken: string): Promise<T> {
-  const res = await send(fetchFn, timeoutMs, url, {
+async function getJson<T>(fetchFn: Fetch, signal: AbortSignal, url: string, accessToken: string): Promise<T> {
+  const res = await send(fetchFn, signal, url, {
     headers: {
       Accept: 'application/json',
       Authorization: `Bearer ${accessToken}`,
@@ -72,7 +72,9 @@ export class GithubProvider implements OAuthProviderPort {
   }
 
   async exchange(i: { code: string; codeVerifier: string; redirectUri: string }): Promise<ProviderProfile> {
-    const token = await postForm(this.fetchFn, this.timeoutMs, 'https://github.com/login/oauth/access_token', {
+    // One deadline for all three calls, not one per call.
+    const signal = AbortSignal.timeout(this.timeoutMs);
+    const token = await postForm(this.fetchFn, signal, 'https://github.com/login/oauth/access_token', {
       client_id: this.creds.clientId,
       client_secret: this.creds.clientSecret,
       code: i.code,
@@ -82,14 +84,14 @@ export class GithubProvider implements OAuthProviderPort {
     const accessToken = token['access_token'] as string;
     const user = await getJson<{ id: number; login: string; name: string | null }>(
       this.fetchFn,
-      this.timeoutMs,
+      signal,
       'https://api.github.com/user',
       accessToken,
     );
     // The public profile email is unverified; only trust the primary verified one.
     const emails = await getJson<{ email: string; primary: boolean; verified: boolean }[]>(
       this.fetchFn,
-      this.timeoutMs,
+      signal,
       'https://api.github.com/user/emails',
       accessToken,
     );
@@ -126,7 +128,8 @@ export class GoogleProvider implements OAuthProviderPort {
   }
 
   async exchange(i: { code: string; codeVerifier: string; redirectUri: string }): Promise<ProviderProfile> {
-    const token = await postForm(this.fetchFn, this.timeoutMs, 'https://oauth2.googleapis.com/token', {
+    const signal = AbortSignal.timeout(this.timeoutMs);
+    const token = await postForm(this.fetchFn, signal, 'https://oauth2.googleapis.com/token', {
       client_id: this.creds.clientId,
       client_secret: this.creds.clientSecret,
       code: i.code,
@@ -139,7 +142,7 @@ export class GoogleProvider implements OAuthProviderPort {
       email?: string;
       email_verified?: boolean;
       name?: string;
-    }>(this.fetchFn, this.timeoutMs, 'https://openidconnect.googleapis.com/v1/userinfo', token['access_token'] as string);
+    }>(this.fetchFn, signal, 'https://openidconnect.googleapis.com/v1/userinfo', token['access_token'] as string);
     const email = info.email ?? null;
     return {
       providerUserId: info.sub,

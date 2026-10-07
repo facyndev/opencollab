@@ -1,27 +1,38 @@
 import { describe, expect, it } from 'vitest';
 
-import { BINDING_COOKIE, bindingHash, clearCookie, readCookie, setCookie } from './binding';
+import { bindingCookieName, bindingHash, clearCookie, readCookie, setCookie } from './binding';
+import { STATE_TTL_SECONDS } from './state';
 
 describe('binding cookie', () => {
   it('reads a named cookie among others and tolerates garbage', () => {
-    expect(readCookie(`a=1; ${BINDING_COOKIE}=abc_-9; b=2`, BINDING_COOKIE)).toBe('abc_-9');
-    expect(readCookie(undefined, BINDING_COOKIE)).toBeUndefined();
-    expect(readCookie('a=1; b', BINDING_COOKIE)).toBeUndefined();
+    const name = bindingCookieName('f1');
+    expect(readCookie(`a=1; ${name}=abc_-9; b=2`, name)).toBe('abc_-9');
+    expect(readCookie(undefined, name)).toBeUndefined();
+    expect(readCookie('a=1; b', name)).toBeUndefined();
   });
 
-  it('sets a hardened, path-scoped, 10 minute cookie; Secure only on https', () => {
-    const http = setCookie('v', false);
-    expect(http).toContain(`${BINDING_COOKIE}=v`);
-    for (const attr of ['HttpOnly', 'SameSite=Lax', 'Path=/auth/oauth', 'Max-Age=600']) {
+  it('names the cookie after the flow so simultaneous flows do not collide', () => {
+    expect(bindingCookieName('f1')).not.toBe(bindingCookieName('f2'));
+    expect(setCookie('f1', 'v', false)).toContain(`${bindingCookieName('f1')}=v`);
+    const jar = `${bindingCookieName('f1')}=one; ${bindingCookieName('f2')}=two`;
+    expect(readCookie(jar, bindingCookieName('f1'))).toBe('one');
+    expect(readCookie(jar, bindingCookieName('f2'))).toBe('two');
+  });
+
+  it('sets a hardened, path-scoped cookie that lives as long as the state; Secure only on https', () => {
+    const http = setCookie('f1', 'v', false);
+    for (const attr of ['HttpOnly', 'SameSite=Lax', 'Path=/auth/oauth', `Max-Age=${STATE_TTL_SECONDS}`]) {
       expect(http).toContain(attr);
     }
     expect(http).not.toContain('Secure');
-    expect(setCookie('v', true)).toContain('Secure');
+    expect(setCookie('f1', 'v', true)).toContain('Secure');
   });
 
-  it('clears the cookie on the same path', () => {
-    expect(clearCookie(false)).toContain('Max-Age=0');
-    expect(clearCookie(false)).toContain('Path=/auth/oauth');
+  it('clears that flow\'s cookie on the same path', () => {
+    const cleared = clearCookie('f1', false);
+    expect(cleared).toContain(`${bindingCookieName('f1')}=;`);
+    expect(cleared).toContain('Max-Age=0');
+    expect(cleared).toContain('Path=/auth/oauth');
   });
 
   it('hashes deterministically', () => {

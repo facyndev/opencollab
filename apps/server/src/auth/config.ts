@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 import { PROVIDER_NAMES, type ProviderName } from './oauth-provider';
 
 export interface ProviderCredentials {
@@ -13,11 +15,42 @@ export interface AuthConfig {
   oauth: Partial<Record<ProviderName, ProviderCredentials>>;
   /** Tests switch it off; production always has it on. */
   rateLimitEnabled: boolean;
+  /**
+   * Express `trust proxy`: how many reverse-proxy hops (or which addresses) may
+   * set `X-Forwarded-For`. Off by default; throttling then keys on the socket
+   * address. Never `true`: trusting every hop lets any client spoof its IP.
+   */
+  trustProxy: false | number | string[];
 }
 
 export const AUTH_CONFIG = Symbol('AUTH_CONFIG');
 
 type Env = Record<string, string | undefined>;
+
+const PROXY_PRESETS = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+function isTrustedProxyEntry(entry: string): boolean {
+  if (PROXY_PRESETS.has(entry)) return true;
+  const [address, prefix, ...rest] = entry.split('/');
+  const family = isIP(address ?? '');
+  if (family === 0 || rest.length > 0) return false;
+  if (prefix === undefined) return true;
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128);
+}
+
+/** `TRUST_PROXY`: unset/false/0 = off, a hop count, or a comma list of IPs, CIDRs and presets. */
+function parseTrustProxy(raw: string | undefined): AuthConfig['trustProxy'] {
+  const value = (raw ?? '').trim();
+  if (value === '' || value.toLowerCase() === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value) === 0 ? false : Number(value);
+  const entries = value.split(',').map((e) => e.trim());
+  if (!entries.every(isTrustedProxyEntry)) {
+    throw new Error(
+      'TRUST_PROXY must be false, a hop count, or a comma-separated list of IPs, CIDRs or loopback/linklocal/uniquelocal',
+    );
+  }
+  return entries;
+}
 
 /** Throws on missing required settings so the server fails fast at startup. */
 export function loadAuthConfig(env: Env): AuthConfig {
@@ -41,5 +74,6 @@ export function loadAuthConfig(env: Env): AuthConfig {
     publicBaseUrl: (env['PUBLIC_BASE_URL'] ?? 'http://127.0.0.1:8787').replace(/\/+$/, ''),
     oauth,
     rateLimitEnabled: true,
+    trustProxy: parseTrustProxy(env['TRUST_PROXY']),
   };
 }

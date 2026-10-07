@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { pkceVerifierFor, signState, verifyState, type OAuthState } from './state';
+import { STATE_TTL_SECONDS, pkceVerifierFor, signState, verifyState, type OAuthState } from './state';
 
 const secret = 'test-secret-test-secret-test-secret-1234';
 const now = new Date('2026-01-01T00:00:00Z');
@@ -9,6 +9,7 @@ const payload: OAuthState = {
   intent: 'login',
   client: 'web',
   nonce: 'n-1',
+  flow: 'f-1',
   binding: 'b-1',
 };
 
@@ -30,7 +31,13 @@ describe('oauth state', () => {
     expect(verifyState('garbage', secret, now)).toBeUndefined();
   });
 
-  it('expires after 10 minutes', () => {
+  it('rejects a state without a flow id', () => {
+    const { flow: _flow, ...legacy } = payload;
+    expect(verifyState(signState(legacy as OAuthState, secret, now), secret, now)).toBeUndefined();
+  });
+
+  it('expires after STATE_TTL_SECONDS (10 minutes)', () => {
+    expect(STATE_TTL_SECONDS).toBe(600);
     const token = signState(payload, secret, now);
     expect(verifyState(token, secret, new Date(now.getTime() + 9 * 60_000))).toEqual(payload);
     expect(verifyState(token, secret, new Date(now.getTime() + 11 * 60_000))).toBeUndefined();

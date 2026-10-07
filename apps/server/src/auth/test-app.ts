@@ -5,6 +5,7 @@ import type { PrismaClient } from '../generated/prisma/client';
 import { PRISMA } from '../persistence/persistence.module';
 import { openTestClient } from '../persistence/test-db';
 import { AuthModule } from './auth.module';
+import { applyHttpConfig } from './http-config';
 import { AUTH_CONFIG, type AuthConfig } from './config';
 import { CLOCK, type Clock } from './clock';
 import {
@@ -61,7 +62,11 @@ export interface TestApp {
 }
 
 export async function startTestApp(
-  options: { rateLimitEnabled?: boolean; providers?: ProviderName[] } = {},
+  options: {
+    rateLimitEnabled?: boolean;
+    providers?: ProviderName[];
+    trustProxy?: AuthConfig['trustProxy'];
+  } = {},
 ): Promise<TestApp> {
   const prisma = openTestClient();
   const clock = new TestClock();
@@ -74,6 +79,7 @@ export async function startTestApp(
     publicBaseUrl: 'http://api.test',
     oauth: {},
     rateLimitEnabled: options.rateLimitEnabled ?? false,
+    trustProxy: options.trustProxy ?? false,
   };
   const providers = {
     ...(enabled.includes('github') ? { github } : {}),
@@ -90,6 +96,7 @@ export async function startTestApp(
     .useValue(clock)
     .compile();
   const app = moduleRef.createNestApplication();
+  applyHttpConfig(app, config);
   await app.listen(0, '127.0.0.1');
   return {
     app,

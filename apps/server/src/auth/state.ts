@@ -11,6 +11,8 @@ export interface OAuthState {
   client: 'web' | 'desktop';
   /** Random per flow; also derives the provider-side PKCE verifier. */
   nonce: string;
+  /** Random per flow; names the browser-binding cookie so parallel flows do not clash. */
+  flow: string;
   /** Hash of the browser-binding cookie value set when the flow started. */
   binding: string;
   /** Desktop only: the desktop's own S256 challenge. */
@@ -19,13 +21,14 @@ export interface OAuthState {
   linkUserId?: string;
 }
 
-const TTL_SECONDS = 10 * 60;
+/** Lifetime of a signed state; the browser-binding cookie lives exactly as long. */
+export const STATE_TTL_SECONDS = 10 * 60;
 const AUDIENCE = 'oauth-state';
 
 const seconds = (d: Date): number => Math.floor(d.getTime() / 1000);
 
 export function signState(payload: OAuthState, secret: string, now: Date): string {
-  return jwt.sign({ ...payload, iat: seconds(now), exp: seconds(now) + TTL_SECONDS }, keyFor(secret, AUDIENCE), {
+  return jwt.sign({ ...payload, iat: seconds(now), exp: seconds(now) + STATE_TTL_SECONDS }, keyFor(secret, AUDIENCE), {
     algorithm: 'HS256',
     audience: AUDIENCE,
   });
@@ -38,12 +41,14 @@ export function verifyState(token: string, secret: string, now: Date): OAuthStat
       audience: AUDIENCE,
       clockTimestamp: seconds(now),
     }) as jwt.JwtPayload;
-    const { provider, intent, client, nonce, binding, codeChallenge, linkUserId } = claims;
+    const { provider, intent, client, nonce, flow, binding, codeChallenge, linkUserId } = claims;
+    if (typeof flow !== 'string' || !flow) return undefined;
     return {
       provider,
       intent,
       client,
       nonce,
+      flow,
       binding,
       ...(codeChallenge ? { codeChallenge } : {}),
       ...(linkUserId ? { linkUserId } : {}),

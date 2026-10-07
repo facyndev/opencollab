@@ -138,6 +138,37 @@ describe('provider timeouts', () => {
     expect(hangingFetch.seen[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it.each([
+    ['github', 3, (fn: typeof fetch) => new GithubProvider(creds, fn, 20)],
+    ['google', 2, (fn: typeof fetch) => new GoogleProvider(creds, fn, 20)],
+  ])('%s: one deadline covers all %i calls of an exchange, not one per call', async (_name, calls, make) => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    // One stub answers every call of both providers well enough for the exchange to finish.
+    const answer = ((input: unknown, init?: RequestInit) => {
+      signals.push(init?.signal);
+      const body = String(input).endsWith('/emails') ? [] : { access_token: 't', sub: 's', id: 1, login: 'l', name: null };
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }) as unknown as typeof fetch;
+    await make(answer).exchange(input);
+    expect(signals).toHaveLength(calls);
+    expect(new Set(signals).size).toBe(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it('github: a deadline hit between calls still reports unavailable', async () => {
+    let n = 0;
+    const slowSecond = ((_input: unknown, init?: RequestInit) => {
+      n += 1;
+      if (n === 1) return Promise.resolve(new Response(JSON.stringify({ access_token: 't' }), { status: 200 }));
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      });
+    }) as unknown as typeof fetch;
+    await expect(new GithubProvider(creds, slowSecond, 20).exchange(input)).rejects.toBeInstanceOf(
+      ProviderUnavailableError,
+    );
+  });
+
   it('reports a network failure as unavailable without leaking its message', async () => {
     const boom = (async () => {
       throw new Error('connect ECONNREFUSED secret-token-123');

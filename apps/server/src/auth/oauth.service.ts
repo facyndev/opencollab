@@ -13,7 +13,7 @@ import type { UserId } from '../domain';
 import { AuthRepository, isUniqueViolation } from '../persistence/auth.repository';
 import { UserRepository, type UserRecord } from '../persistence/user.repository';
 import { AuthService, toUserView, type AuthResult } from './auth.service';
-import { bindingHash, clearCookie, setCookie } from './binding';
+import { bindingCookieName, bindingHash, clearCookie, readCookie, setCookie } from './binding';
 import { CLOCK, type Clock } from './clock';
 import { AUTH_CONFIG, type AuthConfig } from './config';
 import {
@@ -72,19 +72,25 @@ export class OAuthService {
     return this.config.publicBaseUrl.startsWith('https://');
   }
 
-  /** Set-Cookie header that expires the binding cookie (sent on every callback). */
-  get clearBindingCookie(): string {
-    return clearCookie(this.secure);
+  /**
+   * Set-Cookie header that expires the binding cookie of the flow a callback's
+   * state belongs to (sent on every callback). A state that does not verify
+   * names no flow, so there is nothing to clear.
+   */
+  clearBindingCookieFor(stateToken: string | undefined): string | undefined {
+    const state = stateToken ? verifyState(stateToken, this.config.jwtSecret, this.clock.now()) : undefined;
+    return state ? clearCookie(state.flow, this.secure) : undefined;
   }
 
   private authorizationUrl(
     provider: OAuthProviderPort,
-    base: Omit<OAuthState, 'nonce' | 'provider' | 'binding'>,
+    base: Omit<OAuthState, 'nonce' | 'flow' | 'provider' | 'binding'>,
   ): FlowStart {
     const nonce = randomBytes(16).toString('base64url');
+    const flow = randomBytes(9).toString('base64url');
     const bindingValue = randomBytes(16).toString('base64url');
     const state = signState(
-      { ...base, provider: provider.name, nonce, binding: bindingHash(bindingValue) },
+      { ...base, provider: provider.name, nonce, flow, binding: bindingHash(bindingValue) },
       this.config.jwtSecret,
       this.clock.now(),
     );
@@ -93,7 +99,7 @@ export class OAuthService {
       codeChallenge: s256(pkceVerifierFor(this.config.jwtSecret, nonce)),
       redirectUri: this.redirectUri(provider),
     });
-    return { url, setCookie: setCookie(bindingValue, this.secure) };
+    return { url, setCookie: setCookie(flow, bindingValue, this.secure) };
   }
 
   start(name: string, client: 'web' | 'desktop', codeChallenge?: string): FlowStart {
@@ -124,7 +130,7 @@ export class OAuthService {
   async callback(
     name: string,
     query: { code?: string; state?: string; error?: string },
-    bindingCookie: string | undefined,
+    cookieHeader: string | undefined,
     userAgent?: string,
   ): Promise<CallbackOutcome> {
     const provider = this.provider(name);
@@ -133,6 +139,7 @@ export class OAuthService {
       : undefined;
     if (!state || state.provider !== provider.name) throw new BadRequestException('Invalid state');
     // The flow must finish in the browser that started it (login/link CSRF).
+    const bindingCookie = readCookie(cookieHeader, bindingCookieName(state.flow));
     if (!bindingCookie || bindingHash(bindingCookie) !== state.binding) {
       throw new BadRequestException('Invalid state');
     }

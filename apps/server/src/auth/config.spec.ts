@@ -25,6 +25,35 @@ describe('loadAuthConfig', () => {
     expect(cfg.rateLimitEnabled).toBe(true);
   });
 
+  describe('TRUST_PROXY', () => {
+    it('is off by default and when explicitly false or 0', () => {
+      expect(loadAuthConfig(base).trustProxy).toBe(false);
+      for (const value of ['', 'false', 'FALSE', '0', ' ']) {
+        expect(loadAuthConfig({ ...base, TRUST_PROXY: value }).trustProxy).toBe(false);
+      }
+    });
+
+    it('accepts a hop count', () => {
+      expect(loadAuthConfig({ ...base, TRUST_PROXY: '1' }).trustProxy).toBe(1);
+      expect(loadAuthConfig({ ...base, TRUST_PROXY: '2' }).trustProxy).toBe(2);
+    });
+
+    it('accepts a list of addresses, subnets and Express presets', () => {
+      expect(loadAuthConfig({ ...base, TRUST_PROXY: 'loopback, 10.0.0.0/8 ,::1,192.168.1.5' }).trustProxy).toEqual([
+        'loopback',
+        '10.0.0.0/8',
+        '::1',
+        '192.168.1.5',
+      ]);
+    });
+
+    it('rejects `true` (it would trust every hop and make the client IP spoofable) and garbage', () => {
+      for (const value of ['true', '-1', '1.5', 'nope', '10.0.0.0/99', '999.1.1.1', 'loopback,,']) {
+        expect(() => loadAuthConfig({ ...base, TRUST_PROXY: value })).toThrow(/TRUST_PROXY/);
+      }
+    });
+  });
+
   it('defaults and trims PUBLIC_BASE_URL', () => {
     expect(loadAuthConfig(base).publicBaseUrl).toBe('http://127.0.0.1:8787');
     expect(loadAuthConfig({ ...base, PUBLIC_BASE_URL: 'https://api.x.com/' }).publicBaseUrl).toBe(

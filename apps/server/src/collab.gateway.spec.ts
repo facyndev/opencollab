@@ -1,4 +1,4 @@
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 
 import type { INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
@@ -6,11 +6,17 @@ import { Test } from '@nestjs/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 
+import { SessionRevocations } from './auth/session-revocations';
 import { SessionService } from './auth/session.service';
 import { CollabGateway } from './collab.gateway';
 import { Session, Workspace, newAgentProfile, newUserId, type SessionId, type UserId } from './domain';
 import { SESSION_STORE, SessionHub, type SessionStore } from './hub';
 import { ConnectionDeadline, TOKEN_GRACE_MS } from './connection-deadline';
+import {
+  CLOSE_HANDSHAKE_TIMEOUT_MS,
+  HEARTBEAT_INTERVAL_MS,
+  MAX_BUFFERED_BYTES,
+} from './connection-policy';
 import { FORBIDDEN, NOT_JOINED, UNAUTHORIZED } from './protocol';
 
 const frame = (message: object): string => JSON.stringify({ version: 1, message });
@@ -22,7 +28,8 @@ describe('CollabGateway', () => {
   let member: UserId;
   let session: Session;
   let terminal: string;
-  let tokens: Record<string, { userId: UserId; expiresAt: number }>;
+  let tokens: Record<string, { userId: UserId; expiresAt: number; familyId?: string }>;
+  let revocations: SessionRevocations;
   const open: WebSocket[] = [];
 
   beforeEach(async () => {
@@ -41,12 +48,14 @@ describe('CollabGateway', () => {
       load: async (id: SessionId) => (id === session.id ? { session, workspace } : undefined),
       save: async () => undefined,
     };
+    revocations = new SessionRevocations();
     const moduleRef = await Test.createTestingModule({
       providers: [
         CollabGateway,
         { provide: SESSION_STORE, useValue: store },
         { provide: SessionHub, useFactory: (s: SessionStore) => new SessionHub(s), inject: [SESSION_STORE] },
         { provide: SessionService, useValue: { verifyAccessClaims: (t: string) => tokens[t] } },
+        { provide: SessionRevocations, useValue: revocations },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -61,9 +70,9 @@ describe('CollabGateway', () => {
   });
 
   /** Resolves with the socket once open, or with the HTTP status of a rejected upgrade. */
-  function connect(protocols?: string[]): Promise<WebSocket | number> {
+  function connect(protocols?: string[], options?: WebSocket.ClientOptions): Promise<WebSocket | number> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url, protocols);
+      const socket = new WebSocket(url, protocols, options);
       open.push(socket);
       socket.on('open', () => resolve(socket));
       socket.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
@@ -73,11 +82,19 @@ describe('CollabGateway', () => {
     });
   }
 
-  async function authed(token: string): Promise<WebSocket> {
-    const socket = await connect(['opencollab.v1', `bearer.${token}`]);
+  async function authed(token: string, options?: WebSocket.ClientOptions): Promise<WebSocket> {
+    const socket = await connect(['opencollab.v1', `bearer.${token}`], options);
     if (typeof socket === 'number') throw new Error(`rejected with ${socket}`);
     return socket;
   }
+
+  /** The server-side sockets, in connection order. */
+  const serverSockets = (): WebSocket[] =>
+    [...(app.get(CollabGateway) as unknown as { server: { clients: Set<WebSocket> } }).server.clients];
+
+  /** Stops the client from reading, so it never answers a close frame or a ping. */
+  const freeze = (socket: WebSocket): void =>
+    void (socket as unknown as { _socket: Socket })._socket.pause();
 
   const next = (socket: WebSocket): Promise<string> =>
     new Promise((resolve) => socket.once('message', (data) => resolve(data.toString())));
@@ -172,8 +189,7 @@ describe('CollabGateway', () => {
     const nowSeconds = (): number => Math.floor(Date.now() / 1000);
     const closed = (socket: WebSocket): Promise<{ code: number; reason: string }> =>
       new Promise((resolve) => socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
-
-    // Only the timers and the clock are faked: the sockets stay real.
+    // Only timeouts and the clock are faked (the heartbeat is tested apart): the sockets stay real.
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     });
@@ -244,6 +260,182 @@ describe('CollabGateway', () => {
       }
       expect(clear).toHaveBeenCalledOnce();
       clear.mockRestore();
+    });
+
+    it('detaches the connection from the hub the moment the token expires', async () => {
+      tokens['short'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const hub = app.get(SessionHub);
+      const socket = await authed('short');
+      await join(socket);
+      expect(hub.liveSessionCount()).toBe(1);
+      freeze(socket); // never completes the close handshake
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      // Synchronous: nothing may be routed to or from the socket after expiry.
+      expect(hub.liveSessionCount()).toBe(0);
+    });
+
+    it('terminates a socket that does not complete the close handshake in time', async () => {
+      tokens['short'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const socket = await authed('short');
+      const [server] = serverSockets();
+      const terminate = vi.spyOn(server as WebSocket, 'terminate');
+      freeze(socket);
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      expect(terminate).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(CLOSE_HANDSHAKE_TIMEOUT_MS);
+      expect(terminate).toHaveBeenCalledOnce();
+    });
+
+    it('does not terminate a socket whose close handshake completed', async () => {
+      tokens['short'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const socket = await authed('short');
+      const [server] = serverSockets();
+      const terminate = vi.spyOn(server as WebSocket, 'terminate');
+      const gone = closed(socket);
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      await gone;
+      for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+      vi.advanceTimersByTime(CLOSE_HANDSHAKE_TIMEOUT_MS * 2);
+      expect(terminate).not.toHaveBeenCalled();
+    });
+
+    it('never shortens the deadline: reauth with an older, still valid token keeps the later expiry', async () => {
+      const longAt = nowSeconds() + 900;
+      tokens['long'] = { userId: owner, expiresAt: longAt };
+      tokens['older'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const socket = await authed('long');
+      const reply = next(socket);
+      socket.send(reauthFrame('older'));
+      expect(JSON.parse(await reply).message).toEqual({ type: 'reauthenticated', expires_at: longAt });
+
+      let isClosed = false;
+      socket.once('close', () => (isClosed = true));
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(isClosed).toBe(false);
+      const gone = closed(socket);
+      vi.advanceTimersByTime(900_000);
+      expect(await gone).toEqual({ code: 1008, reason: 'token_expired' });
+    });
+  });
+
+  describe('refresh family revocation', () => {
+    const closed = (socket: WebSocket): Promise<{ code: number; reason: string }> =>
+      new Promise((resolve) => socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+    const future = (): number => Math.floor(Date.now() / 1000) + 3600;
+
+    it('closes only the sockets of the revoked family with 1008 session_revoked', async () => {
+      tokens['a'] = { userId: owner, expiresAt: future(), familyId: 'fam-a' };
+      tokens['b'] = { userId: owner, expiresAt: future(), familyId: 'fam-b' };
+      const hub = app.get(SessionHub);
+      const phone = await authed('a');
+      const laptop = await authed('b');
+      await join(phone);
+      expect(hub.liveSessionCount()).toBe(1);
+
+      const gone = closed(phone);
+      revocations.publish('fam-a');
+      expect(hub.liveSessionCount()).toBe(0); // detached on the spot
+      expect(await gone).toEqual({ code: 1008, reason: 'session_revoked' });
+      // The other device keeps working.
+      expect(JSON.parse(await join(laptop)).message.type).toBe('joined');
+    });
+
+    it('moves a connection to the family of the token it renews with', async () => {
+      tokens['a'] = { userId: owner, expiresAt: future(), familyId: 'fam-a' };
+      tokens['a2'] = { userId: owner, expiresAt: future(), familyId: 'fam-b' };
+      const socket = await authed('a');
+      const reply = next(socket);
+      socket.send(frame({ type: 'reauth', token: 'a2' }));
+      expect(JSON.parse(await reply).message.type).toBe('reauthenticated');
+
+      revocations.publish('fam-a'); // the old family no longer owns this socket
+      expect(JSON.parse(await join(socket)).message.type).toBe('joined');
+      const gone = closed(socket);
+      revocations.publish('fam-b');
+      expect(await gone).toEqual({ code: 1008, reason: 'session_revoked' });
+    });
+
+    it('leaves sockets without a family untouched', async () => {
+      const socket = await authed('owner-token'); // no familyId claim
+      revocations.publish('fam-a');
+      expect(JSON.parse(await join(socket)).message.type).toBe('joined');
+    });
+  });
+
+  describe('heartbeat', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('terminates and detaches a socket that does not answer a ping by the next tick', async () => {
+      const hub = app.get(SessionHub);
+      const socket = await authed('owner-token', { autoPong: false });
+      await join(socket);
+      const [server] = serverSockets();
+      const terminate = vi.spyOn(server as WebSocket, 'terminate');
+
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS); // ping goes out
+      expect(terminate).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS); // still no pong
+      expect(terminate).toHaveBeenCalledOnce();
+      expect(hub.liveSessionCount()).toBe(0);
+    });
+
+    it('keeps a socket that keeps answering', async () => {
+      const socket = await authed('owner-token');
+      const [server] = serverSockets();
+      const terminate = vi.spyOn(server as WebSocket, 'terminate');
+      const ponged = (): Promise<void> => new Promise((resolve) => (server as WebSocket).once('pong', () => resolve()));
+      for (let i = 0; i < 3; i += 1) {
+        const answered = ponged();
+        vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+        await answered;
+      }
+      expect(terminate).not.toHaveBeenCalled();
+      expect(socket.readyState).toBe(WebSocket.OPEN);
+    });
+
+    it('clears its interval on module destroy', async () => {
+      await authed('owner-token');
+      const before = vi.getTimerCount();
+      app.get(CollabGateway).onModuleDestroy();
+      expect(vi.getTimerCount()).toBe(before - 1);
+    });
+  });
+
+  describe('backpressure', () => {
+    const closed = (socket: WebSocket): Promise<{ code: number; reason: string }> =>
+      new Promise((resolve) => socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+
+    it('closes a slow consumer with 1013 slow_consumer instead of queuing more', async () => {
+      const hub = app.get(SessionHub);
+      const disconnect = vi.spyOn(hub, 'disconnect');
+      const host = await authed('owner-token');
+      const viewer = await authed('member-token');
+      await join(host);
+      await join(viewer);
+      const [, viewerServer] = serverSockets();
+      Object.defineProperty(viewerServer, 'bufferedAmount', { get: () => MAX_BUFFERED_BYTES + 1 });
+
+      const gone = closed(viewer);
+      host.send(frame({ type: 'terminal_output', session_id: session.id, terminal_id: terminal, data: [1] }));
+      expect(await gone).toEqual({ code: 1013, reason: 'slow_consumer' });
+      expect(disconnect.mock.calls.some(([conn]) => conn.userId === member)).toBe(true);
+    });
+
+    it('keeps delivering to a consumer under the cap', async () => {
+      const host = await authed('owner-token');
+      const viewer = await authed('member-token');
+      await join(host);
+      await join(viewer);
+      const [, viewerServer] = serverSockets();
+      Object.defineProperty(viewerServer, 'bufferedAmount', { get: () => MAX_BUFFERED_BYTES });
+      const out = frame({ type: 'terminal_output', session_id: session.id, terminal_id: terminal, data: [1] });
+      const received = next(viewer);
+      host.send(out);
+      expect(await received).toBe(out);
     });
   });
 });
