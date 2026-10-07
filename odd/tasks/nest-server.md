@@ -609,3 +609,12 @@ sobre el commit work-unit de T1.
   `oc_refresh`; refresh 200; `/auth/me` con el access; `desktop-code`
   devuelve `opencollab://auth/callback?code=`; logout 204; refresh tras
   logout 401. Procesos detenidos.
+- 2026-10-07: Commit de T6b `1d8e440`. Review (base `2ca7771`, 4 lentes,
+  consent granted): aprobada y acknowledged; límite revisado → `1d8e440`.
+  Avisos a corregir (T6b-fix): carrera logout/refresh en vuelo (dos lentes:
+  un refresh que termina después del logout re-autentica); `logout()` no
+  mira la respuesta (403/5xx/red → la UI dice "cerraste sesión" con la
+  cookie viva); requests sin timeout y el refresh entre pestañas retiene el
+  Web Lock indefinidamente si el server cuelga; `ContinuePage` queda en
+  "Loading…" para siempre si falla `me()` (dos lentes); `captureHandoff`
+  como efecto dentro de un inicializador de `useState`.
