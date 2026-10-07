@@ -420,3 +420,15 @@ sobre el commit work-unit de T1.
   membresía del workspace cacheada en el hub (fuera de alcance); si se agota
   `pickAvailableUsername` el callback responde 500 (probabilidad
   despreciable); el timer de cierre usa `unref`.
+- 2026-10-07: Commit de T5c `064f295` (parent re-corrió unit 179/179 e
+  integración 81/81). Review (base `81eb4a4`, lineage de 4 lentes, riesgo
+  alto, consent granted): aprobada sin correcciones y acknowledged. Límite
+  revisado → `064f295`. Avisos nuevos no bloqueantes: (a) revocar una
+  familia solo cierra los sockets abiertos en ese momento; un access token
+  todavía vigente de esa familia puede abrir un socket nuevo o usarse en
+  `reauth` hasta su `exp` (falta una lista en memoria de familias revocadas
+  con TTL = vida del access); (b) `reauth` adopta la familia del token
+  presentado aunque el plazo quede del anterior; (c) cerrar un consumidor
+  lento desde `send` desconecta del hub mientras éste itera el broadcast
+  (reentrancia); (d) cookies `oc_oauth_<flow>` de flujos abandonados se
+  acumulan hasta su TTL.
