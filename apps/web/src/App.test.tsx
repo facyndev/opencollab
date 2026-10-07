@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { createAuthClient } from "./authClient";
+import { captureInitialHandoff } from "./handoff";
 
 const user = { id: "u1", username: "ada", email: "ada@example.com", displayName: "Ada L", emailVerifiedAt: null };
 const tokens = { accessToken: "access-1", expiresIn: 900, tokenType: "Bearer" };
@@ -16,7 +17,7 @@ const json = (status: number, body: unknown = {}) =>
     headers: { "content-type": "application/json" },
   });
 
-function setup(path: string, routes: Record<string, Handler> = {}) {
+function setup(path: string, routes: Record<string, Handler> = {}, options: { skipCapture?: boolean } = {}) {
   window.history.replaceState(null, "", path);
   const table: Record<string, Handler> = {
     "POST /auth/web/refresh": () => json(401, { message: "Invalid refresh token" }),
@@ -33,6 +34,7 @@ function setup(path: string, routes: Record<string, Handler> = {}) {
     return handler(init);
   });
   const client = createAuthClient({ fetch: fetchMock, locks: null });
+  if (!options.skipCapture) captureInitialHandoff(window.location);
   const assign = vi.fn();
   render(<App client={client} assign={assign} />);
   return { client, assign, calls, fetchMock };
@@ -152,6 +154,30 @@ describe("register", () => {
   });
 });
 
+describe("continue page", () => {
+  const url = `/login?client=desktop&code_challenge=${challenge}`;
+
+  it("shows an error with retry and sign-in-as-someone-else when me() fails", async () => {
+    let attempts = 0;
+    setup(url, {
+      "POST /auth/web/refresh": () => json(200, tokens),
+      "GET /auth/me": () => (++attempts === 1 ? json(500, { message: "boom" }) : json(200, user)),
+    });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/boom/i);
+    expect(screen.getByRole("button", { name: /use a different account/i })).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole("button", { name: /try again/i }));
+    expect(await screen.findByRole("button", { name: /continue as ada/i })).toBeTruthy();
+  });
+});
+
+describe("handoff capture", () => {
+  it("does not write to sessionStorage while rendering", async () => {
+    setup(`/login?client=desktop&code_challenge=${challenge}`, {}, { skipCapture: true });
+    await screen.findByRole("heading", { name: /sign in/i });
+    expect(sessionStorage.length).toBe(0);
+  });
+});
+
 describe("desktop handoff", () => {
   const url = `/login?client=desktop&code_challenge=${challenge}`;
   const deepLink = "opencollab://auth/callback?code=one-shot";
@@ -252,5 +278,12 @@ describe("account", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: /sign out/i }));
     expect(await screen.findByRole("heading", { name: /sign in/i })).toBeTruthy();
     expect(calls).toContain("POST /auth/web/logout");
+  });
+
+  it("stays on the account and says so when logout fails", async () => {
+    setup("/account", { ...authed, "POST /auth/web/logout": () => json(503, { message: "down" }) });
+    await userEvent.setup().click(await screen.findByRole("button", { name: /sign out/i }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/could not sign out/i);
+    expect(window.location.pathname).toBe("/account");
   });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AuthClient } from "./authClient";
 import { messageOf } from "./components";
-import { captureHandoff, readPendingHandoff, runPendingHandoff } from "./handoff";
+import { readPendingHandoff, runPendingHandoff } from "./handoff";
 import {
   AccountPage,
   ContinuePage,
@@ -34,11 +34,6 @@ export function App({
   const [offerContinue, setOfferContinue] = useState(false);
   const [handoff, setHandoff] = useState<Handoff>({ kind: "idle" });
   const completing = useRef(false);
-
-  // A desktop request arrives on /login; remember its challenge before anything else.
-  useState(() => {
-    if (pathname === "/login") captureHandoff(search);
-  });
 
   useEffect(() => {
     client
@@ -85,9 +80,7 @@ export function App({
           <ContinuePage
             client={client}
             onContinue={() => void finish()}
-            onSwitch={() => {
-              void client.logout().then(() => setOfferContinue(false));
-            }}
+            onSwitch={() => client.logout().then(() => setOfferContinue(false))}
           />
         );
       }

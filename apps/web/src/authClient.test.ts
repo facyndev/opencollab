@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createAuthClient, type AuthClientDeps } from "./authClient";
+import { ApiError, REQUEST_TIMEOUT_MS, createAuthClient, type AuthClientDeps } from "./authClient";
 
 const user = { id: "u1", username: "ada", email: null, displayName: null, emailVerifiedAt: null };
 const tokens = { accessToken: "access-1", expiresIn: 900, tokenType: "Bearer" };
@@ -53,16 +53,38 @@ describe("auth client requests", () => {
     expect(JSON.parse(init.body as string)).toEqual({ username: "ada", password: "0123456789", displayName: "Ada" });
   });
 
-  it("logout clears the state even when the request fails", async () => {
+  it("logout clears the state and calls the server on success", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(200, { user, ...tokens }))
+      .mockResolvedValueOnce(json(204));
+    const client = build(fetchMock);
+    await client.login("ada", "pw");
+    await client.logout();
+    expect(client.getState().status).toBe("anonymous");
+    expect(fetchMock.mock.calls[1]![0]).toBe("/auth/web/logout");
+  });
+
+  it("logout rejects and does not claim anonymous when the network fails", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(json(200, { user, ...tokens }))
       .mockRejectedValueOnce(new TypeError("offline"));
     const client = build(fetchMock);
     await client.login("ada", "pw");
-    await client.logout();
-    expect(client.getState().status).toBe("anonymous");
-    expect(fetchMock.mock.calls[1]![0]).toBe("/auth/web/logout");
+    await expect(client.logout()).rejects.toBeInstanceOf(TypeError);
+    expect(client.getState().status).toBe("authenticated");
+  });
+
+  it("logout rejects with an ApiError on a non-2xx response", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(200, { user, ...tokens }))
+      .mockResolvedValueOnce(json(403, { message: "Forbidden" }));
+    const client = build(fetchMock);
+    await client.login("ada", "pw");
+    await expect(client.logout()).rejects.toMatchObject({ status: 403 });
+    expect(client.getState().status).toBe("authenticated");
   });
 
   it("me() sends the bearer token and not the CSRF header", async () => {
@@ -170,12 +192,67 @@ describe("auth client refresh", () => {
     expect(fetchMock.mock.calls.length).toBe(calls);
   });
 
+  it("ignores a refresh that resolves after logout started", async () => {
+    let release!: (r: Response) => void;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(200, tokens))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => (release = resolve)))
+      .mockResolvedValue(json(204));
+    const client = build(fetchMock);
+    await client.refresh();
+    const pending = client.refresh();
+    await client.logout();
+    expect(client.getState().status).toBe("anonymous");
+    release(json(200, { ...tokens, accessToken: "access-2" }));
+    expect(await pending).toBe(false);
+    expect(client.getState().status).toBe("anonymous");
+    const calls = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2_000_000);
+    expect(fetchMock.mock.calls.length).toBe(calls);
+  });
+
   it("notifies subscribers of state changes", async () => {
     const client = build(async () => json(200, tokens));
     const seen: string[] = [];
     client.subscribe(() => seen.push(client.getState().status));
     await client.refresh();
     expect(seen).toContain("authenticated");
+  });
+});
+
+describe("auth client timeouts", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("rejects a hanging request after the timeout", async () => {
+    const client = build(() => new Promise<Response>(() => undefined));
+    const result = expect(client.login("ada", "pw")).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    await result;
+  });
+
+  it("passes an abort signal to fetch", async () => {
+    const fetchMock = vi.fn(async () => json(200, tokens));
+    await build(fetchMock).refresh();
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("settles the Web Lock callback when the refresh times out", async () => {
+    let settled = false;
+    const request = vi.fn(async (_name: string, cb: () => Promise<unknown>) => {
+      try {
+        return await cb();
+      } finally {
+        settled = true;
+      }
+    });
+    const client = build(() => new Promise<Response>(() => undefined), { locks: { request } as unknown as LockManager });
+    const result = expect(client.refresh()).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    await result;
+    expect(settled).toBe(true);
   });
 });
 

@@ -61,3 +61,8 @@ export async function runPendingHandoff(
   assign(redirectUrl);
   return true;
 }
+
+/** Called once from the entry point, before the first render: a desktop request arrives on /login. */
+export function captureInitialHandoff(location: { pathname: string; search: string }): void {
+  if (location.pathname === "/login") captureHandoff(location.search);
+}

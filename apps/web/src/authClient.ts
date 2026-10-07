@@ -43,6 +43,9 @@ export interface AuthClientDeps {
 export const CSRF_HEADER = "X-OpenCollab-CSRF";
 export const REFRESH_LOCK = "opencollab-refresh";
 
+/** Every auth request is abandoned after this long, so a hung server cannot pin a tab or the refresh lock. */
+export const REQUEST_TIMEOUT_MS = 10_000;
+
 const REFRESH_MARGIN_MS = 60_000;
 const MIN_REFRESH_DELAY_MS = 5_000;
 const RETRY_DELAY_MS = 30_000;
@@ -66,6 +69,12 @@ async function errorOf(response: Response): Promise<ApiError> {
   return new ApiError(response.status, message);
 }
 
+function timeoutError(): Error {
+  const error = new Error("The request timed out");
+  error.name = "TimeoutError";
+  return error;
+}
+
 function defaultDeps(): AuthClientDeps {
   return {
     fetch: (input, init) => globalThis.fetch(input, init),
@@ -78,6 +87,8 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
   let state: AuthState = { status: "unknown" };
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inflight: Promise<boolean> | undefined;
+  // Bumped by logout: a refresh that started earlier must not resurrect the session.
+  let epoch = 0;
   const listeners = new Set<() => void>();
 
   const set = (next: AuthState) => {
@@ -108,8 +119,24 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
     schedule(body.expiresIn);
   };
 
+  // The timer is ours (not AbortSignal.timeout) and also races the fetch, so the
+  // request settles even if the transport ignores the abort signal.
+  const request = (input: string, init: RequestInit = {}): Promise<Response> => {
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(timeoutError());
+      }, REQUEST_TIMEOUT_MS);
+    });
+    return Promise.race([deps.fetch(input, { ...init, signal: controller.signal }), timeout]).finally(() =>
+      clearTimeout(timeoutId),
+    );
+  };
+
   const webPost = (path: string, body?: unknown) =>
-    deps.fetch(`/auth/web/${path}`, {
+    request(`/auth/web/${path}`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -126,7 +153,9 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
   };
 
   async function doRefresh(): Promise<boolean> {
+    const startedAt = epoch;
     const response = await webPost("refresh");
+    if (startedAt !== epoch) return false;
     if (response.status === 401) {
       clearTimer();
       set({ status: "anonymous" });
@@ -134,7 +163,9 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
     }
     if (!response.ok) throw await errorOf(response);
     const previous = state.status === "authenticated" ? state.user : undefined;
-    adopt((await response.json()) as TokenBody, previous);
+    const data = (await response.json()) as TokenBody;
+    if (startedAt !== epoch) return false;
+    adopt(data, previous);
     return true;
   }
 
@@ -159,8 +190,8 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
   }
 
   async function authed(path: string, init: RequestInit = {}): Promise<Response> {
-    let response = await deps.fetch(path, bearer(init));
-    if (response.status === 401 && (await refresh())) response = await deps.fetch(path, bearer(init));
+    let response = await request(path, bearer(init));
+    if (response.status === 401 && (await refresh())) response = await request(path, bearer(init));
     if (!response.ok) throw await errorOf(response);
     return response;
   }
@@ -180,11 +211,18 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
       return credentials("register", body);
     },
     async logout(): Promise<void> {
+      epoch += 1;
       clearTimer();
       try {
-        await webPost("logout");
-      } catch {
-        // The cookie may outlive a failed request; the local state is cleared regardless.
+        const response = await webPost("logout");
+        if (!response.ok) throw await errorOf(response);
+      } catch (error) {
+        // The cookie may still be valid: stay signed in (the access token is still good)
+        // and keep refreshing, so the caller can tell the user and offer a retry.
+        if (state.status === "authenticated") {
+          timer = setTimeout(() => void refresh().catch(() => undefined), RETRY_DELAY_MS);
+        }
+        throw error;
       }
       set({ status: "anonymous" });
     },

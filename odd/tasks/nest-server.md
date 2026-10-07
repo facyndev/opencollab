@@ -158,6 +158,10 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     `?client=desktop&code_challenge=…` tras autenticar pide el código y
     redirige al deep link. Vitest + Testing Library; job `web` en el CI;
     `AGENTS.md` (estructura y comandos).
+  - [x] **T6b-fix (web)**: carrera logout/refresh (epoch), `logout()`
+    rechaza si el server no confirma, timeout de 10 s en cada request
+    (libera el Web Lock), `ContinuePage` con error y reintento, captura del
+    handoff fuera de React (`main.tsx`).
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
@@ -618,3 +622,18 @@ sobre el commit work-unit de T1.
   Web Lock indefinidamente si el server cuelga; `ContinuePage` queda en
   "Loading…" para siempre si falla `me()` (dos lentes); `captureHandoff`
   como efecto dentro de un inicializador de `useState`.
+- 2026-10-07: T6b-fix implementado por el writer delegado (sin commit).
+  (1) `authClient` lleva un `epoch` que `logout()` incrementa; un refresh en
+  vuelo que resuelve después ya no re-autentica ni rearma el timer. (2)
+  `logout()` rechaza ante error de red o non-2xx y conserva la sesión (con
+  reintento de refresh); la UI muestra "Could not sign out, try again." en
+  la cuenta y en "Use a different account". (3) `request()` con
+  `REQUEST_TIMEOUT_MS = 10_000` (AbortController + race, funciona con
+  timers falsos); el callback del Web Lock se resuelve al vencer. (4)
+  `ContinuePage` muestra alerta, "Try again" y "Use a different account".
+  (5) `captureInitialHandoff` se llama una vez en `main.tsx` antes del
+  render; se quitó el efecto del inicializador de `useState`. RED (9
+  tests): refresh posterior al logout, logout con red caída / 403,
+  signal en fetch, timeout, lock que se libera, error de `ContinuePage`,
+  logout fallido en la cuenta, render sin escribir en sessionStorage.
+  GREEN: web 87/87, build OK.

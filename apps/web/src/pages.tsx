@@ -166,24 +166,56 @@ export function ContinuePage({
 }: {
   client: AuthClient;
   onContinue: () => void;
-  onSwitch: () => void;
+  /** Signs out of the web session; rejects when the server could not confirm it. */
+  onSwitch: () => Promise<unknown>;
 }) {
   const [user, setUser] = useState<UserView | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    client.me().then(setUser, () => undefined);
-  }, [client]);
+    let current = true;
+    client.me().then(
+      (value) => current && setUser(value),
+      (error) => current && setFailure(messageOf(error)),
+    );
+    return () => {
+      current = false;
+    };
+  }, [client, attempt]);
+
+  const retry = () => {
+    setFailure(null);
+    setAttempt((n) => n + 1);
+  };
+  const switchAccount = () => {
+    setFailure(null);
+    onSwitch().catch(() => setFailure(SIGN_OUT_FAILED));
+  };
+
   return (
     <Shell title="Continue to OpenCollab desktop">
       <p>You are already signed in on the web. Link this session to the desktop app?</p>
+      {failure && (
+        <p className="banner error" role="alert">
+          {failure}
+        </p>
+      )}
       <button className="button primary" type="button" disabled={!user} onClick={onContinue}>
-        {user ? `Continue as ${user.username}` : "Loading…"}
+        {user ? `Continue as ${user.username}` : failure ? "Unavailable" : "Loading…"}
       </button>
-      <button className="button secondary" type="button" onClick={onSwitch}>
+      {failure && !user && (
+        <button className="button secondary" type="button" onClick={retry}>
+          Try again
+        </button>
+      )}
+      <button className="button secondary" type="button" onClick={switchAccount}>
         Use a different account
       </button>
     </Shell>
   );
 }
+
+const SIGN_OUT_FAILED = "Could not sign out, try again.";
 
 const PROVIDERS: Record<Provider, string> = { github: "GitHub", google: "Google" };
 const isProvider = (value: string | null): value is Provider => value !== null && Object.hasOwn(PROVIDERS, value);
@@ -220,7 +252,13 @@ export function AccountPage({
   };
 
   const signOut = async () => {
-    await client.logout();
+    setFailure(null);
+    try {
+      await client.logout();
+    } catch {
+      setFailure(SIGN_OUT_FAILED);
+      return;
+    }
     navigate("/login", true);
   };
 
