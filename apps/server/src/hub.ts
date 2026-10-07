@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import {
   DomainError,
   parseSessionId,
@@ -7,7 +9,7 @@ import {
   type UserId,
   type Workspace,
 } from './domain';
-import { FORBIDDEN, NOT_JOINED, parseFrame, type Message } from './protocol';
+import { FORBIDDEN, NOT_JOINED, PROTOCOL_VERSION, UNAUTHORIZED, parseFrame, type Message } from './protocol';
 
 /** Nest injection token for the hub's `SessionStore` port. */
 export const SESSION_STORE = Symbol('SESSION_STORE');
@@ -19,6 +21,12 @@ export const UNAVAILABLE = '{"error":"unavailable"}';
 export interface HubConnection {
   readonly userId: UserId;
   send(text: string): void;
+  /**
+   * Asks the connection to accept a fresh access token. Returns the new expiry
+   * (unix seconds), or undefined when the token is refused. The deadline lives
+   * with the connection; the hub only relays the verdict.
+   */
+  reauthenticate(token: string): number | undefined;
 }
 
 export interface SessionState {
@@ -47,6 +55,7 @@ export class SessionHub {
   private readonly loading = new Map<SessionId, Promise<SessionState | undefined>>();
   private readonly joined = new Map<HubConnection, Set<SessionId>>();
   private readonly queues = new WeakMap<HubConnection, Promise<void>>();
+  private readonly logger = new Logger(SessionHub.name);
 
   constructor(private readonly store: SessionStore) {}
 
@@ -63,9 +72,17 @@ export class SessionHub {
     this.joined.delete(conn);
   }
 
-  /** Frames of one connection are handled strictly in arrival order. */
+  /**
+   * Frames of one connection are handled strictly in arrival order. The
+   * returned promise never rejects: an unexpected failure is logged (error
+   * name only, never frame contents) and the next frame is still processed.
+   */
   receive(conn: HubConnection, text: string): Promise<void> {
-    const next = (this.queues.get(conn) ?? Promise.resolve()).then(() => this.handle(conn, text));
+    const next = (this.queues.get(conn) ?? Promise.resolve())
+      .then(() => this.handle(conn, text))
+      .catch((error: unknown) => {
+        this.logger.error(`frame handling failed: ${error instanceof Error ? error.name : 'unknown error'}`);
+      });
     this.queues.set(conn, next);
     return next;
   }
@@ -73,7 +90,7 @@ export class SessionHub {
   private async handle(conn: HubConnection, text: string): Promise<void> {
     if (!this.joined.has(conn)) return;
     const parsed = parseFrame(text);
-    if (!parsed.ok) return conn.send(parsed.error);
+    if (!parsed.ok) return safeSend(conn, parsed.error);
     try {
       await this.route(conn, text, parsed.envelope.message);
     } catch {
@@ -87,7 +104,10 @@ export class SessionHub {
       case 'join_session':
         return this.join(conn, message.session_id);
       case 'joined':
+      case 'reauthenticated':
         return conn.send(FORBIDDEN);
+      case 'reauth':
+        return this.reauth(conn, message.token);
       default: {
         const live = this.liveOf(conn, message.session_id as SessionId);
         if (!live) return conn.send(NOT_JOINED);
@@ -101,6 +121,23 @@ export class SessionHub {
         }
       }
     }
+  }
+
+  /** Renewal is about the connection, not a session, so it needs no join. */
+  private reauth(conn: HubConnection, token: string): void {
+    let expiresAt: number | undefined;
+    try {
+      expiresAt = conn.reauthenticate(token);
+    } catch {
+      expiresAt = undefined;
+    }
+    if (expiresAt === undefined) return conn.send(UNAUTHORIZED);
+    conn.send(
+      JSON.stringify({
+        version: PROTOCOL_VERSION,
+        message: { type: 'reauthenticated', expires_at: expiresAt },
+      }),
+    );
   }
 
   private liveOf(conn: HubConnection, id: SessionId): Live | undefined {

@@ -3,14 +3,15 @@ import type { AddressInfo } from 'node:net';
 import type { INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { Test } from '@nestjs/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 
 import { SessionService } from './auth/session.service';
 import { CollabGateway } from './collab.gateway';
 import { Session, Workspace, newAgentProfile, newUserId, type SessionId, type UserId } from './domain';
 import { SESSION_STORE, SessionHub, type SessionStore } from './hub';
-import { FORBIDDEN, NOT_JOINED } from './protocol';
+import { ConnectionDeadline, TOKEN_GRACE_MS } from './connection-deadline';
+import { FORBIDDEN, NOT_JOINED, UNAUTHORIZED } from './protocol';
 
 const frame = (message: object): string => JSON.stringify({ version: 1, message });
 
@@ -21,13 +22,17 @@ describe('CollabGateway', () => {
   let member: UserId;
   let session: Session;
   let terminal: string;
-  let tokens: Record<string, UserId>;
+  let tokens: Record<string, { userId: UserId; expiresAt: number }>;
   const open: WebSocket[] = [];
 
   beforeEach(async () => {
     owner = newUserId();
     member = newUserId();
-    tokens = { 'owner-token': owner, 'member-token': member };
+    const farFuture = Math.floor(Date.now() / 1000) + 3600;
+    tokens = {
+      'owner-token': { userId: owner, expiresAt: farFuture },
+      'member-token': { userId: member, expiresAt: farFuture },
+    };
     const workspace = new Workspace(owner, 'w');
     workspace.addMember(owner, member);
     session = Session.create(workspace, owner, 's');
@@ -41,7 +46,7 @@ describe('CollabGateway', () => {
         CollabGateway,
         { provide: SESSION_STORE, useValue: store },
         { provide: SessionHub, useFactory: (s: SessionStore) => new SessionHub(s), inject: [SESSION_STORE] },
-        { provide: SessionService, useValue: { verifyAccess: (t: string) => tokens[t] } },
+        { provide: SessionService, useValue: { verifyAccessClaims: (t: string) => tokens[t] } },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -160,6 +165,85 @@ describe('CollabGateway', () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(hub.liveSessionCount()).toBe(0);
+    });
+  });
+
+  describe('token lifetime', () => {
+    const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+    const closed = (socket: WebSocket): Promise<{ code: number; reason: string }> =>
+      new Promise((resolve) => socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+
+    // Only the timers and the clock are faked: the sockets stay real.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const reauthFrame = (token: string): string => frame({ type: 'reauth', token });
+
+    it('closes the socket with 1008 token_expired once the token expiry plus the grace passes', async () => {
+      tokens['short'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const socket = await authed('short');
+      const gone = closed(socket);
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      expect(await gone).toEqual({ code: 1008, reason: 'token_expired' });
+    });
+
+    it('moves the deadline on reauth and answers reauthenticated with the new expiry', async () => {
+      tokens['short'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const renewedAt = nowSeconds() + 900;
+      tokens['renewed'] = { userId: owner, expiresAt: renewedAt };
+      const socket = await authed('short');
+      const reply = next(socket);
+      socket.send(reauthFrame('renewed'));
+      expect(JSON.parse(await reply)).toEqual({
+        version: 1,
+        message: { type: 'reauthenticated', expires_at: renewedAt },
+      });
+
+      let isClosed = false;
+      socket.once('close', () => (isClosed = true));
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(isClosed).toBe(false);
+
+      const gone = closed(socket);
+      vi.advanceTimersByTime(900_000);
+      expect(await gone).toEqual({ code: 1008, reason: 'token_expired' });
+    });
+
+    it('refuses a token of another user without moving the deadline', async () => {
+      tokens['short'] = { userId: owner, expiresAt: nowSeconds() + 60 };
+      const socket = await authed('short');
+      const reply = next(socket);
+      socket.send(reauthFrame('member-token'));
+      expect(await reply).toBe(UNAUTHORIZED);
+      const gone = closed(socket);
+      vi.advanceTimersByTime(60_000 + TOKEN_GRACE_MS);
+      expect(await gone).toEqual({ code: 1008, reason: 'token_expired' });
+    });
+
+    it('refuses an invalid token and keeps the connection usable', async () => {
+      const socket = await authed('owner-token');
+      const reply = next(socket);
+      socket.send(reauthFrame('nope'));
+      expect(await reply).toBe(UNAUTHORIZED);
+      expect(JSON.parse(await join(socket)).message.type).toBe('joined');
+    });
+
+    it('clears the deadline timer when the socket closes', async () => {
+      const clear = vi.spyOn(ConnectionDeadline.prototype, 'clear');
+      const socket = await authed('owner-token');
+      clear.mockClear();
+      const gone = closed(socket);
+      socket.close();
+      await gone;
+      // The server's own close event can land a few ticks after the client's.
+      for (let i = 0; i < 100 && clear.mock.calls.length === 0; i += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(clear).toHaveBeenCalledOnce();
+      clear.mockRestore();
     });
   });
 });

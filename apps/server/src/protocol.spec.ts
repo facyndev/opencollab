@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { INCOMPATIBLE_PROTOCOL_VERSION, INVALID_MESSAGE, parseFrame } from './protocol';
+import { INCOMPATIBLE_PROTOCOL_VERSION, INVALID_MESSAGE, UNAUTHORIZED, parseFrame } from './protocol';
 
 /** The raw error a frame would be answered with, or undefined when it is accepted. */
 function replyForTextFrame(text: string): string | undefined {
@@ -31,6 +31,24 @@ describe('parseFrame', () => {
     expect(replyForTextFrame(frame('{"type":"joined","session_id":"s","access":"root"}'))).toBe(
       INVALID_MESSAGE,
     );
+  });
+
+  it('accepts reauth and reauthenticated, which carry no session', () => {
+    const reauth = '{"version":1,"message":{"type":"reauth","token":"t"}}';
+    const done = '{"version":1,"message":{"type":"reauthenticated","expires_at":1790000000}}';
+    expect(replyForTextFrame(reauth)).toBeUndefined();
+    expect(replyForTextFrame(done)).toBeUndefined();
+    expect(UNAUTHORIZED).toBe('{"error":"unauthorized"}');
+  });
+
+  it('rejects reauth and reauthenticated with wrong field types', () => {
+    const frame = (message: string) => `{"version":1,"message":${message}}`;
+    expect(replyForTextFrame(frame('{"type":"reauth"}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"reauth","token":7}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"reauthenticated"}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"reauthenticated","expires_at":1.5}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"reauthenticated","expires_at":-1}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"reauthenticated","expires_at":"9"}'))).toBe(INVALID_MESSAGE);
   });
 
   it('rejects other versions (mirror of the Rust envelope test)', () => {

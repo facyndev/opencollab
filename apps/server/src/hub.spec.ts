@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   Session,
@@ -16,14 +16,22 @@ import {
   INCOMPATIBLE_PROTOCOL_VERSION,
   INVALID_MESSAGE,
   NOT_JOINED,
+  UNAUTHORIZED,
   type Message,
 } from './protocol';
 
 class FakeConn implements HubConnection {
   readonly sent: string[] = [];
+  /** What `reauthenticate` answers: the new expiry, or undefined to refuse. */
+  reauthResult: number | undefined = undefined;
+  readonly reauthTokens: string[] = [];
   constructor(readonly userId: UserId) {}
   send(text: string): void {
     this.sent.push(text);
+  }
+  reauthenticate(token: string): number | undefined {
+    this.reauthTokens.push(token);
+    return this.reauthResult;
   }
   get last(): string | undefined {
     return this.sent.at(-1);
@@ -411,6 +419,58 @@ describe('SessionHub', () => {
       };
       await hub.receive(host, output());
       expect(healthy.last).toBe(output());
+    });
+
+    it('keeps handling later frames after one frame fails unexpectedly', async () => {
+      const conn = connect(owner);
+      const failure = vi
+        .spyOn(hub as unknown as { handle: () => Promise<void> }, 'handle')
+        .mockRejectedValueOnce(new Error('boom'));
+      await expect(hub.receive(conn, 'first')).resolves.toBeUndefined();
+      failure.mockRestore();
+      await join(conn);
+      expect(conn.last).toBe(frame({ type: 'joined', session_id: session.id, access: 'write' }));
+    });
+
+    it('does not let a failing send on the parse-error path reject the queue', async () => {
+      const conn = connect(owner);
+      conn.send = () => {
+        throw new Error('socket closed');
+      };
+      await expect(hub.receive(conn, 'not json')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('reauth', () => {
+    const reauth = frame({ type: 'reauth', token: 'new-token' });
+
+    it('replies reauthenticated with the new expiry, without joining a session first', async () => {
+      const conn = connect(owner);
+      conn.reauthResult = 1_790_000_000;
+      await hub.receive(conn, reauth);
+      expect(conn.reauthTokens).toEqual(['new-token']);
+      expect(conn.sent).toEqual([frame({ type: 'reauthenticated', expires_at: 1_790_000_000 })]);
+    });
+
+    it('answers unauthorized when the connection refuses the token', async () => {
+      const conn = connect(owner);
+      await hub.receive(conn, reauth);
+      expect(conn.sent).toEqual([UNAUTHORIZED]);
+    });
+
+    it('answers unauthorized if the connection throws while verifying', async () => {
+      const conn = connect(owner);
+      conn.reauthenticate = () => {
+        throw new Error('boom');
+      };
+      await hub.receive(conn, reauth);
+      expect(conn.sent).toEqual([UNAUTHORIZED]);
+    });
+
+    it('refuses a client-sent reauthenticated', async () => {
+      const conn = connect(owner);
+      await hub.receive(conn, frame({ type: 'reauthenticated', expires_at: 1 }));
+      expect(conn.sent).toEqual([FORBIDDEN]);
     });
   });
 });

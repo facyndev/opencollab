@@ -89,6 +89,17 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   - [x] `access_changed`: solo del dueño; `setAccess` del dominio, persiste,
     difunde a la sesión; quien pierde Ver queda desuscripto en el acto.
   - [x] Se elimina el eco del stub; `AGENTS.md` deja de decir "stub".
+- [x] **T5b** — Correcciones de la review de T5 (rama `feature/nest-ws`).
+  - [x] Vencimiento del JWT en el socket con renovación en banda: mensaje
+    `reauth { token }` (cliente→server, access token nuevo obtenido por
+    `POST /auth/refresh`); mismo usuario y vigente → se corre el vencimiento
+    de la conexión y se responde `reauthenticated { expires_at }`; inválido
+    o de otro usuario → `{"error":"unauthorized"}` sin cambiar el plazo. Sin
+    renovación a tiempo (`exp` + margen chico) el server cierra el socket.
+    El refresh token nunca viaja por el WS.
+  - [x] La cola por conexión nunca queda rechazada (un error se registra y
+    los mensajes siguientes se procesan); el gateway no deja promesas sin
+    capturar.
 - [ ] **T6** — `apps/web` + `packages/contracts` como fuente del wire.
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
@@ -319,3 +330,24 @@ sobre el commit work-unit de T1.
   backpressure; sin heartbeat (sockets medio abiertos); el revert de un
   `access_changed` fallido puede pisar un cambio concurrente; tests con
   `sleep` y un `FakeStore` compartido entre specs.
+- 2026-10-06: T5b implementado por el writer delegado (sin commit). Wire:
+  `reauth { token }` / `reauthenticated { expires_at }` en `protocol.ts` y
+  `crates/protocol` (`PROTOCOL_VERSION` sigue en 1). `SessionService.
+  verifyAccessClaims` devuelve `{ userId, expiresAt }` (`verifyAccess` delega).
+  Diseño: `connection-deadline.ts` (`ConnectionDeadline`, `TOKEN_GRACE_MS` =
+  5 s) vive en el gateway; el hub solo rutea y delega `reauth` a
+  `HubConnection.reauthenticate(token)`, que el gateway implementa (mismo
+  usuario o `undefined` → `{"error":"unauthorized"}` sin tocar el plazo).
+  Vencido el plazo: `close(1008, 'token_expired')`; el timer se limpia en
+  `close`. La cola del hub nunca queda rechazada (`.catch` que registra solo
+  el nombre del error), el error de parseo usa `safeSend`, y el gateway
+  agrega listener de `error` del socket. RED observado: `cargo test -p
+  protocol` no compilaba (`Message::Reauth`/`Reauthenticated` inexistentes);
+  vitest 9 tests fallando en 5 archivos (`verifyAccessClaims`, módulo
+  `connection-deadline` y `UNAUTHORIZED` inexistentes, reauth sin manejar);
+  el test de cola envenenada se confirmó en RED quitando el `.catch`. GREEN:
+  unit 148/148, integración 78/78, typecheck, build, `cargo test -p protocol`
+  8/8, clippy `-D warnings` y `fmt --check` limpios. Los tests del gateway
+  usan fake timers (solo `setTimeout`/`clearTimeout`/`Date`) con sockets `ws`
+  reales. Pendiente: heartbeat, backpressure y revocación de refresh sobre un
+  socket abierto siguen fuera de alcance.

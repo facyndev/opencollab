@@ -66,13 +66,19 @@ export class SessionService {
 
   /** The user id of a valid access token, or undefined. */
   verifyAccess(token: string): UserId | undefined {
+    return this.verifyAccessClaims(token)?.userId;
+  }
+
+  /** The user and the expiry (unix seconds) of a valid access token, or undefined. */
+  verifyAccessClaims(token: string): { userId: UserId; expiresAt: number } | undefined {
     try {
       const claims = jwt.verify(token, this.key, {
         algorithms: ['HS256'],
         audience: AUDIENCE,
         clockTimestamp: seconds(this.clock.now()),
       }) as jwt.JwtPayload;
-      return typeof claims.sub === 'string' ? (claims.sub as UserId) : undefined;
+      if (typeof claims.sub !== 'string' || typeof claims.exp !== 'number') return undefined;
+      return { userId: claims.sub as UserId, expiresAt: claims.exp };
     } catch {
       return undefined;
     }

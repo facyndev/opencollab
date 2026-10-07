@@ -32,7 +32,11 @@ export type Message =
   /** Client -> server: subscribe this connection to a session. */
   | { type: 'join_session'; session_id: string }
   /** Server -> client: join accepted, with the access in force right now. */
-  | { type: 'joined'; session_id: string; access: AccessLevelDto };
+  | { type: 'joined'; session_id: string; access: AccessLevelDto }
+  /** Client -> server: a fresh access token to keep the socket alive (never the refresh token). */
+  | { type: 'reauth'; token: string }
+  /** Server -> client: renewal accepted; `expires_at` is unix seconds. */
+  | { type: 'reauthenticated'; expires_at: number };
 
 export interface Envelope {
   version: number;
@@ -44,6 +48,8 @@ export const INVALID_MESSAGE = '{"error":"invalid_message"}';
 /** Also answers unknown sessions, so existence is not revealed. */
 export const FORBIDDEN = '{"error":"forbidden"}';
 export const NOT_JOINED = '{"error":"not_joined"}';
+/** A `reauth` token that is invalid or belongs to another user. */
+export const UNAUTHORIZED = '{"error":"unauthorized"}';
 
 type Fields = Record<string, unknown>;
 
@@ -62,7 +68,11 @@ const ACCESS_LEVELS: readonly unknown[] = ['none', 'view', 'write'];
 
 /** Same shape check serde runs for `Message`; unknown fields are ignored. */
 function isMessage(value: unknown): value is Message {
-  if (!isObject(value) || !isString(value.session_id)) return false;
+  if (!isObject(value)) return false;
+  // The only messages that are not about a session.
+  if (value.type === 'reauth') return isString(value.token);
+  if (value.type === 'reauthenticated') return isUint(value.expires_at, Number.MAX_SAFE_INTEGER);
+  if (!isString(value.session_id)) return false;
   switch (value.type) {
     case 'terminal_output':
       return isString(value.terminal_id) && isBytes(value.data);

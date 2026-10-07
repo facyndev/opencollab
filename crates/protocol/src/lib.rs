@@ -68,6 +68,12 @@ pub enum Message {
         session_id: String,
         access: AccessLevelDto,
     },
+    /// El cliente presenta un access token nuevo para seguir conectado
+    /// (cliente -> relay). El refresh token nunca viaja por el WS.
+    Reauth { token: String },
+    /// El relay aceptó la renovación; `expires_at` en segundos Unix
+    /// (relay -> cliente).
+    Reauthenticated { expires_at: u64 },
 }
 
 #[cfg(test)]
@@ -129,5 +135,41 @@ mod tests {
     fn joined_rejects_an_unknown_access_level() {
         let json = r#"{"version":1,"message":{"type":"joined","session_id":"s","access":"root"}}"#;
         assert!(serde_json::from_str::<Envelope>(json).is_err());
+    }
+
+    #[test]
+    fn reauth_round_trips_as_tagged_json() {
+        let envelope = Envelope::new(Message::Reauth { token: "t".into() });
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"version":1,"message":{"type":"reauth","token":"t"}}"#
+        );
+        let back: Envelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, envelope);
+    }
+
+    #[test]
+    fn reauthenticated_round_trips_with_the_expiry() {
+        let envelope = Envelope::new(Message::Reauthenticated {
+            expires_at: 1_790_000_000,
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"version":1,"message":{"type":"reauthenticated","expires_at":1790000000}}"#
+        );
+        let back: Envelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, envelope);
+    }
+
+    #[test]
+    fn reauth_messages_reject_wrong_field_types() {
+        let missing = r#"{"version":1,"message":{"type":"reauth"}}"#;
+        let negative = r#"{"version":1,"message":{"type":"reauthenticated","expires_at":-1}}"#;
+        let fractional = r#"{"version":1,"message":{"type":"reauthenticated","expires_at":1.5}}"#;
+        assert!(serde_json::from_str::<Envelope>(missing).is_err());
+        assert!(serde_json::from_str::<Envelope>(negative).is_err());
+        assert!(serde_json::from_str::<Envelope>(fractional).is_err());
     }
 }
