@@ -13,7 +13,7 @@ export interface AuthConfig {
   publicBaseUrl: string;
   /** Origin of the web app: where OAuth callbacks for `client=web` redirect to (no trailing slash). */
   webOrigin: string;
-  /** Only providers with both id and secret are present (others answer 404). */
+  /** `loadAuthConfig` requires every provider; tests may wire fewer (others answer 404). */
   oauth: Partial<Record<ProviderName, ProviderCredentials>>;
   /** Tests switch it off; production always has it on. */
   rateLimitEnabled: boolean;
@@ -87,12 +87,15 @@ export function loadAuthConfig(env: Env): AuthConfig {
   const databaseUrl = env['DATABASE_URL'];
   if (!databaseUrl) throw new Error('DATABASE_URL is required');
 
+  // Every provider is required: a missing credential is a deploy mistake, not a disabled login.
   const oauth: AuthConfig['oauth'] = {};
   for (const name of PROVIDER_NAMES) {
     const prefix = name.toUpperCase();
     const clientId = env[`${prefix}_CLIENT_ID`];
+    if (!clientId) throw new Error(`${prefix}_CLIENT_ID is required`);
     const clientSecret = env[`${prefix}_CLIENT_SECRET`];
-    if (clientId && clientSecret) oauth[name] = { clientId, clientSecret };
+    if (!clientSecret) throw new Error(`${prefix}_CLIENT_SECRET is required`);
+    oauth[name] = { clientId, clientSecret };
   }
   return {
     jwtSecret,

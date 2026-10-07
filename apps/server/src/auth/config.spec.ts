@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { loadAuthConfig } from './config';
 
-const base = { JWT_SECRET: 'x'.repeat(32), DATABASE_URL: 'postgresql://u:p@h/db' };
+const base = {
+  JWT_SECRET: 'x'.repeat(32),
+  DATABASE_URL: 'postgresql://u:p@h/db',
+  GITHUB_CLIENT_ID: 'gh-id',
+  GITHUB_CLIENT_SECRET: 'gh-secret',
+  GOOGLE_CLIENT_ID: 'g-id',
+  GOOGLE_CLIENT_SECRET: 'g-secret',
+};
 
 describe('loadAuthConfig', () => {
   it('fails fast without JWT_SECRET or with a short one', () => {
@@ -14,16 +21,22 @@ describe('loadAuthConfig', () => {
     expect(() => loadAuthConfig({ JWT_SECRET: base.JWT_SECRET })).toThrow(/DATABASE_URL/);
   });
 
-  it('enables only providers with both id and secret', () => {
-    const cfg = loadAuthConfig({
-      ...base,
-      GITHUB_CLIENT_ID: 'a',
-      GITHUB_CLIENT_SECRET: 'b',
-      GOOGLE_CLIENT_ID: 'only-id',
+  it('enables every OAuth provider with its credentials', () => {
+    const cfg = loadAuthConfig(base);
+    expect(cfg.oauth).toEqual({
+      github: { clientId: 'gh-id', clientSecret: 'gh-secret' },
+      google: { clientId: 'g-id', clientSecret: 'g-secret' },
     });
-    expect(Object.keys(cfg.oauth)).toEqual(['github']);
     expect(cfg.rateLimitEnabled).toBe(true);
   });
+
+  it.each(['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'])(
+    'fails fast without %s',
+    (name) => {
+      expect(() => loadAuthConfig({ ...base, [name]: undefined })).toThrow(new RegExp(name));
+      expect(() => loadAuthConfig({ ...base, [name]: '' })).toThrow(new RegExp(name));
+    },
+  );
 
   describe('TRUST_PROXY', () => {
     it('is off by default and when explicitly false or 0', () => {
