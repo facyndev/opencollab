@@ -13,6 +13,7 @@ use infrastructure::{
     InMemoryWorkspaceRepository, OpenCodeAdapter, PortablePtyAdapter, SysinfoProcessInspector,
 };
 
+use crate::auth::AuthStore;
 /// Silencio de un PTY a partir del cual se considera inactivo.
 const ACTIVITY_IDLE_AFTER: Duration = Duration::from_secs(3);
 
@@ -37,6 +38,8 @@ pub struct AppState {
     pub adapters: Arc<AgentAdapters>,
     pub check_relay: CheckRelay,
     pub session_collaborators: SessionCollaborators,
+    /// Sesión del desktop (tokens solo en memoria) + verifier PKCE pendiente.
+    pub auth: AuthStore,
 }
 
 /// Adaptadores ricos disponibles. Si uno no puede arrancar (p. ej. no abre su
@@ -60,7 +63,7 @@ impl AppState {
         // Dirección del relay: `RELAY_ADDR` o la de por defecto del protocolo.
         let relay_addr = std::env::var("RELAY_ADDR")
             .unwrap_or_else(|_| protocol::DEFAULT_RELAY_ADDR.to_string());
-        let relay_probe: Arc<dyn RelayProbe> = Arc::new(HttpRelayProbe::new(relay_addr));
+        let relay_probe: Arc<dyn RelayProbe> = Arc::new(HttpRelayProbe::new(relay_addr.clone()));
 
         let local_user = UserId::new();
         let workspace = Workspace::new(local_user, "Local");
@@ -85,6 +88,7 @@ impl AppState {
             adapters: Arc::new(AgentAdapters::new(agent_adapters())),
             check_relay: CheckRelay::new(relay_probe),
             session_collaborators: SessionCollaborators::new(repo),
+            auth: AuthStore::new(relay_addr),
         })
     }
 }
