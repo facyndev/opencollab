@@ -224,7 +224,7 @@ describe('SessionService web refresh (grace window) and read-only session lookup
           (row) => row.familyId === familyId && !row.revokedAt && row.expiresAt.getTime() > at.getTime(),
         ),
     } as unknown as AuthRepository;
-    return { service: new SessionService(repo, config, clock, new SessionRevocations()), rows };
+    return { service: new SessionService(repo, config, clock, new SessionRevocations()), rows, repo };
   }
 
   it('rotates a live token normally', async () => {
@@ -292,6 +292,17 @@ describe('SessionService web refresh (grace window) and read-only session lookup
     expect([a.kind, b.kind].sort()).toEqual(['grace', 'rotated']);
     const winner = a.kind === 'rotated' ? a : b;
     expect(winner.kind === 'rotated' && (await service.refreshWeb(winner.tokens.refreshToken)).kind).toBe('rotated');
+  });
+
+  it('a web refresh that lost the rotation to a revoked family is rejected, not graced', async () => {
+    const { service, repo } = setup();
+    const first = await service.issue(newUserId(), 'fam-1');
+    // A logout lands between the read and the claim: the claim fails and the family is dead.
+    repo.rotateRefreshToken = async () => {
+      await repo.revokeFamily('fam-1', now);
+      return false;
+    };
+    await expect(service.refreshWeb(first.refreshToken)).rejects.toThrow();
   });
 
   describe('sessionUser (read-only)', () => {

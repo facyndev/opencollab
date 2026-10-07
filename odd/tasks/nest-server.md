@@ -573,3 +573,13 @@ sobre el commit work-unit de T1.
   `familyHasLiveToken` (int) se escribió junto con el método (RED no observado
   por separado). GREEN: unit 207/207, integración 99/99, typecheck y build
   limpios. El test existente de reuso web ahora avanza el reloj 10 s.
+- 2026-10-07: Commit de T6a-fix `69fe22b` (parent re-corrió unit 207/207 e
+  integración 99/99). Review (base `b7cfd33`, 4 lentes, riesgo alto, consent
+  granted): aprobada y acknowledged; límite revisado → `69fe22b`. R1 (la
+  ventana de 10 s debilita la detección de reuso) es el costo aceptado por
+  el usuario. Corregido inline (TDD) R3-001: quien perdía la carrera de
+  rotación recibía gracia sin verificar que la familia siguiera viva (un
+  logout concurrente podía dejar pasar un access nuevo); ahora exige
+  `familyHasLiveToken`. RED: test nuevo fallando; GREEN: unit 208/208,
+  integración 99/99, typecheck y build. Sugerencia abierta: simplificar el
+  flujo `lost`/`grace` de `rotate`.

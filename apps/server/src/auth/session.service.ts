@@ -181,8 +181,11 @@ export class SessionService {
       if (lost && grace) return undefined;
       throw error;
     });
-    if (!tokens) return this.graceAccess(row.userId, row.familyId, now);
-    return { kind: 'rotated', userId: row.userId, tokens };
+    if (tokens) return { kind: 'rotated', userId: row.userId, tokens };
+    // The loser gets grace only under the same rule as a replay: the family must still be alive
+    // (a logout racing the claim must not hand out a fresh access token).
+    if (!(await this.repo.familyHasLiveToken(row.familyId, now))) return { kind: 'invalid' };
+    return this.graceAccess(row.userId, row.familyId, now);
   }
 
   private graceAccess(userId: UserId, familyId: string, now: Date): WebRefreshResult {
