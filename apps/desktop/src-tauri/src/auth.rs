@@ -182,14 +182,20 @@ fn percent_decode(value: &str) -> Option<String> {
 }
 
 fn open_browser(url: &str) {
+    let (program, args) = browser_command(url);
+    let _ = std::process::Command::new(program).args(args).spawn();
+}
+
+/// Programa y argumentos que abren `url` en el navegador del sistema. En
+/// Windows no pasa por `cmd`: `cmd /C start` corta la URL en el `&` (separador
+/// de comandos) y el `code_challenge` no llegaría a la web.
+fn browser_command(url: &str) -> (&'static str, Vec<&str>) {
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
+    return ("rundll32", vec!["url.dll,FileProtocolHandler", url]);
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(url).spawn();
+    return ("open", vec![url]);
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    return ("xdg-open", vec![url]);
 }
 
 /// Escapa un string para interpolarlo en un JSON entre comillas (los códigos y
@@ -422,6 +428,15 @@ fn refresh_due(store: &AuthStore) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_launch_passes_the_whole_url_without_a_shell() {
+        let url = "http://localhost:1421/login?client=desktop&code_challenge=abc";
+        let (program, args) = browser_command(url);
+        // `cmd /C start` would cut the URL at `&` and run the rest as a command.
+        assert_ne!(program, "cmd");
+        assert_eq!(args.last(), Some(&url));
+    }
 
     #[test]
     fn login_url_targets_the_desktop_client() {
