@@ -128,7 +128,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     recorrido de broadcast (se difiere hasta terminar el recorrido).
   - Se deja: cookies `oc_oauth_<flow>` de flujos abandonados viven hasta su
     TTL (10 min).
-- [ ] **T6** — `apps/web` como puerta de autenticación (rama
+- [x] **T6** — `apps/web` como puerta de autenticación (rama
   `feature/nest-web`, apilada sobre `feature/nest-ws`). Stack elegido por el
   usuario: Vite + React + TS (mismo toolchain que el desktop).
   `packages/contracts` queda para una tarea aparte.
@@ -152,7 +152,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     serializa el refresh entre pestañas con Web Locks en T6b); (b)
     `/auth/desktop/code` pasa a exigir la cookie de sesión web + cabecera
     CSRF en vez del bearer; (c) JSDoc desplazado en `collab.gateway.ts`.
-  - [ ] **T6b (web)**: `apps/web` con su propio `package.json` + lockfile
+  - [x] **T6b (web)**: `apps/web` con su propio `package.json` + lockfile
     (sin `pnpm-workspace` raíz): rutas `/login`, `/register`, `/account`
     (datos de `me`, vincular GitHub/Google); con
     `?client=desktop&code_challenge=…` tras autenticar pide el código y
@@ -588,3 +588,24 @@ sobre el commit work-unit de T1.
   bloqueante: el test nuevo usa `rejects.toThrow()` genérico (el RED sí se
   observó antes del fix); conviene afirmar `UnauthorizedException`.
   Siguiente: T6b (web).
+- 2026-10-07: T6b implementado por el writer delegado (sin commit). `apps/web`
+  (Vite 8 + React 19 + TS 7, lockfile propio, puerto 1421, proxy `/auth`),
+  `authClient` (token en memoria, CSRF, single-flight + Web Locks con
+  fallback, refresh proactivo, 401 = cerrado), `handoff` (challenge S256 en
+  `sessionStorage`, deep link `opencollab://` únicamente), validación
+  espejo del server, páginas login/registro/complete/cuenta, CSP estricta en
+  `vite preview`, job `web` en el CI, `AGENTS.md`. RED observado por módulo
+  (suite sin el módulo: `Failed to resolve import ./authClient|./handoff|
+  ./validation|./App`); GREEN: 4 archivos, 78 tests. Una expectativa de test
+  propia estaba mal (login 401 esperaba `anonymous`, el estado correcto es
+  `unknown` sin refresh previo) y se corrigió. `font-src 'self'` obligó a
+  `assetsInlineLimit: 0` (una fuente salía como `data:`). Smoke: `vite
+  preview` envía la CSP; el proxy responde 502 sin server (no se levantó
+  Postgres, omitido).
+- 2026-10-07: Parent verificó T6b: web unit 78/78 y build OK. Smoke de punta
+  a punta (server real con Postgres + `vite preview` con proxy, variables de
+  prueba explícitas): raíz 200 con CSP; `/auth/web/refresh` sin cabecera
+  CSRF 403, con cabecera y sin cookie 401; registro 201 con cookie
+  `oc_refresh`; refresh 200; `/auth/me` con el access; `desktop-code`
+  devuelve `opencollab://auth/callback?code=`; logout 204; refresh tras
+  logout 401. Procesos detenidos.

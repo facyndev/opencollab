@@ -48,6 +48,7 @@ Los agentes son **agnósticos**: el sistema no debe tener lógica específica de
 - **Desktop:** Tauri 2, backend en Rust (PTYs con `portable-pty`).
 - **Frontend:** React + TypeScript, terminales con `xterm.js`.
 - **Colaboración:** servidor relay en NestJS sobre WebSockets (autenticación, sesiones compartidas, invitaciones y retransmisión de streams de PTY).
+- **Web:** Vite + React + TypeScript (`apps/web`), puerta de autenticación del navegador; mismo toolchain que el desktop.
 - **Monorepo:** Cargo workspace para el core Rust del desktop + paquetes pnpm para el server Nest y los frontends; desktop y server comparten el wire como contrato versionado, no como código.
 
 ## Arquitectura (Clean Architecture)
@@ -67,6 +68,7 @@ apps/
     src-tauri/     # Composition root de la app: wiring de dependencias + comandos/eventos Tauri (adaptadores de entrada delgados).
     src/           # Frontend React: grilla de terminales, xterm.js, UI de workspaces.
   server/          # Servidor NestJS: auth, sesiones compartidas, invitaciones y fan-out WebSocket (paridad de wire con protocol/).
+  web/             # Web React: login, registro, cuenta y entrega de sesión al desktop. Habla solo con /auth del server (mismo origen).
 ```
 
 Principios clave:
@@ -143,6 +145,8 @@ Desktop (desde `apps/desktop`, usa pnpm):
 
 Server: `pnpm --dir apps/server start:dev` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`; el cliente WS manda `Sec-WebSocket-Protocol: opencollab.v1, bearer.<access JWT>` y sin token válido se rechaza el upgrade con 401). Tests: `pnpm --dir apps/server test` (Vitest).
 
+Web: `pnpm --dir apps/web dev` (puerto 1421, hace proxy de `/auth` al server en `127.0.0.1:8787`, o a `OPENCOLLAB_API`), `pnpm --dir apps/web test` (Vitest + Testing Library), `pnpm --dir apps/web build` (typecheck + Vite).
+
 ### Particularidades
 
 - En Windows, ConPTY envía una consulta de posición de cursor (`ESC[6n`) y retiene la salida hasta recibir respuesta. En la app la contesta xterm.js vía `onData` → `write_terminal`. Cualquier test o cliente que lea un PTY sin xterm debe responderla (ver el test de `crates/infrastructure/src/pty.rs`).
@@ -168,6 +172,7 @@ Server: `pnpm --dir apps/server start:dev` (escucha en `127.0.0.1:8787`, configu
 - Cerrar una terminal mata el **árbol de procesos completo** por pid (`taskkill /T /F` en Windows, `kill -KILL -<pgid>` en Unix), para que el agente que corre dentro de la shell no quede huérfano. No usar `ChildKiller::kill` de portable-pty: en Windows falla con "handle inválido" (os error 6) o devuelve un falso error con código 0.
 - El frontend no usa `React.StrictMode`: su doble montaje en dev abriría un PTY extra por terminal (un panel solo cierra su PTY con el botón ✕ → `close_terminal`, no al desmontarse).
 - **Salir desde la shell** (`exit` o cualquier forma de terminar el proceso): el núcleo emite `terminal-exit` y el panel sigue el mismo camino que el ✕ (`close_terminal` + se quita de la grilla). `close` es idempotente porque el ✕ también dispara `terminal-exit` al matar el PTY. E2E: `e2e/scenarios/exit-closes-pane.mjs`.
+- **Web como puerta de autenticación** (`apps/web`): sin router ni estado global, cuatro rutas (`/login`, `/register`, `/auth/complete`, `/account`). El access token vive solo en memoria (`authClient.ts`); el refresh token es la cookie httpOnly `oc_refresh` (`Path=/auth`) que la página nunca ve, y toda llamada a `/auth/web/*` lleva `X-OpenCollab-CSRF: 1` y `credentials: 'same-origin'`. Nada va a `localStorage`/URL. El refresh es single-flight por pestaña y se serializa entre pestañas con Web Locks (`opencollab-refresh`; sin `navigator.locks` queda el single-flight local), y se renueva solo poco antes de `expiresIn`; un 401 deja la sesión cerrada. Web y API comparten origen (proxy de Vite en dev; reverse proxy en producción), por eso no hay CORS. **Entrega al desktop:** `/login?client=desktop&code_challenge=<S256, 43 caracteres base64url>`; solo el challenge se guarda en `sessionStorage` (sobrevive al viaje OAuth) y, tras autenticar (contraseña, registro o `/auth/complete`), se pide `POST /auth/web/desktop-code` y se navega al deep link `opencollab://` (cualquier otro destino se rechaza). Si ya había sesión, se ofrece "Continue as <usuario>". **CSP:** `vite preview` sirve `Content-Security-Policy` estricta (`default-src 'self'`, sin inline, `frame-ancestors 'none'`; definida en `apps/web/vite.config.ts`); en producción el reverse proxy debe enviar **la misma cabecera**. El dev server no la lleva (Fast Refresh necesita scripts inline). No usar `dangerouslySetInnerHTML` ni estilos en línea.
 - Frontend: los workspaces y las sesiones del sidebar son por ahora estado de UI (`apps/desktop/src/model.ts`), porque el núcleo todavía no expone comandos para ellos; todas las terminales corren dentro de la única sesión del núcleo. Las terminales de sesiones no activas quedan montadas y ocultas (atributo `hidden`) para no perder sus PTY; xterm solo hace `fit()` si su contenedor tiene tamaño. Al agregar comandos de workspaces/sesiones en el núcleo, reemplazar ese estado local en lugar de duplicarlo.
 - **Arrastrar paneles** (`apps/desktop/src/usePaneDrag.ts`): se arrastran por el header y se intercambian en vivo con el panel que está bajo el puntero, con animación FLIP. Regla clave: **nunca reordenar el DOM de los paneles** (mover el nodo de una xterm puede resetear su scroll/estado). El DOM se renderiza siempre por `Pane.seq` (orden de creación) y la posición visual sale del orden de `Session.panes` aplicado con la propiedad CSS `order`. El hit-testing usa `offsetLeft/Top` (posición de layout, sin transforms) para no oscilar mientras los demás paneles se animan. El arrastre se desactiva con un solo panel visible (maximizado o layout single).
 - Íconos: los de UI genéricos vienen de `react-icons` (set Codicons, `react-icons/vsc`): `VscTerminal` en el contador de terminales de cada sesión, y en el header del panel el ícono de la shell (`VscTerminalPowershell`, `VscTerminalCmd`, `VscTerminalBash` o `VscTerminal`) cuando no corre un agente conocido. Los trazos simples propios están en `src/icons.tsx`; SVGs propios del proyecto en `src/assets/opencollab/` (pintados como máscara CSS para heredar el color del texto).
