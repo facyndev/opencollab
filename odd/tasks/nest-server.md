@@ -583,3 +583,8 @@ sobre el commit work-unit de T1.
   `familyHasLiveToken`. RED: test nuevo fallando; GREEN: unit 208/208,
   integración 99/99, typecheck y build. Sugerencia abierta: simplificar el
   flujo `lost`/`grace` de `rotate`.
+- 2026-10-07: Review de `2ca7771` (4 lentes, riesgo alto, consent granted):
+  aprobada y acknowledged; límite revisado → `2ca7771`. Aviso no
+  bloqueante: el test nuevo usa `rejects.toThrow()` genérico (el RED sí se
+  observó antes del fix); conviene afirmar `UnauthorizedException`.
+  Siguiente: T6b (web).
