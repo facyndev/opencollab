@@ -28,7 +28,11 @@ export type Message =
       session_id: string;
       user_id: string;
       access: AccessLevelDto;
-    };
+    }
+  /** Client -> server: subscribe this connection to a session. */
+  | { type: 'join_session'; session_id: string }
+  /** Server -> client: join accepted, with the access in force right now. */
+  | { type: 'joined'; session_id: string; access: AccessLevelDto };
 
 export interface Envelope {
   version: number;
@@ -37,6 +41,9 @@ export interface Envelope {
 
 export const INCOMPATIBLE_PROTOCOL_VERSION = '{"error":"incompatible_protocol_version"}';
 export const INVALID_MESSAGE = '{"error":"invalid_message"}';
+/** Also answers unknown sessions, so existence is not revealed. */
+export const FORBIDDEN = '{"error":"forbidden"}';
+export const NOT_JOINED = '{"error":"not_joined"}';
 
 type Fields = Record<string, unknown>;
 
@@ -63,6 +70,10 @@ function isMessage(value: unknown): value is Message {
       return isString(value.terminal_id) && isString(value.user_id) && isBytes(value.data);
     case 'access_changed':
       return isString(value.user_id) && ACCESS_LEVELS.includes(value.access);
+    case 'join_session':
+      return true;
+    case 'joined':
+      return ACCESS_LEVELS.includes(value.access);
     default:
       return false;
   }
@@ -87,19 +98,22 @@ function parseWire(text: string): unknown {
   );
 }
 
+export type ParsedFrame = { ok: true; envelope: Envelope } | { ok: false; error: string };
+
 /**
- * Reply semantics, mirroring the Rust relay exactly: a frame that does not
- * deserialize into a complete `Envelope` gets the message error, an envelope
- * of another version gets the version error, and a compatible envelope
- * echoes back byte-identically (the ORIGINAL text, not re-serialized).
+ * Same acceptance rules as the Rust relay: a frame that does not deserialize
+ * into a complete `Envelope` is a message error and an envelope of another
+ * version is a version error. Routing the accepted message is the hub's job,
+ * which forwards the ORIGINAL text rather than a re-serialization.
  */
-export function replyForTextFrame(text: string): string {
+export function parseFrame(text: string): ParsedFrame {
   let parsed: unknown;
   try {
     parsed = parseWire(text);
   } catch {
-    return INVALID_MESSAGE;
+    return { ok: false, error: INVALID_MESSAGE };
   }
-  if (!isEnvelope(parsed)) return INVALID_MESSAGE;
-  return parsed.version === PROTOCOL_VERSION ? text : INCOMPATIBLE_PROTOCOL_VERSION;
+  if (!isEnvelope(parsed)) return { ok: false, error: INVALID_MESSAGE };
+  if (parsed.version !== PROTOCOL_VERSION) return { ok: false, error: INCOMPATIBLE_PROTOCOL_VERSION };
+  return { ok: true, envelope: parsed };
 }

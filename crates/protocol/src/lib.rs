@@ -61,6 +61,13 @@ pub enum Message {
         user_id: String,
         access: AccessLevelDto,
     },
+    /// Un participante se suscribe a una sesión (cliente -> relay).
+    JoinSession { session_id: String },
+    /// El relay aceptó el join, con el acceso vigente (relay -> cliente).
+    Joined {
+        session_id: String,
+        access: AccessLevelDto,
+    },
 }
 
 #[cfg(test)]
@@ -87,5 +94,40 @@ mod tests {
         let json = r#"{"version":999,"message":{"type":"terminal_output","session_id":"s","terminal_id":"t","data":[104,105]}}"#;
         let envelope: Envelope = serde_json::from_str(json).unwrap();
         assert!(!envelope.is_compatible());
+    }
+
+    #[test]
+    fn join_session_round_trips_as_tagged_json() {
+        let envelope = Envelope::new(Message::JoinSession {
+            session_id: "s".into(),
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"version":1,"message":{"type":"join_session","session_id":"s"}}"#
+        );
+        let back: Envelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, envelope);
+    }
+
+    #[test]
+    fn joined_round_trips_with_the_access_level() {
+        let envelope = Envelope::new(Message::Joined {
+            session_id: "s".into(),
+            access: AccessLevelDto::Write,
+        });
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"version":1,"message":{"type":"joined","session_id":"s","access":"write"}}"#
+        );
+        let back: Envelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, envelope);
+    }
+
+    #[test]
+    fn joined_rejects_an_unknown_access_level() {
+        let json = r#"{"version":1,"message":{"type":"joined","session_id":"s","access":"root"}}"#;
+        assert!(serde_json::from_str::<Envelope>(json).is_err());
     }
 }

@@ -1,24 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  INCOMPATIBLE_PROTOCOL_VERSION,
-  INVALID_MESSAGE,
-  replyForTextFrame,
-} from './protocol';
+import { INCOMPATIBLE_PROTOCOL_VERSION, INVALID_MESSAGE, parseFrame } from './protocol';
+
+/** The raw error a frame would be answered with, or undefined when it is accepted. */
+function replyForTextFrame(text: string): string | undefined {
+  const parsed = parseFrame(text);
+  return parsed.ok ? undefined : parsed.error;
+}
 
 // Wire parity with `crates/protocol`: same fixtures, same expectations.
-describe('replyForTextFrame', () => {
-  it('echoes a compatible envelope byte-identically', () => {
-    const text = JSON.stringify({
-      version: 1,
-      message: {
-        type: 'access_changed',
-        session_id: 's',
-        user_id: 'u',
-        access: 'view',
-      },
-    });
-    expect(replyForTextFrame(text)).toBe(text);
+describe('parseFrame', () => {
+  it('accepts a compatible envelope and hands back the parsed message', () => {
+    const message = { type: 'access_changed', session_id: 's', user_id: 'u', access: 'view' };
+    const parsed = parseFrame(JSON.stringify({ version: 1, message }));
+    expect(parsed).toEqual({ ok: true, envelope: { version: 1, message } });
+  });
+
+  it('accepts join_session and joined', () => {
+    const join = '{"version":1,"message":{"type":"join_session","session_id":"s"}}';
+    const joined = '{"version":1,"message":{"type":"joined","session_id":"s","access":"write"}}';
+    expect(replyForTextFrame(join)).toBeUndefined();
+    expect(replyForTextFrame(joined)).toBeUndefined();
+  });
+
+  it('rejects join_session and joined with wrong field types', () => {
+    const frame = (message: string) => `{"version":1,"message":${message}}`;
+    expect(replyForTextFrame(frame('{"type":"join_session"}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"join_session","session_id":7}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"joined","session_id":"s"}'))).toBe(INVALID_MESSAGE);
+    expect(replyForTextFrame(frame('{"type":"joined","session_id":"s","access":"root"}'))).toBe(
+      INVALID_MESSAGE,
+    );
   });
 
   it('rejects other versions (mirror of the Rust envelope test)', () => {
@@ -82,6 +94,6 @@ describe('replyForTextFrame', () => {
   it('ignores unknown fields like serde does', () => {
     const text =
       '{"version":1,"extra":true,"message":{"type":"terminal_input","session_id":"s","terminal_id":"t","user_id":"u","data":[0,255],"note":"x"}}';
-    expect(replyForTextFrame(text)).toBe(text);
+    expect(replyForTextFrame(text)).toBeUndefined();
   });
 });

@@ -25,7 +25,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
 
 - `apps/server`: NestJS con `GET /health` (contrato del probe: `200` + cuerpo
   `ok`) y `/ws` con semántica de eco idéntica a la actual.
-- `packages/contracts` y `apps/web`: T5, fuera de este documento por ahora.
+- `packages/contracts` y `apps/web`: T6, fuera de este documento por ahora.
 - Auth, ruteo por sesión, filtrado por permiso, DB: T2–T4 (futuras).
 - `apps/relay` (Rust) se elimina del workspace Cargo en T1.
 
@@ -68,7 +68,27 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
 - [x] **T4** — Auth: usuario o email + contraseña (argon2id), OAuth GitHub y
   Google (identidades vinculables), access JWT + refresh rotado con detección
   de reuso, `DesktopLoginCode` (PKCE) para el deep link al desktop.
-- [ ] **T5** — Ruteo por sesión y filtrado por permiso vigente en `/ws`.
+- [x] **T5** — Ruteo por sesión y filtrado por permiso vigente en `/ws`
+  (rama `feature/nest-ws`, apilada sobre `feature/nest-auth`).
+  - [x] Wire: `join_session { session_id }` (cliente→server) y
+    `joined { session_id, access }` (server→cliente) en `protocol.ts` y
+    `crates/protocol`; `PROTOCOL_VERSION` sigue en 1 (sin clientes WS
+    publicados). Errores nuevos como texto crudo: `{"error":"forbidden"}`
+    (también para sesión inexistente, para no revelar existencia) y
+    `{"error":"not_joined"}`.
+  - [x] Handshake: access JWT en `Sec-WebSocket-Protocol`
+    (`opencollab.v1, bearer.<jwt>`); el server elige `opencollab.v1`; sin
+    token válido se rechaza el upgrade.
+  - [x] Hub en memoria por sesión con conexiones activas (Session +
+    Workspace cargados al primer join, liberados al irse el último);
+    permiso evaluado en cada mensaje, nunca cacheado por conexión.
+  - [x] `terminal_output`: solo del dueño, terminal de la sesión; fan-out a
+    los suscriptos con Ver (sin eco al emisor).
+  - [x] `terminal_input`: `user_id` = usuario del token, `canWrite`; se
+    reenvía solo a las conexiones del dueño.
+  - [x] `access_changed`: solo del dueño; `setAccess` del dominio, persiste,
+    difunde a la sesión; quien pierde Ver queda desuscripto en el acto.
+  - [x] Se elimina el eco del stub; `AGENTS.md` deja de decir "stub".
 - [ ] **T6** — `apps/web` + `packages/contracts` como fuente del wire.
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
@@ -255,3 +275,36 @@ sobre el commit work-unit de T1.
   web en otro origen necesita CORS con credenciales (T6); el timeout es por
   llamada (GitHub hace 3 → hasta ~30 s); `trust proxy` y sondeo de
   usernames siguen abiertos.
+- 2026-10-06: T5 iniciado en `feature/nest-ws` (desde `3ae404f`). El usuario
+  aprobó el diseño (incluido tocar `crates/protocol`) y postergó T6
+  (`apps/web` como puerta de auth). Ruta: delegado directo (writer único:
+  wire TS + Rust, gateway, hub, tests, doc), TDD estricto con
+  `pnpm --dir apps/server test` / `test:integration`. Alcance autorizado
+  extra: `crates/protocol/**` y la línea de estado del relay en `AGENTS.md`.
+- 2026-10-06: T5 implementado por el writer delegado (sin commit; Docker no
+  disponible, ver abajo). Archivos: `protocol.ts`/`crates/protocol` (join_session,
+  joined, `parseFrame` reemplaza al eco), `hub.ts` (SessionHub con puerto
+  `SessionStore`, cola por conexión, carga deduplicada, evicción al irse el
+  último), `handshake.ts` + `collab.gateway.ts` (verifyClient/handleProtocols
+  seteados en `server.options` en `onModuleInit`, porque las opciones del
+  decorador no ven DI; `maxPayload` 1 MiB), `persistence/session-store.ts`,
+  módulos (AuthModule exporta SessionService; PersistenceModule provee
+  Session/WorkspaceRepository). RED observado: protocol.spec 10 fallos
+  (`parseFrame is not a function`), hub.spec (`Cannot find module './hub'`),
+  handshake.spec (módulo faltante), collab.gateway.spec 6 fallos (Nest no
+  resolvía SessionHub). GREEN: unit 129/129 (incluye sockets `ws` reales: 401
+  sin token/token inválido/sin subprotocolo, subprotocolo elegido, fan-out,
+  revocación en vivo, evicción). Rust: los tests de `join_session`/`joined` se
+  escribieron junto con la implementación (RED de Rust NO observado por
+  separado). Boot real de `dist/main.js`: `/health` 200 y upgrade sin token
+  401. Desvío menor: error crudo extra `{"error":"unavailable"}` cuando falla
+  el storage (revierte el cambio en memoria si falla `save`). Pendiente:
+  `session-store.int.spec.ts` escrito pero NO ejecutado (Docker daemon
+  apagado: `test:integration` sin correr). Abiertos: el token vencido no corta
+  una conexión ya abierta (solo se valida en el upgrade), sin backpressure
+  (`send` sin control de buffer), cambios de membresía del workspace no
+  invalidan sesiones vivas (solo `access_changed` por el hub).
+- 2026-10-06: Integración re-corrida por el parent con Postgres local
+  (`docker compose up -d`): `test:integration` 78/78 (incluye
+  `session-store.int.spec.ts`); unit 129/129 re-corrido por el parent. T5
+  cerrado con commit work-unit en `feature/nest-ws`.

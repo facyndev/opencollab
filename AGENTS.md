@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, OpenCode, Codex, e
 
 ## Estado del proyecto
 
-Scaffolding inicial. Implementado: modelo de dominio completo con permisos y tests, casos de uso de lanzar / escribir / redimensionar / cerrar terminal y cambiar permisos, adaptador PTY real, y app desktop con la UI de referencia (shells locales reales), con agentes que se lanzan como perfil desde el menú `+` (corren dentro de la shell) y estado de agente como `AgentEvent`s. Pendiente: cliente WebSocket (`CollabTransport` real), lógica del server (hoy `/ws` es un stub en NestJS con paridad de wire), persistencia, autenticación, comandos del núcleo para workspaces/sesiones, UI de permisos e invitaciones, y los adaptadores ricos por agente (Claude Code, OpenCode: hoy solo rige el genérico). La sesión del desktop es por ahora una sesión local fija creada en `apps/desktop/src-tauri/src/state.rs`.
+Scaffolding inicial. Implementado: modelo de dominio completo con permisos y tests, casos de uso de lanzar / escribir / redimensionar / cerrar terminal y cambiar permisos, adaptador PTY real, y app desktop con la UI de referencia (shells locales reales), con agentes que se lanzan como perfil desde el menú `+` (corren dentro de la shell) y estado de agente como `AgentEvent`s. Pendiente: cliente WebSocket (`CollabTransport` real), lógica del server (hoy `/ws` en NestJS autentica el upgrade con el access JWT, enruta por sesión con `join_session` y filtra por el permiso vigente), persistencia, autenticación, comandos del núcleo para workspaces/sesiones, UI de permisos e invitaciones, y los adaptadores ricos por agente (Claude Code, OpenCode: hoy solo rige el genérico). La sesión del desktop es por ahora una sesión local fija creada en `apps/desktop/src-tauri/src/state.rs`.
 
 ## Producto
 
@@ -141,7 +141,7 @@ Desktop (desde `apps/desktop`, usa pnpm):
 - `pnpm test:e2e`: E2E de la interfaz sobre el build de producción (correr `pnpm build` antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.
 - `cargo tauri build`: instaladores en `target/release/bundle/{nsis,msi}`; `pwsh scripts/package-release.ps1 -Version X.Y.Z` los deja en `release/` con el nombre y los hashes de release.
 
-Server: `pnpm --dir apps/server start:dev` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`). Tests: `pnpm --dir apps/server test` (Vitest).
+Server: `pnpm --dir apps/server start:dev` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`; el cliente WS manda `Sec-WebSocket-Protocol: opencollab.v1, bearer.<access JWT>` y sin token válido se rechaza el upgrade con 401). Tests: `pnpm --dir apps/server test` (Vitest).
 
 ### Particularidades
 

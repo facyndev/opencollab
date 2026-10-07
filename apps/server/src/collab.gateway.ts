@@ -1,37 +1,69 @@
-import { OnModuleInit } from '@nestjs/common';
+import type { IncomingMessage } from 'node:http';
+
+import { Inject, OnModuleInit } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import type { RawData, Server as WsServer, WebSocket } from 'ws';
 
-import { replyForTextFrame } from './protocol';
+import { SessionService } from './auth/session.service';
+import type { UserId } from './domain';
+import { SUBPROTOCOL, bearerFromProtocols } from './handshake';
+import { SessionHub, type HubConnection } from './hub';
 
 /**
- * Collaboration socket. Parity with the axum stub: raw text frames carrying an
- * `Envelope` echo back when compatible; anything else gets an error frame.
- * Binary frames are ignored (the Rust side `continue`s past them too).
+ * Collaboration socket: a thin adapter between `ws` and the hub.
  *
- * Frames are handled RAW on purpose: the `ws` adapter's `@SubscribeMessage`
- * routing expects `{ event, data }` payloads, which is NOT our wire format.
+ * The upgrade is authenticated in `verifyClient` (access JWT in
+ * `Sec-WebSocket-Protocol`), so an unauthenticated client never gets a socket.
+ * The token is never logged. Frames are handled RAW on purpose: the `ws`
+ * adapter's `@SubscribeMessage` routing expects `{ event, data }` payloads,
+ * which is NOT our wire format. Binary frames are ignored.
  */
-// TODO: autenticar, enrutar por sesión y filtrar por permiso vigente.
-@WebSocketGateway({ path: '/ws' })
+// 1 MiB: terminal output travels as JSON number arrays, so frames are chunky but bounded.
+@WebSocketGateway({ path: '/ws', maxPayload: 1_048_576 })
 export class CollabGateway implements OnModuleInit {
   @WebSocketServer()
   private server!: WsServer;
 
+  /** Who each pending upgrade authenticated as, handed from verifyClient to `connection`. */
+  private readonly authenticated = new WeakMap<IncomingMessage, UserId>();
+
+  constructor(
+    @Inject(SessionService) private readonly sessions: SessionService,
+    @Inject(SessionHub) private readonly hub: SessionHub,
+  ) {}
+
   onModuleInit(): void {
-    this.server.on('connection', (socket: WebSocket) => {
+    // Gateway decorator options are static and cannot see injected services,
+    // so the hooks are attached here; `ws` reads them on every upgrade.
+    this.server.options.verifyClient = (info, done) => {
+      const token = bearerFromProtocols(info.req.headers['sec-websocket-protocol']);
+      const userId = token === undefined ? undefined : this.sessions.verifyAccess(token);
+      if (userId === undefined) return done(false, 401, 'Unauthorized');
+      this.authenticated.set(info.req, userId);
+      done(true);
+    };
+    this.server.options.handleProtocols = () => SUBPROTOCOL;
+
+    this.server.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+      const userId = this.authenticated.get(request);
+      if (userId === undefined) return socket.close(1008);
+      const conn: HubConnection = {
+        userId,
+        send: (text) => {
+          if (socket.readyState === socket.OPEN) socket.send(text);
+        },
+      };
+      this.hub.connect(conn);
       socket.on('message', (data: RawData, isBinary: boolean) => {
-        if (isBinary) {
-          return;
-        }
-        const frame = Array.isArray(data)
-          ? Buffer.concat(data)
-          : Buffer.isBuffer(data)
-            ? data
-            : Buffer.from(data);
-        const text = frame.toString('utf8');
-        socket.send(replyForTextFrame(text));
+        if (isBinary) return;
+        void this.hub.receive(conn, toText(data));
       });
+      socket.on('close', () => this.hub.disconnect(conn));
     });
   }
+}
+
+function toText(data: RawData): string {
+  const frame = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(data);
+  return frame.toString('utf8');
 }
