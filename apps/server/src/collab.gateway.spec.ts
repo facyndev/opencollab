@@ -477,6 +477,23 @@ describe('CollabGateway', () => {
       expect(events).toEqual(['send:healthy', 'disconnect:slow']);
     });
 
+    it('still closes a slow consumer when detaching it from the hub throws', async () => {
+      const hub = app.get(SessionHub);
+      vi.spyOn(hub, 'disconnect').mockImplementation(() => {
+        throw new Error('boom');
+      });
+      const host = await authed('owner-token');
+      const viewer = await authed('member-token');
+      await join(host);
+      await join(viewer);
+      const [, viewerServer] = serverSockets();
+      Object.defineProperty(viewerServer, 'bufferedAmount', { get: () => MAX_BUFFERED_BYTES + 1 });
+
+      const gone = closed(viewer);
+      host.send(frame({ type: 'terminal_output', session_id: session.id, terminal_id: terminal, data: [1] }));
+      expect(await gone).toEqual({ code: 1013, reason: 'slow_consumer' });
+    });
+
     it('keeps delivering to a consumer under the cap', async () => {
       const host = await authed('owner-token');
       const viewer = await authed('member-token');

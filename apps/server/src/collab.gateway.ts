@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 
-import { Inject, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import type { RawData, Server as WsServer, WebSocket } from 'ws';
 
@@ -44,6 +44,7 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
   private server!: WsServer;
 
   /** Who each pending upgrade authenticated as, handed from verifyClient to `connection`. */
+  private readonly logger = new Logger(CollabGateway.name);
   private readonly authenticated = new WeakMap<IncomingMessage, AccessClaims>();
   private readonly connections = new Set<Live>();
   private readonly families = new Map<string, Set<Live>>();
@@ -96,8 +97,13 @@ export class CollabGateway implements OnModuleInit, OnModuleDestroy {
       if (detached) return;
       detached = true;
       deadline.clear();
-      this.hub.disconnect(conn);
       this.untrack(live);
+      // Runs from socket events and deferred callbacks: a throw here would crash the process.
+      try {
+        this.hub.disconnect(conn);
+      } catch (error) {
+        this.logger.error(`hub disconnect failed: ${(error as Error).name}`);
+      }
     };
 
     let slow = false;

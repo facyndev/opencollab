@@ -463,3 +463,14 @@ sobre el commit work-unit de T1.
   "olvido por TTL vía verify" (un token vencido falla antes por `exp`); la
   poda se prueba en la siguiente revocación. Fuera: cookies
   `oc_oauth_<flow>` abandonadas.
+- 2026-10-07: Commit de T5d `7c9d719` (parent re-corrió unit 185/185 e
+  integración 81/81). Review (base `064f295`, 4 lentes, riesgo alto,
+  consent granted): aprobada y acknowledged; límite revisado → `7c9d719`.
+  Aviso de dos lentes corregido inline (TDD): el corte diferido de un
+  consumidor lento corría sin captura y un fallo de `hub.disconnect` tiraba
+  el proceso; ahora `detach` captura y registra el error (solo el nombre) y
+  el socket se cierra igual. RED: test nuevo con "Uncaught Exception: boom"
+  y el socket sin cerrar; GREEN: unit 186/186 sin errores sin capturar,
+  integración 81/81, typecheck y build limpios. Sugerencias no aplicadas:
+  test del empate en `reauth`, test de upgrade con familia revocada a
+  nivel gateway, fake de repo duplicado en specs.
