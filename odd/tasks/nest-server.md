@@ -165,6 +165,16 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
+- [ ] **T8** — Docker (pedido del usuario antes del push): `docker compose`
+  levanta Postgres + server + web; el desktop NO va en contenedor (se
+  descarga el instalador de la release y corre nativo contra el server del
+  contenedor). Imagen del server multi-etapa (Node 24, migraciones al
+  arrancar, healthcheck `/health`, 8787 publicado solo en `127.0.0.1`);
+  imagen de la web multi-etapa (build Vite → nginx en `127.0.0.1:8080`, SPA
+  fallback, proxy `/auth` y `/ws` con upgrade al server, misma CSP que el
+  preview); server con `TRUST_PROXY=1`; `JWT_SECRET` obligatorio desde `.env`
+  raíz (ignorado) con `.env.example`, sin secretos por defecto; `docker
+  compose up -d postgres` sigue sirviendo para los tests.
 
 ## Decisiones (2026-10-06)
 
