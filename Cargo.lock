@@ -49,7 +49,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "application"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "domain",
  "serde",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "application",
  "domain",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "thiserror 2.0.21",
  "uuid",
@@ -1811,7 +1811,7 @@ dependencies = [
 
 [[package]]
 name = "infrastructure"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "application",
  "domain",
@@ -2814,7 +2814,7 @@ dependencies = [
 
 [[package]]
 name = "protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
