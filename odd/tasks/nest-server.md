@@ -532,3 +532,12 @@ sobre el commit work-unit de T1.
     CSRF, `desktop/code`, callbacks OAuth web). GREEN: unit 194/194,
     integración 93/93, typecheck y build limpios. Los tests OAuth previos que
     asumían JSON en el callback web se reescribieron al nuevo contrato.
+- 2026-10-07: Commit de T6a `b7cfd33` (parent re-corrió unit 194/194 e
+  integración 93/93). Review (base `7c9d719`, incluye `5971f95`; 4 lentes,
+  riesgo alto, consent granted): aprobada y acknowledged; límite revisado →
+  `b7cfd33`. Avisos a corregir antes de T6b (T6a-fix): (a) dos pestañas que
+  refrescan a la vez comparten la cookie: la segunda presenta un refresh ya
+  rotado, la detección de reuso revoca la familia y desloguea al usuario;
+  (b) `POST /auth/desktop/code` acepta solo un access token: un access
+  robado (15 min) se convierte en una familia de refresh nueva vía el
+  desktop; (c) JSDoc desplazado por el `logger` en `collab.gateway.ts`.
