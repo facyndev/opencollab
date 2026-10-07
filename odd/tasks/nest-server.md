@@ -165,7 +165,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
-- [ ] **T8** — Docker (pedido del usuario antes del push): `docker compose`
+- [x] **T8** — Docker (pedido del usuario antes del push): `docker compose`
   levanta Postgres + server + web; el desktop NO va en contenedor (se
   descarga el instalador de la release y corre nativo contra el server del
   contenedor). Imagen del server multi-etapa (Node 24, migraciones al
@@ -175,6 +175,21 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
   preview); server con `TRUST_PROXY=1`; `JWT_SECRET` obligatorio desde `.env`
   raíz (ignorado) con `.env.example`, sin secretos por defecto; `docker
   compose up -d postgres` sigue sirviendo para los tests.
+  - Hecho en `feature/nest-docker` (apilada sobre `feature/desktop-login`).
+    Ruta: delegada (escritor único; 2+ archivos no triviales: Dockerfiles,
+    compose, nginx). Desvíos acordados: `JWT_SECRET` y OAuth no se validan
+    en Compose (`${VAR:?}` rompería `up -d postgres`) sino en el server, que
+    sale al arrancar; el server corre **solo en Docker** (se borró
+    `apps/server/.env.example`); GitHub y Google pasan a ser **obligatorios**
+    (`loadAuthConfig` falla sin cualquiera de las 4 variables). La CSP de
+    nginx está atada a la de `vite.config.ts` por `apps/web/src/nginx.test.ts`.
+  - Evidencia: web 90 tests (RED del test de nginx observado), server 212 +
+    99 de integración, typecheck; `docker compose up -d --build` con los 3
+    servicios healthy, `/health` = ok, `/login` 200 con CSP, `/auth` y `/ws`
+    llegan al server por nginx, registro/login por 8080, puertos solo en
+    127.0.0.1, server sin `GITHUB_CLIENT_ID` sale con el error, inicio OAuth
+    GitHub redirige con callback `http://localhost:8080/...`. Sin verificar:
+    callback OAuth completo, migrar una base vacía, CI que construya imágenes.
 
 ## Decisiones (2026-10-06)
 

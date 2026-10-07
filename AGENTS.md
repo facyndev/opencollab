@@ -143,9 +143,18 @@ Desktop (desde `apps/desktop`, usa pnpm):
 - `pnpm test:e2e`: E2E de la interfaz sobre el build de producción (correr `pnpm build` antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.
 - `cargo tauri build`: instaladores en `target/release/bundle/{nsis,msi}`; `pwsh scripts/package-release.ps1 -Version X.Y.Z` los deja en `release/` con el nombre y los hashes de release.
 
-Server: `pnpm --dir apps/server start:dev` (escucha en `127.0.0.1:8787`, configurable con `RELAY_ADDR`; expone `/health` y `/ws`; el cliente WS manda `Sec-WebSocket-Protocol: opencollab.v1, bearer.<access JWT>` y sin token válido se rechaza el upgrade con 401). Tests: `pnpm --dir apps/server test` (Vitest).
+Server: corre solo en Docker (ver abajo; no hay `.env` para correrlo suelto). Escucha en `127.0.0.1:8787` (dentro del contenedor, `RELAY_ADDR=0.0.0.0:8787`); expone `/health` y `/ws`; el cliente WS manda `Sec-WebSocket-Protocol: opencollab.v1, bearer.<access JWT>` y sin token válido se rechaza el upgrade con 401. Tests: `pnpm --dir apps/server test` (Vitest).
 
 Web: `pnpm --dir apps/web dev` (puerto 1421, hace proxy de `/auth` al server en `127.0.0.1:8787`, o a `OPENCOLLAB_API`), `pnpm --dir apps/web test` (Vitest + Testing Library), `pnpm --dir apps/web build` (typecheck + Vite).
+
+Docker (server + web + Postgres; el desktop **no** va en contenedor: se instala la release y corre nativo contra este server):
+
+- `cp .env.example .env`, completar `JWT_SECRET` (32+ caracteres: `openssl rand -base64 48`) y las credenciales OAuth de **GitHub y Google** (`GITHUB_CLIENT_ID`/`_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET`; callback a registrar en cada proveedor: `<PUBLIC_BASE_URL>/auth/oauth/<github|google>/callback`), y `docker compose up -d --build`. El `.env` raíz está ignorado. Todas son obligatorias: si falta alguna, el contenedor del server sale al arrancar (`docker compose logs server` dice cuál). Las migraciones de Prisma se aplican al iniciar el contenedor del server (`prisma migrate deploy`).
+- Puertos, todos solo en `127.0.0.1`: web `8080` (nginx: SPA con fallback a `index.html`, proxy de `/auth` y `/ws` al server, misma CSP que `vite preview`), server `8787` (`/health`, `/auth/desktop/token`; el desktop habla directo con él), Postgres `5432`.
+- El server corre con `TRUST_PROXY=1` (nginx es un salto) y `WEB_ORIGIN`/`PUBLIC_BASE_URL` = `http://localhost:8080`: los callbacks de OAuth pasan por la web.
+- Apuntar el desktop a la web del contenedor: `OPENCOLLAB_WEB_ORIGIN=http://localhost:8080` (la dirección del server por defecto, `127.0.0.1:8787`, ya coincide).
+- `docker compose up -d postgres` levanta solo la base para los tests de integración del server: `DATABASE_URL=postgresql://opencollab:opencollab@127.0.0.1:5432/opencollab pnpm --dir apps/server test:integration` (usan la base `opencollab_test`, nunca la de desarrollo).
+- La CSP vive en dos lugares (`CSP` en `apps/web/vite.config.ts` y `apps/web/nginx.conf`); `apps/web/src/nginx.test.ts` falla si divergen.
 
 ### Particularidades
 
