@@ -351,3 +351,13 @@ sobre el commit work-unit de T1.
   usan fake timers (solo `setTimeout`/`clearTimeout`/`Date`) con sockets `ws`
   reales. Pendiente: heartbeat, backpressure y revocación de refresh sobre un
   socket abierto siguen fuera de alcance.
+- 2026-10-06: Commit de T5b `81eb4a4` (parent re-corrió unit 148/148 y
+  `cargo test -p protocol` 8/8). Review (base `eb27470`, lineage
+  `review-4dc175ba56456b56`, riesgo alto, 4 lentes, consent granted):
+  aprobada sin correcciones y acknowledged. Límite revisado → `81eb4a4`.
+  Avisos no bloqueantes: al vencer el token el socket se cierra con
+  `close()` y el hub lo suelta recién en el evento `close`, así que un
+  cliente que no contesta el cierre puede seguir mandando frames un rato
+  (soltar del hub en el acto y `terminate()` tras un plazo); un `reauth` con
+  un token más viejo pero vigente acorta el plazo (tomar el máximo); listener
+  de `error` sin test; logs de errores sin contexto.
