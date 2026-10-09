@@ -1,4 +1,4 @@
-// Client-side checks that mirror the server's zod schemas (apps/server/src/auth/dto.ts).
+// Client-side checks that mirror the server's zod schemas (packages/server/src/auth/dto.ts).
 // The server stays the authority; this only saves a round trip and explains the rule.
 
 export interface RegisterValues {

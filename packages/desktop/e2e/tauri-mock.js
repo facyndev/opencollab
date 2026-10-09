@@ -1,6 +1,6 @@
 // Núcleo de Tauri simulado para los E2E de la interfaz. Se inyecta en la página
 // antes de que cargue la app (evaluateOnNewDocument) y responde los mismos
-// comandos y eventos que el núcleo real (apps/desktop/src-tauri/src/commands.rs).
+// comandos y eventos que el núcleo real (packages/desktop/src-tauri/src/commands.rs).
 //
 // Controles para los tests en `window.__mock`:
 //   emit(event, payload)  emite un evento como el núcleo

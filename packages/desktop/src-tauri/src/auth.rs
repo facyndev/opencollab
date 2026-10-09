@@ -25,7 +25,7 @@ use crate::state::AppState;
 /// nuevo, logout o caída de la sesión).
 pub const AUTH_CHANGED_EVENT: &str = "auth-changed";
 
-/// Origen de la web por defecto: el dev server de `apps/web` (1420 es Vite del desktop).
+/// Origen de la web por defecto: el dev server de `packages/web` (1420 es Vite del desktop).
 const DEFAULT_WEB_ORIGIN: &str = "http://localhost:1421";
 /// Margen antes del vencimiento en el que `auth_status` intenta refrescar (igual que la web).
 const REFRESH_MARGIN: Duration = Duration::from_secs(60);

@@ -5,13 +5,13 @@
 
 .DESCRIPTION
   Cada paquete tiene su propia versión y su propio formato de tag:
-    desktop  3 fuentes que tienen que coincidir      tag vX.Y.Z
-    server   apps/server/package.json                tag server-vX.Y.Z
-    web      apps/web/package.json                   tag web-vX.Y.Z
+    desktop  3 fuentes que tienen que coincidir      tag desktop-vX.Y.Z
+    server   packages/server/package.json                tag server-vX.Y.Z
+    web      packages/web/package.json                   tag web-vX.Y.Z
 
 .EXAMPLE
   pwsh scripts/check-version.ps1                              # desktop, solo consistencia
-  pwsh scripts/check-version.ps1 -Tag v0.2.0                  # desktop, además contra el tag
+  pwsh scripts/check-version.ps1 -Tag desktop-v0.2.0          # desktop, además contra el tag
   pwsh scripts/check-version.ps1 -Package server -Tag server-v0.1.0
 #>
 param(
@@ -37,17 +37,17 @@ switch ($Package) {
       Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }
     $sources = [ordered]@{
       'Cargo.toml [workspace.package]'          = $cargo
-      'apps/desktop/package.json'               = Read-PackageJsonVersion 'apps/desktop/package.json'
-      'apps/desktop/src-tauri/tauri.conf.json'  = Read-PackageJsonVersion 'apps/desktop/src-tauri/tauri.conf.json'
+      'packages/desktop/package.json'               = Read-PackageJsonVersion 'packages/desktop/package.json'
+      'packages/desktop/src-tauri/tauri.conf.json'  = Read-PackageJsonVersion 'packages/desktop/src-tauri/tauri.conf.json'
     }
-    $tagPrefix = 'v'
+    $tagPrefix = 'desktop-v'
   }
   'server' {
-    $sources = [ordered]@{ 'apps/server/package.json' = Read-PackageJsonVersion 'apps/server/package.json' }
+    $sources = [ordered]@{ 'packages/server/package.json' = Read-PackageJsonVersion 'packages/server/package.json' }
     $tagPrefix = 'server-v'
   }
   'web' {
-    $sources = [ordered]@{ 'apps/web/package.json' = Read-PackageJsonVersion 'apps/web/package.json' }
+    $sources = [ordered]@{ 'packages/web/package.json' = Read-PackageJsonVersion 'packages/web/package.json' }
     $tagPrefix = 'web-v'
   }
 }
