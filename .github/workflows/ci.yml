@@ -175,6 +175,16 @@ jobs:
       - name: Tests E2E (PTY real + shell integration)
         run: cargo test -p infrastructure --test shell_integration_e2e -- --ignored --test-threads=1
 
-      - name: Versión consistente
+      - name: Versión consistente (desktop, server y web)
         shell: pwsh
-        run: ./scripts/check-version.ps1
+        run: |
+          ./scripts/check-version.ps1 -Package desktop
+          # server y web se verifican desde que existen en el repo. El script corta
+          # con un error terminante si algo no coincide, y eso falla el paso.
+          foreach ($package in 'server', 'web') {
+            if (Test-Path "apps/$package/package.json") {
+              ./scripts/check-version.ps1 -Package $package
+            } else {
+              Write-Host "Versión ($package): se saltea, no existe apps/$package/package.json."
+            }
+          }

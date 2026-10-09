@@ -87,11 +87,11 @@ Principios clave:
 
 El repo se maneja con **Git Flow**:
 
-- `main`: solo código liberado. Cada merge a `main` es una versión y se etiqueta (`vX.Y.Z`). Nunca se commitea directo.
+- `main`: solo código liberado. Cada merge a `main` es una versión y se etiqueta (`vX.Y.Z` para el desktop, `server-vX.Y.Z` / `web-vX.Y.Z` para los otros paquetes, ver "Versionado"). Nunca se commitea directo.
 - `develop`: rama de integración; de acá salen y acá vuelven las features.
 - `feature/<nombre>`: sale de `develop`, vuelve a `develop`. Una por funcionalidad (p. ej. `feature/relay-websocket`).
-- `release/<versión>`: sale de `develop` para preparar una versión (solo ajustes, versión y fixes); se mergea a `main` (con tag) **y** de vuelta a `develop`.
-- `hotfix/<versión>`: sale de `main` para un arreglo urgente; se mergea a `main` (con tag) **y** a `develop`.
+- `release/<versión>`: sale de `develop` para preparar una versión (solo ajustes, versión y fixes); se mergea a `main` (con tag) **y** de vuelta a `develop`. Una por paquete: `release/X.Y.Z` (desktop), `release/server-X.Y.Z`, `release/web-X.Y.Z`.
+- `hotfix/<versión>`: sale de `main` para un arreglo urgente; se mergea a `main` (con tag) **y** a `develop`. Mismo esquema de nombres: `hotfix/X.Y.Z`, `hotfix/server-X.Y.Z`, `hotfix/web-X.Y.Z`.
 
 No trabajar ni commitear directo en `main` ni en `develop`: antes de cambiar código, crear o usar la rama `feature/*` (o `hotfix/*`) que corresponda.
 
@@ -99,30 +99,33 @@ Remoto: `origin` → https://github.com/facyndev/opencollab (licencia MIT).
 
 ## Versionado
 
-**Versionado semántico** (`MAJOR.MINOR.PATCH`), con tag `vX.Y.Z` en `main` por cada versión liberada.
+**Versionado semántico** (`MAJOR.MINOR.PATCH`) **por paquete**: desktop, server y web evolucionan a su ritmo y cada uno tiene su propia versión y su propio tag en `main`.
 
 - `PATCH`: arreglos sin cambios de comportamiento visibles (lo típico de un `hotfix/*`).
 - `MINOR`: funcionalidades nuevas compatibles.
-- `MAJOR`: cambios incompatibles. Mientras estemos en `0.y.z` (antes de la 1.0), un cambio incompatible sube `MINOR`.
+- `MAJOR`: cambios incompatibles. Mientras un paquete esté en `0.y.z` (antes de la 1.0), un cambio incompatible sube `MINOR`.
 
-La versión de la app vive en **tres lugares que tienen que coincidir** (hoy `0.1.0`):
+| Paquete | Dónde vive la versión | Tag | Qué dispara el tag |
+|---|---|---|---|
+| **desktop** (app Tauri) | Tres fuentes que tienen que coincidir: `Cargo.toml` raíz (`[workspace.package] version`, los crates la heredan con `version.workspace = true`), `apps/desktop/package.json` y `apps/desktop/src-tauri/tauri.conf.json` (la que muestra el instalador) | `vX.Y.Z` (sin prefijo) | `release.yml`: CI completo, build de Tauri y release de GitHub |
+| **server** (relay NestJS) | `apps/server/package.json` | `server-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
+| **web** | `apps/web/package.json` | `web-vX.Y.Z` | Nada por ahora (sin release de GitHub); el paquete aún no existe en el repo |
 
-- `Cargo.toml` raíz → `[workspace.package] version` (todos los crates la heredan con `version.workspace = true`).
-- `apps/desktop/package.json` → `version`.
-- `apps/desktop/src-tauri/tauri.conf.json` → `version` (es la que muestra el instalador).
+Solo el desktop genera releases de GitHub: `release.yml` escucha `v*.*.*` y los tags `server-v*` / `web-v*` no lo disparan.
 
-La versión se sube **solo** en la rama `release/*` o `hotfix/*`, como un commit propio, nunca dentro de una feature. El tag se crea sobre el merge a `main`.
+La versión de un paquete se sube **solo** en la rama `release/*` o `hotfix/*` de ese paquete, como un commit propio, nunca dentro de una feature. El tag se crea sobre el merge a `main`.
 
-`pwsh scripts/check-version.ps1` verifica que las tres coincidan (y con `-Tag vX.Y.Z`, que coincidan con el tag); el CI lo corre en cada push.
+`pwsh scripts/check-version.ps1 -Package desktop|server|web` verifica las fuentes del paquete (por defecto `desktop`) y, con `-Tag <tag>`, que el tag tenga el formato de la tabla y sea esa versión. El CI chequea desktop siempre; server y web, solo si existe su `package.json` (si no, lo informa en el log y lo saltea). Invocado a mano con un paquete inexistente, el script falla con un mensaje claro.
+
+El **protocolo de red** tiene su propia versión, independiente de las tres: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
 
 ## CI/CD (GitHub Actions)
 
-- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión. Job `server`: Vitest + typecheck + build del relay Nest.
-- **`.github/workflows/release.yml`**: al pushear un tag `vX.Y.Z` (sobre `main`). Verifica tag = versión de la app, corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`v1.0.0-beta.1`) salen como pre-release.
-- **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`<os>_<versión>.<extensión>`** → `windows_0.1.0.exe` (NSIS) y `windows_0.1.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
-- Para publicar una versión: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → merge de vuelta a `develop`.
-
-El **protocolo de red** tiene su propia versión, independiente de la de la app: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y server rechazan mensajes de otra versión).
+- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión (desktop; server y web si existen). Job `server`: Vitest + typecheck + build del relay Nest.
+- **`.github/workflows/release.yml`**: al pushear un tag `vX.Y.Z` del desktop (sobre `main`; `server-v*` y `web-v*` no lo disparan). Verifica tag = versión del desktop (`check-version.ps1 -Package desktop`), corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`v1.0.0-beta.1`) salen como pre-release.
+- **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`opencollab-<os>-<versión>.<extensión>`** → `opencollab-windows-0.2.0.exe` (NSIS) y `opencollab-windows-0.2.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
+- Para publicar una versión del **desktop**: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → merge de vuelta a `develop`.
+- Para versionar el **server** (o la **web**, igual con `web-`): `release/server-X.Y.Z` desde `develop` → subir la versión en `apps/server/package.json` → merge a `main` → `git tag server-vX.Y.Z` → `git push origin server-vX.Y.Z` → merge de vuelta a `develop`. No genera release de GitHub.
 
 ## Comandos
 
