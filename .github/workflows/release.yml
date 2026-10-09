@@ -1,4 +1,4 @@
-# Release del desktop: al pushear un tag vX.Y.Z, sin prefijo (sobre main, ver Git Flow en AGENTS.md).
+# Release del desktop: al pushear un tag desktop-vX.Y.Z (sobre main, ver Git Flow en AGENTS.md).
 #   1. Corre todo el CI (unit + E2E). Si falla, no se construye nada.
 #   2. Verifica que el tag coincida con la versión del desktop.
 #   3. Construye los instaladores de Windows con Tauri.
@@ -8,14 +8,14 @@ name: Release
 
 on:
   push:
-    tags: ["v*.*.*"]
+    tags: ["desktop-v*.*.*"]
 
 permissions:
   contents: write
 
 jobs:
   # Los tags server-vX.Y.Z y web-vX.Y.Z no disparan este workflow: el patrón
-  # v*.*.* exige que el tag empiece con "v". Solo el desktop publica releases.
+  # desktop-v*.*.* exige el prefijo "desktop-". Solo el desktop publica releases.
   # Primero lo barato: un tag mal puesto falla en segundos, sin correr el CI.
   version:
     name: Versión del tag = versión de la app
@@ -73,10 +73,10 @@ jobs:
       - name: Publicar release
         uses: softprops/action-gh-release@v3
         with:
-          name: OpenCollab ${{ github.ref_name }}
+          name: OpenCollab v${{ env.VERSION }}
           body_path: release/release-notes.md
-          # Versiones con sufijo (v1.0.0-beta.1) salen como pre-release.
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Versiones con sufijo (desktop-v1.0.0-beta.1) salen como pre-release.
+          prerelease: ${{ contains(env.VERSION, '-') }}
           files: |
             release/opencollab-windows-*.exe
             release/opencollab-windows-*.msi

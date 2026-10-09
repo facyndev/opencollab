@@ -5,13 +5,13 @@
 
 .DESCRIPTION
   Cada paquete tiene su propia versión y su propio formato de tag:
-    desktop  3 fuentes que tienen que coincidir      tag vX.Y.Z
+    desktop  3 fuentes que tienen que coincidir      tag desktop-vX.Y.Z
     server   packages/server/package.json                tag server-vX.Y.Z
     web      packages/web/package.json                   tag web-vX.Y.Z
 
 .EXAMPLE
   pwsh scripts/check-version.ps1                              # desktop, solo consistencia
-  pwsh scripts/check-version.ps1 -Tag v0.2.0                  # desktop, además contra el tag
+  pwsh scripts/check-version.ps1 -Tag desktop-v0.2.0          # desktop, además contra el tag
   pwsh scripts/check-version.ps1 -Package server -Tag server-v0.1.0
 #>
 param(
@@ -40,7 +40,7 @@ switch ($Package) {
       'packages/desktop/package.json'               = Read-PackageJsonVersion 'packages/desktop/package.json'
       'packages/desktop/src-tauri/tauri.conf.json'  = Read-PackageJsonVersion 'packages/desktop/src-tauri/tauri.conf.json'
     }
-    $tagPrefix = 'v'
+    $tagPrefix = 'desktop-v'
   }
   'server' {
     $sources = [ordered]@{ 'packages/server/package.json' = Read-PackageJsonVersion 'packages/server/package.json' }

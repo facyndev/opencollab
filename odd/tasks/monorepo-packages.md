@@ -37,14 +37,14 @@ keep their old `apps/` paths (they are history); live docs (`AGENTS.md`,
 
 ## Checklist
 
-- [ ] **M1** — `git mv apps packages` and update every live path reference
+- [x] **M1** — `git mv apps packages` and update every live path reference
   (Cargo workspace members, CI, release workflow, scripts, docker-compose,
   Dockerfiles, `.gitignore`, `AGENTS.md`, `README.md`, code/comments).
-- [ ] **M2** — Root pnpm workspace: root `package.json` (private, shared
+- [x] **M2** — Root pnpm workspace: root `package.json` (private, shared
   `packageManager`, convenience scripts), `pnpm-workspace.yaml` with
   `packages/*` (absorbing the server's workspace settings), one root
   `pnpm-lock.yaml` (per-package lockfiles removed), CI and Dockerfiles adapted.
-- [ ] **M3** — Desktop tags `desktop-vX.Y.Z`: `check-version.ps1`,
+- [x] **M3** — Desktop tags `desktop-vX.Y.Z`: `check-version.ps1`,
   `release.yml` trigger and pre-release detection, `AGENTS.md`.
 
 ## Acceptance criteria
@@ -67,4 +67,4 @@ keep their old `apps/` paths (they are history); live docs (`AGENTS.md`,
 ## Progress
 
 - Route: delegated direct (writer trigger: 2+ non-trivial files per task).
-- Next: M1.
+- M1 03f07a3, M2 e7f5d09, M3 (this commit). Docker unavailable locally: images built only via simulated pnpm filter install + deploy. Next: user review/push.

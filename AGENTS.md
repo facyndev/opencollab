@@ -87,7 +87,7 @@ Principios clave:
 
 El repo se maneja con **Git Flow**:
 
-- `main`: solo código liberado. Cada merge a `main` es una versión y se etiqueta (`vX.Y.Z` para el desktop, `server-vX.Y.Z` / `web-vX.Y.Z` para los otros paquetes, ver "Versionado"). Nunca se commitea directo.
+- `main`: solo código liberado. Cada merge a `main` es una versión y se etiqueta (`desktop-vX.Y.Z` para el desktop, `server-vX.Y.Z` / `web-vX.Y.Z` para los otros paquetes, ver "Versionado"). Nunca se commitea directo.
 - `develop`: rama de integración; de acá salen y acá vuelven las features.
 - `feature/<nombre>`: sale de `develop`, vuelve a `develop`. Una por funcionalidad (p. ej. `feature/relay-websocket`).
 - `release/<versión>`: sale de `develop` para preparar una versión (solo ajustes, versión y fixes); se mergea a `main` (con tag) **y** de vuelta a `develop`. Una por paquete: `release/X.Y.Z` (desktop), `release/server-X.Y.Z`, `release/web-X.Y.Z`.
@@ -107,11 +107,11 @@ Remoto: `origin` → https://github.com/facyndev/opencollab (licencia MIT).
 
 | Paquete | Dónde vive la versión | Tag | Qué dispara el tag |
 |---|---|---|---|
-| **desktop** (app Tauri) | Tres fuentes que tienen que coincidir: `Cargo.toml` raíz (`[workspace.package] version`, los crates la heredan con `version.workspace = true`), `packages/desktop/package.json` y `packages/desktop/src-tauri/tauri.conf.json` (la que muestra el instalador) | `vX.Y.Z` (sin prefijo) | `release.yml`: CI completo, build de Tauri y release de GitHub |
+| **desktop** (app Tauri) | Tres fuentes que tienen que coincidir: `Cargo.toml` raíz (`[workspace.package] version`, los crates la heredan con `version.workspace = true`), `packages/desktop/package.json` y `packages/desktop/src-tauri/tauri.conf.json` (la que muestra el instalador) | `desktop-vX.Y.Z` | `release.yml`: CI completo, build de Tauri y release de GitHub |
 | **server** (relay NestJS) | `packages/server/package.json` | `server-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
 | **web** | `packages/web/package.json` | `web-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
 
-Solo el desktop genera releases de GitHub: `release.yml` escucha `v*.*.*` y los tags `server-v*` / `web-v*` no lo disparan.
+Solo el desktop genera releases de GitHub: `release.yml` escucha `desktop-v*.*.*` y los tags `server-v*` / `web-v*` no lo disparan. Los tags `v0.1.0` a `v0.3.0` son históricos (anteriores al prefijo): se conservan y ya no disparan nada.
 
 La versión de un paquete se sube **solo** en la rama `release/*` o `hotfix/*` de ese paquete, como un commit propio, nunca dentro de una feature. El tag se crea sobre el merge a `main`.
 
@@ -122,9 +122,9 @@ El **protocolo de red** tiene su propia versión, independiente de las tres: `PR
 ## CI/CD (GitHub Actions)
 
 - **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm --filter @opencollab/desktop build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión (desktop, server y web). Job `server`: Vitest + typecheck + build del relay Nest.
-- **`.github/workflows/release.yml`**: al pushear un tag `vX.Y.Z` del desktop (sobre `main`; `server-v*` y `web-v*` no lo disparan). Verifica tag = versión del desktop (`check-version.ps1 -Package desktop`), corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`v1.0.0-beta.1`) salen como pre-release.
+- **`.github/workflows/release.yml`**: al pushear un tag `desktop-vX.Y.Z` (sobre `main`; `server-v*` y `web-v*` no lo disparan). Verifica tag = versión del desktop (`check-version.ps1 -Package desktop`), corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`desktop-v1.0.0-beta.1`) salen como pre-release.
 - **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`opencollab-<os>-<versión>.<extensión>`** → `opencollab-windows-0.2.0.exe` (NSIS) y `opencollab-windows-0.2.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
-- Para publicar una versión del **desktop**: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → merge de vuelta a `develop`.
+- Para publicar una versión del **desktop**: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag desktop-vX.Y.Z` → `git push origin desktop-vX.Y.Z` → merge de vuelta a `develop`.
 - Para versionar el **server** (o la **web**, igual con `web-`): `release/server-X.Y.Z` desde `develop` → subir la versión en `packages/server/package.json` → merge a `main` → `git tag server-vX.Y.Z` → `git push origin server-vX.Y.Z` → merge de vuelta a `develop`. No genera release de GitHub.
 
 ## Comandos
