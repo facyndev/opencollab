@@ -70,4 +70,5 @@ keep their old `apps/` paths (they are history); live docs (`AGENTS.md`,
 - M1 03f07a3, M2 e7f5d09, M3 6dee186. Docker unavailable locally: images built only via simulated pnpm filter install + deploy.
 - Verified (writer, parent spot check of the bare `v0.3.0` tag failing): root `pnpm install --frozen-lockfile`; desktop 73 tests + build + E2E; server 212 tests + typecheck + build; web 90 tests + build; cargo fmt/clippy/test; check-version RED→GREEN. Pending: `docker compose up` + `/health`, server `test:integration`.
 - Review (RDD on, risk high): consent granted, START refused with `lens_context_budget_exceeded` (the tool counts the rename as 45k changed lines, no review authority created). Authored lines: M1 ~170 (+ renames), M2 ~195 (+ lockfile), M3 36.
-- Next: user decides how to review the reduced scope, then nest-server T7 on its own branch.
+- Review of the reduced scope (M2+M3+docs, base 03f07a3, user-authorized): 4 lenses, approved with no findings; acknowledged (lineage review-a5bdff32acc0baad, authority burned). M1 (mechanical rename) left unreviewed by user decision; covered by the full test suites.
+- Next: nest-server T7 on `feature/domain-slim` (stacked on this branch); Docker check before merge.
