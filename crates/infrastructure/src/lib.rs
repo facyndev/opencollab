@@ -19,7 +19,7 @@ pub use agent_launch::{agent_shell_profile, command_exists};
 pub use claude_adapter::ClaudeCodeAdapter;
 pub use directory_browser::FsDirectoryBrowser;
 pub use hook_receiver::HookReceiver;
-pub use memory_repository::InMemoryWorkspaceRepository;
+pub use memory_repository::InMemorySessionRepository;
 pub use opencode_adapter::OpenCodeAdapter;
 pub use process_inspector::SysinfoProcessInspector;
 pub use pty::PortablePtyAdapter;

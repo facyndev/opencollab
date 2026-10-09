@@ -1,36 +1,28 @@
 use std::sync::Arc;
 
-use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace};
+use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId};
 
 use crate::agent_detection::{detect_agents_within, AgentTree};
 use crate::error::AppError;
 use crate::git::Branch;
 use crate::ports::{
-    CollabTransport, DirectoryBrowser, ProcessInspector, PtyPort, RepositoryInspector,
-    TerminalOutputSink, TerminalSize, WorkspaceRepository,
+    DirectoryBrowser, ProcessInspector, PtyPort, RepositoryInspector, SessionRepository,
+    TerminalOutputSink, TerminalSize,
 };
 
-fn load(
-    repo: &dyn WorkspaceRepository,
-    session_id: SessionId,
-) -> Result<(Workspace, Session), AppError> {
-    let session = repo
-        .find_session(session_id)?
-        .ok_or(AppError::SessionNotFound(session_id))?;
-    let workspace = repo
-        .find_workspace(session.workspace_id())?
-        .ok_or(AppError::WorkspaceNotFound(session.workspace_id()))?;
-    Ok((workspace, session))
+fn load(repo: &dyn SessionRepository, session_id: SessionId) -> Result<Session, AppError> {
+    repo.find_session(session_id)?
+        .ok_or(AppError::SessionNotFound(session_id))
 }
 
 /// Agrega una terminal a la sesión y lanza su PTY.
 pub struct LaunchTerminal {
-    repo: Arc<dyn WorkspaceRepository>,
+    repo: Arc<dyn SessionRepository>,
     pty: Arc<dyn PtyPort>,
 }
 
 impl LaunchTerminal {
-    pub fn new(repo: Arc<dyn WorkspaceRepository>, pty: Arc<dyn PtyPort>) -> Self {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
         Self { repo, pty }
     }
 
@@ -42,8 +34,8 @@ impl LaunchTerminal {
         size: TerminalSize,
         sink: Arc<dyn TerminalOutputSink>,
     ) -> Result<TerminalId, AppError> {
-        let (workspace, mut session) = load(self.repo.as_ref(), session_id)?;
-        let terminal = session.add_terminal(&workspace, actor, profile.clone())?;
+        let mut session = load(self.repo.as_ref(), session_id)?;
+        let terminal = session.add_terminal(actor, profile.clone())?;
         self.pty.spawn(terminal, &profile, size, sink)?;
         self.repo.save_session(session)?;
         Ok(terminal)
@@ -53,12 +45,12 @@ impl LaunchTerminal {
 /// Escribe input en una terminal. Es el único camino de entrada al PTY, tanto
 /// local como remoto: valida contra el permiso vigente en cada llamada.
 pub struct SendTerminalInput {
-    repo: Arc<dyn WorkspaceRepository>,
+    repo: Arc<dyn SessionRepository>,
     pty: Arc<dyn PtyPort>,
 }
 
 impl SendTerminalInput {
-    pub fn new(repo: Arc<dyn WorkspaceRepository>, pty: Arc<dyn PtyPort>) -> Self {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
         Self { repo, pty }
     }
 
@@ -76,12 +68,12 @@ impl SendTerminalInput {
 }
 
 pub struct ResizeTerminal {
-    repo: Arc<dyn WorkspaceRepository>,
+    repo: Arc<dyn SessionRepository>,
     pty: Arc<dyn PtyPort>,
 }
 
 impl ResizeTerminal {
-    pub fn new(repo: Arc<dyn WorkspaceRepository>, pty: Arc<dyn PtyPort>) -> Self {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
         Self { repo, pty }
     }
 
@@ -100,12 +92,12 @@ impl ResizeTerminal {
 
 /// Quita una terminal de la sesión y termina su proceso.
 pub struct CloseTerminal {
-    repo: Arc<dyn WorkspaceRepository>,
+    repo: Arc<dyn SessionRepository>,
     pty: Arc<dyn PtyPort>,
 }
 
 impl CloseTerminal {
-    pub fn new(repo: Arc<dyn WorkspaceRepository>, pty: Arc<dyn PtyPort>) -> Self {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
         Self { repo, pty }
     }
 
@@ -115,8 +107,8 @@ impl CloseTerminal {
         session_id: SessionId,
         terminal: TerminalId,
     ) -> Result<(), AppError> {
-        let (workspace, mut session) = load(self.repo.as_ref(), session_id)?;
-        session.remove_terminal(&workspace, actor, terminal)?;
+        let mut session = load(self.repo.as_ref(), session_id)?;
+        session.remove_terminal(actor, terminal)?;
         self.pty.kill(terminal)?;
         self.repo.save_session(session)?;
         Ok(())
@@ -165,7 +157,7 @@ impl InspectBranch {
 /// Qué agentes conocidos corren en cada terminal viva de la sesión: el principal
 /// de cada una y los que ese agente tiene anidados.
 pub struct DetectTerminalAgents {
-    repo: Arc<dyn WorkspaceRepository>,
+    repo: Arc<dyn SessionRepository>,
     pty: Arc<dyn PtyPort>,
     inspector: Arc<dyn ProcessInspector>,
     /// Ejecutables en los que el recorrido se detiene (otras instancias de la app).
@@ -174,7 +166,7 @@ pub struct DetectTerminalAgents {
 
 impl DetectTerminalAgents {
     pub fn new(
-        repo: Arc<dyn WorkspaceRepository>,
+        repo: Arc<dyn SessionRepository>,
         pty: Arc<dyn PtyPort>,
         inspector: Arc<dyn ProcessInspector>,
     ) -> Self {
@@ -221,14 +213,14 @@ impl DetectTerminalAgents {
 }
 
 fn ensure_can_write(
-    repo: &dyn WorkspaceRepository,
+    repo: &dyn SessionRepository,
     actor: UserId,
     session_id: SessionId,
     terminal: TerminalId,
 ) -> Result<(), AppError> {
-    let (workspace, session) = load(repo, session_id)?;
+    let session = load(repo, session_id)?;
     session.ensure_has_terminal(terminal)?;
-    if !session.can_write(&workspace, actor) {
+    if !session.can_write(actor) {
         return Err(AppError::WriteNotAllowed {
             user: actor,
             terminal,
@@ -237,42 +229,28 @@ fn ensure_can_write(
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccessChange {
-    SetView(bool),
-    SetWrite(bool),
+/// Aplica a la sesión el nivel de acceso que mandó el server (`Joined` /
+/// `AccessChanged`) y lo persiste: el siguiente input se valida contra él.
+/// El server decide quién puede qué; acá solo se guarda para la validación final.
+pub struct ApplyAccessLevel {
+    repo: Arc<dyn SessionRepository>,
 }
 
-/// El dueño cambia el acceso de un participante en vivo y se notifica a los demás.
-pub struct ChangeParticipantAccess {
-    repo: Arc<dyn WorkspaceRepository>,
-    transport: Arc<dyn CollabTransport>,
-}
-
-impl ChangeParticipantAccess {
-    pub fn new(repo: Arc<dyn WorkspaceRepository>, transport: Arc<dyn CollabTransport>) -> Self {
-        Self { repo, transport }
+impl ApplyAccessLevel {
+    pub fn new(repo: Arc<dyn SessionRepository>) -> Self {
+        Self { repo }
     }
 
     pub fn execute(
         &self,
-        actor: UserId,
         session_id: SessionId,
-        target: UserId,
-        change: AccessChange,
-    ) -> Result<AccessLevel, AppError> {
-        let (workspace, mut session) = load(self.repo.as_ref(), session_id)?;
-        let level = match change {
-            AccessChange::SetView(enabled) => {
-                session.set_view(&workspace, actor, target, enabled)?
-            }
-            AccessChange::SetWrite(enabled) => {
-                session.set_write(&workspace, actor, target, enabled)?
-            }
-        };
+        user: UserId,
+        level: AccessLevel,
+    ) -> Result<(), AppError> {
+        let mut session = load(self.repo.as_ref(), session_id)?;
+        session.set_access(user, level)?;
         self.repo.save_session(session)?;
-        self.transport.access_changed(session_id, target, level)?;
-        Ok(level)
+        Ok(())
     }
 }
 
@@ -281,7 +259,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use domain::{DomainError, WorkspaceId};
+    use domain::DomainError;
 
     use super::*;
     use crate::agent_detection::KnownAgent;
@@ -289,21 +267,10 @@ mod tests {
 
     #[derive(Default)]
     struct FakeRepo {
-        workspaces: Mutex<HashMap<WorkspaceId, Workspace>>,
         sessions: Mutex<HashMap<SessionId, Session>>,
     }
 
-    impl WorkspaceRepository for FakeRepo {
-        fn find_workspace(&self, id: WorkspaceId) -> Result<Option<Workspace>, PortError> {
-            Ok(self.workspaces.lock().unwrap().get(&id).cloned())
-        }
-        fn save_workspace(&self, workspace: Workspace) -> Result<(), PortError> {
-            self.workspaces
-                .lock()
-                .unwrap()
-                .insert(workspace.id(), workspace);
-            Ok(())
-        }
+    impl SessionRepository for FakeRepo {
         fn find_session(&self, id: SessionId) -> Result<Option<Session>, PortError> {
             Ok(self.sessions.lock().unwrap().get(&id).cloned())
         }
@@ -361,23 +328,6 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct FakeTransport {
-        events: Mutex<Vec<(SessionId, UserId, AccessLevel)>>,
-    }
-
-    impl CollabTransport for FakeTransport {
-        fn access_changed(
-            &self,
-            session: SessionId,
-            user: UserId,
-            access: AccessLevel,
-        ) -> Result<(), PortError> {
-            self.events.lock().unwrap().push((session, user, access));
-            Ok(())
-        }
-    }
-
     struct NullSink;
     impl TerminalOutputSink for NullSink {
         fn output(&self, _terminal: TerminalId, _data: &[u8]) {}
@@ -391,22 +341,17 @@ mod tests {
         terminal: TerminalId,
         repo: Arc<FakeRepo>,
         pty: Arc<FakePty>,
-        transport: Arc<FakeTransport>,
     }
 
     fn world() -> World {
         let owner = UserId::new();
         let member = UserId::new();
-        let mut workspace = Workspace::new(owner, "proyecto");
-        workspace.add_member(owner, member).unwrap();
-        let session = Session::new(&workspace, owner, "sesión").unwrap();
+        let session = Session::new(owner, "sesión");
         let session_id = session.id();
 
         let repo = Arc::new(FakeRepo::default());
-        repo.save_workspace(workspace).unwrap();
         repo.save_session(session).unwrap();
         let pty = Arc::new(FakePty::default());
-        let transport = Arc::new(FakeTransport::default());
 
         let terminal = LaunchTerminal::new(repo.clone(), pty.clone())
             .execute(
@@ -425,7 +370,6 @@ mod tests {
             terminal,
             repo,
             pty,
-            transport,
         }
     }
 
@@ -614,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn member_with_default_view_cannot_write() {
+    fn non_owner_without_server_grant_cannot_write() {
         let w = world();
         let input = SendTerminalInput::new(w.repo.clone(), w.pty.clone());
         let result = input.execute(w.member, w.session_id, w.terminal, b"ls\r");
@@ -623,69 +567,63 @@ mod tests {
     }
 
     #[test]
-    fn permission_change_applies_to_next_input() {
+    fn applying_view_then_write_from_server_allows_input() {
         let w = world();
-        let change = ChangeParticipantAccess::new(w.repo.clone(), w.transport.clone());
+        let apply = ApplyAccessLevel::new(w.repo.clone());
         let input = SendTerminalInput::new(w.repo.clone(), w.pty.clone());
 
-        change
-            .execute(
-                w.owner,
-                w.session_id,
-                w.member,
-                AccessChange::SetWrite(true),
-            )
+        apply
+            .execute(w.session_id, w.member, AccessLevel::View)
+            .unwrap();
+        assert!(input
+            .execute(w.member, w.session_id, w.terminal, b"a")
+            .is_err());
+
+        apply
+            .execute(w.session_id, w.member, AccessLevel::Write)
+            .unwrap();
+        input
+            .execute(w.member, w.session_id, w.terminal, b"a")
+            .unwrap();
+        assert_eq!(w.pty.written.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn revoking_to_none_from_server_blocks_next_input() {
+        let w = world();
+        let apply = ApplyAccessLevel::new(w.repo.clone());
+        let input = SendTerminalInput::new(w.repo.clone(), w.pty.clone());
+
+        apply
+            .execute(w.session_id, w.member, AccessLevel::Write)
             .unwrap();
         input
             .execute(w.member, w.session_id, w.terminal, b"a")
             .unwrap();
 
-        change
-            .execute(
-                w.owner,
-                w.session_id,
-                w.member,
-                AccessChange::SetWrite(false),
-            )
+        apply
+            .execute(w.session_id, w.member, AccessLevel::None)
             .unwrap();
-        assert!(input
-            .execute(w.member, w.session_id, w.terminal, b"b")
-            .is_err());
-
+        assert!(matches!(
+            input.execute(w.member, w.session_id, w.terminal, b"b"),
+            Err(AppError::WriteNotAllowed { .. })
+        ));
         assert_eq!(w.pty.written.lock().unwrap().len(), 1);
     }
 
     #[test]
-    fn permission_change_is_broadcast() {
+    fn applying_access_to_unknown_session_or_owner_is_rejected() {
         let w = world();
-        let change = ChangeParticipantAccess::new(w.repo.clone(), w.transport.clone());
-        let level = change
-            .execute(
-                w.owner,
-                w.session_id,
-                w.member,
-                AccessChange::SetView(false),
-            )
-            .unwrap();
-        assert_eq!(level, AccessLevel::None);
+        let apply = ApplyAccessLevel::new(w.repo.clone());
+        let missing = SessionId::new();
         assert_eq!(
-            *w.transport.events.lock().unwrap(),
-            vec![(w.session_id, w.member, AccessLevel::None)]
+            apply.execute(missing, w.member, AccessLevel::View),
+            Err(AppError::SessionNotFound(missing))
         );
-    }
-
-    #[test]
-    fn non_owner_cannot_change_permissions_and_nothing_is_broadcast() {
-        let w = world();
-        let change = ChangeParticipantAccess::new(w.repo.clone(), w.transport.clone());
-        let result = change.execute(
-            w.member,
-            w.session_id,
-            w.member,
-            AccessChange::SetWrite(true),
+        assert_eq!(
+            apply.execute(w.session_id, w.owner, AccessLevel::None),
+            Err(AppError::Domain(DomainError::CannotChangeOwnerAccess))
         );
-        assert_eq!(result, Err(AppError::Domain(DomainError::NotOwner)));
-        assert!(w.transport.events.lock().unwrap().is_empty());
     }
 
     #[test]

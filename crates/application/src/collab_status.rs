@@ -6,7 +6,7 @@ use std::sync::Arc;
 use domain::SessionId;
 
 use crate::error::AppError;
-use crate::ports::{RelayProbe, WorkspaceRepository};
+use crate::ports::{RelayProbe, SessionRepository};
 
 /// Resultado de sondear el relay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,11 +39,11 @@ impl CheckRelay {
 /// Cuántos participantes de la sesión tienen acceso (al menos Ver). Quien no
 /// puede ver la sesión no la está compartiendo con nadie, así que no cuenta.
 pub struct SessionCollaborators {
-    repo: Arc<dyn WorkspaceRepository>,
+    repo: Arc<dyn SessionRepository>,
 }
 
 impl SessionCollaborators {
-    pub fn new(repo: Arc<dyn WorkspaceRepository>) -> Self {
+    pub fn new(repo: Arc<dyn SessionRepository>) -> Self {
         Self { repo }
     }
 
@@ -52,12 +52,8 @@ impl SessionCollaborators {
             .repo
             .find_session(session_id)?
             .ok_or(AppError::SessionNotFound(session_id))?;
-        let workspace = self
-            .repo
-            .find_workspace(session.workspace_id())?
-            .ok_or(AppError::WorkspaceNotFound(session.workspace_id()))?;
         Ok(session
-            .participants(&workspace)
+            .participants()
             .iter()
             .filter(|p| p.access.can_view())
             .count())
@@ -70,7 +66,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
-    use domain::{Session, UserId, Workspace, WorkspaceId};
+    use domain::{AccessLevel, Session, UserId};
 
     use super::*;
     use crate::ports::PortError;
@@ -103,21 +99,10 @@ mod tests {
 
     #[derive(Default)]
     struct FakeRepo {
-        workspaces: Mutex<HashMap<WorkspaceId, Workspace>>,
         sessions: Mutex<HashMap<SessionId, Session>>,
     }
 
-    impl WorkspaceRepository for FakeRepo {
-        fn find_workspace(&self, id: WorkspaceId) -> Result<Option<Workspace>, PortError> {
-            Ok(self.workspaces.lock().unwrap().get(&id).cloned())
-        }
-        fn save_workspace(&self, workspace: Workspace) -> Result<(), PortError> {
-            self.workspaces
-                .lock()
-                .unwrap()
-                .insert(workspace.id(), workspace);
-            Ok(())
-        }
+    impl SessionRepository for FakeRepo {
         fn find_session(&self, id: SessionId) -> Result<Option<Session>, PortError> {
             Ok(self.sessions.lock().unwrap().get(&id).cloned())
         }
@@ -128,32 +113,28 @@ mod tests {
     }
 
     struct World {
-        owner: UserId,
-        member: UserId,
+        viewer: UserId,
         session_id: SessionId,
         repo: Arc<FakeRepo>,
     }
 
     fn world() -> World {
         let owner = UserId::new();
-        let member = UserId::new();
-        let mut workspace = Workspace::new(owner, "proyecto");
-        workspace.add_member(owner, member).unwrap();
-        let session = Session::new(&workspace, owner, "sesión").unwrap();
+        let viewer = UserId::new();
+        let mut session = Session::new(owner, "sesión");
+        session.set_access(viewer, AccessLevel::View).unwrap();
         let session_id = session.id();
         let repo = Arc::new(FakeRepo::default());
-        repo.save_workspace(workspace).unwrap();
         repo.save_session(session).unwrap();
         World {
-            owner,
-            member,
+            viewer,
             session_id,
             repo,
         }
     }
 
     #[test]
-    fn counts_owner_and_members_with_default_view() {
+    fn counts_owner_and_viewers_granted_by_the_server() {
         let w = world();
         let count = SessionCollaborators::new(w.repo.clone()).execute(w.session_id);
         assert_eq!(count, Ok(2));
@@ -162,17 +143,8 @@ mod tests {
     #[test]
     fn participant_without_view_is_not_counted() {
         let w = world();
-        let workspace = w
-            .repo
-            .find_session(w.session_id)
-            .unwrap()
-            .map(|s| s.workspace_id())
-            .and_then(|id| w.repo.find_workspace(id).unwrap())
-            .unwrap();
         let mut session = w.repo.find_session(w.session_id).unwrap().unwrap();
-        session
-            .set_view(&workspace, w.owner, w.member, false)
-            .unwrap();
+        session.set_access(w.viewer, AccessLevel::None).unwrap();
         w.repo.save_session(session).unwrap();
         let count = SessionCollaborators::new(w.repo.clone()).execute(w.session_id);
         assert_eq!(count, Ok(1));

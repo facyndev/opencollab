@@ -55,7 +55,5 @@ id_type!(
     /// Identidad de una persona usuaria de OpenCollab.
     UserId
 );
-id_type!(WorkspaceId);
 id_type!(SessionId);
 id_type!(TerminalId);
-id_type!(InvitationId);

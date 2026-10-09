@@ -1,16 +1,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use application::ports::{ProcessInspector, PtyPort, RelayProbe, WorkspaceRepository};
+use application::ports::{ProcessInspector, PtyPort, RelayProbe, SessionRepository};
 use application::{
     ActivityTracker, AgentAdapter, AgentAdapters, AgentStates, AppError, CheckRelay, CloseTerminal,
     DetectTerminalAgents, InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal,
     SendTerminalInput, SessionCollaborators,
 };
-use domain::{Session, SessionId, UserId, Workspace};
+use domain::{Session, SessionId, UserId};
 use infrastructure::{
     ClaudeCodeAdapter, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver, HttpRelayProbe,
-    InMemoryWorkspaceRepository, OpenCodeAdapter, PortablePtyAdapter, SysinfoProcessInspector,
+    InMemorySessionRepository, OpenCodeAdapter, PortablePtyAdapter, SysinfoProcessInspector,
 };
 
 use crate::auth::AuthStore;
@@ -18,7 +18,7 @@ use crate::auth::AuthStore;
 const ACTIVITY_IDLE_AFTER: Duration = Duration::from_secs(3);
 
 /// Dependencias cableadas de la app. Mientras no haya cuentas ni persistencia,
-/// arranca con un usuario local dueño de un workspace y una sesión.
+/// arranca con un usuario local dueño de una sesión.
 pub struct AppState {
     pub local_user: UserId,
     pub session_id: SessionId,
@@ -56,7 +56,7 @@ fn agent_adapters() -> Vec<Arc<dyn AgentAdapter>> {
 
 impl AppState {
     pub fn bootstrap() -> Result<Self, AppError> {
-        let repo: Arc<dyn WorkspaceRepository> = Arc::new(InMemoryWorkspaceRepository::new());
+        let repo: Arc<dyn SessionRepository> = Arc::new(InMemorySessionRepository::new());
         let pty: Arc<dyn PtyPort> = Arc::new(PortablePtyAdapter::new());
         let inspector: Arc<dyn ProcessInspector> = Arc::new(SysinfoProcessInspector::new());
 
@@ -66,10 +66,8 @@ impl AppState {
         let relay_probe: Arc<dyn RelayProbe> = Arc::new(HttpRelayProbe::new(relay_addr.clone()));
 
         let local_user = UserId::new();
-        let workspace = Workspace::new(local_user, "Local");
-        let session = Session::new(&workspace, local_user, "Sesión local")?;
+        let session = Session::new(local_user, "Sesión local");
         let session_id = session.id();
-        repo.save_workspace(workspace)?;
         repo.save_session(session)?;
 
         Ok(Self {

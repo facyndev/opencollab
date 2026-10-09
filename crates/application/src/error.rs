@@ -1,4 +1,4 @@
-use domain::{DomainError, SessionId, TerminalId, UserId, WorkspaceId};
+use domain::{DomainError, SessionId, TerminalId, UserId};
 
 use crate::ports::PortError;
 
@@ -8,8 +8,6 @@ pub enum AppError {
     Domain(#[from] DomainError),
     #[error(transparent)]
     Port(#[from] PortError),
-    #[error("workspace {0} no encontrado")]
-    WorkspaceNotFound(WorkspaceId),
     #[error("sesión {0} no encontrada")]
     SessionNotFound(SessionId),
     #[error("{user} no tiene permiso de escritura en la terminal {terminal}")]
