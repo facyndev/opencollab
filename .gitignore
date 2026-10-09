@@ -11,7 +11,7 @@ dist/
 /release/
 
 # Tauri
-apps/desktop/src-tauri/gen/schemas/
+packages/desktop/src-tauri/gen/schemas/
 
 # CodeGraph index (per-checkout)
 .codegraph/
@@ -31,5 +31,5 @@ Thumbs.db
 /.env
 
 # Server: local env and generated Prisma client
-apps/server/.env
-apps/server/src/generated/
+packages/server/.env
+packages/server/src/generated/

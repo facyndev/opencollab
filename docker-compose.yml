@@ -20,7 +20,7 @@ services:
       retries: 10
 
   server:
-    build: ./apps/server
+    build: ./packages/server
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
     restart: on-failure:5
 
   web:
-    build: ./apps/web
+    build: ./packages/web
     depends_on:
       server:
         condition: service_healthy

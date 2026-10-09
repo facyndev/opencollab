@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Relay server image. Build context: apps/server.
+# Relay server image. Build context: packages/server.
 
 FROM node:24-slim AS build
 WORKDIR /app

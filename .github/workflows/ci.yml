@@ -24,19 +24,19 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: apps/desktop
+        working-directory: packages/desktop
     steps:
       - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: apps/desktop/package.json
+          package_json_file: packages/desktop/package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+          cache-dependency-path: packages/desktop/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
-          path: apps/desktop/dist
+          path: packages/desktop/dist
           retention-days: 1
 
   server:
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/server
+        working-directory: packages/server
     env:
       DATABASE_URL: postgresql://opencollab:opencollab@localhost:5432/opencollab
     services:
@@ -85,13 +85,13 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: apps/server/package.json
+          package_json_file: packages/server/package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/server/pnpm-lock.yaml
+          cache-dependency-path: packages/server/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
@@ -118,19 +118,19 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: apps/web
+        working-directory: packages/web
     steps:
       - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: apps/web/package.json
+          package_json_file: packages/web/package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/web/pnpm-lock.yaml
+          cache-dependency-path: packages/web/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
 
@@ -152,7 +152,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
-          path: apps/desktop/dist
+          path: packages/desktop/dist
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -182,9 +182,9 @@ jobs:
           # server y web se verifican desde que existen en el repo. El script corta
           # con un error terminante si algo no coincide, y eso falla el paso.
           foreach ($package in 'server', 'web') {
-            if (Test-Path "apps/$package/package.json") {
+            if (Test-Path "packages/$package/package.json") {
               ./scripts/check-version.ps1 -Package $package
             } else {
-              Write-Host "Versión ($package): se saltea, no existe apps/$package/package.json."
+              Write-Host "Versión ($package): se saltea, no existe packages/$package/package.json."
             }
           }

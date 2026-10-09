@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Web image: Vite build served by nginx. Build context: apps/web.
+# Web image: Vite build served by nginx. Build context: packages/web.
 
 FROM node:24-slim AS build
 WORKDIR /app
