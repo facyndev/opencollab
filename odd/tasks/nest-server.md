@@ -162,7 +162,7 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     rechaza si el server no confirma, timeout de 10 s en cada request
     (libera el Web Lock), `ContinuePage` con error y reintento, captura del
     handoff fuera de React (`main.tsx`).
-- [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
+- [x] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
   - Rama `feature/domain-slim` (apilada sobre `feature/monorepo-packages`).
@@ -181,6 +181,15 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     que aplica el nivel recibido del server; `WorkspaceRepository` pasa a
     ser un repositorio de sesiones. `SessionCollaborators` cuenta dueño +
     usuarios con Ver.
+  - Evidencia: commit `d15cc16`. RED observado: `owner_always_writes`,
+    `server_levels_drive_view_and_write`, `participants_are_owner_plus_viewers`
+    (domain) y `applying_view_then_write_from_server_allows_input`,
+    `revoking_to_none_from_server_blocks_next_input`,
+    `applying_access_to_unknown_session_or_owner_is_rejected` (application)
+    fallaban contra un stub; GREEN tras implementar. `cargo fmt --check`,
+    clippy `-D warnings` y `cargo test --workspace` (194 tests) en verde;
+    build y Vitest del desktop en verde. `CollabTransport` se retira (vuelve
+    con el cliente WS).
 - [x] **T8** — Docker (pedido del usuario antes del push): `docker compose`
   levanta Postgres + server + web; el desktop NO va en contenedor (se
   descarga el instalador de la release y corre nativo contra el server del
