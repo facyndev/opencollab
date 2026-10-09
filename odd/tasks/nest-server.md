@@ -190,6 +190,10 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     clippy `-D warnings` y `cargo test --workspace` (194 tests) en verde;
     build y Vitest del desktop en verde. `CollabTransport` se retira (vuelve
     con el cliente WS).
+  - Revisión (RDD, riesgo medio, consentida): una lente (confiabilidad),
+    aprobada sin hallazgos y reconocida (lineage `review-382acf7be262846b`).
+    Spot check del padre: `cargo test -p domain -p application` en verde.
+    Sin correr: E2E de la interfaz (no cambió ningún comando ni evento).
 - [x] **T8** — Docker (pedido del usuario antes del push): `docker compose`
   levanta Postgres + server + web; el desktop NO va en contenedor (se
   descarga el instalador de la release y corre nativo contra el server del
