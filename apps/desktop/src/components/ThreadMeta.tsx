@@ -21,8 +21,13 @@ type Props = {
 export function ThreadMeta({ agent, attention, startedAt }: Props) {
   const { tone, detail } = describeAgent(agent, attention);
   if (!detail && startedAt === null) return null;
+  const hasTool = Boolean(detail);
   return (
-    <div className={`thread-meta thread-meta--${tone}`}>
+    <div
+      className={`thread-meta thread-meta--${tone} ${
+        hasTool ? "thread-meta--has-tool" : "thread-meta--uptime-only"
+      }`}
+    >
       {detail && (
         <span className="thread-meta-part thread-meta-tool" title={detail}>
           {detail}

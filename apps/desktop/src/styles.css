@@ -420,9 +420,16 @@ kbd {
      debajo calcularía el codo sobre el alto de toda la lista y apuntaría al
      medio en vez de a su terminal. */
   --thread-row: 26px;
+  --thread-gap: 6px;
   list-style: none;
   margin: 0 0 6px;
   padding: 0;
+}
+
+.thread:not(.thread--sub) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--thread-gap);
 }
 
 .thread li {
@@ -452,7 +459,7 @@ kbd {
   /* Arranca donde empieza la curva del codo (su radio es 8px), no donde termina:
      si no, la línea recta queda cortada a la altura de cada rama. */
   top: calc(min(50%, var(--thread-row)) - 8px);
-  bottom: -1px;
+  bottom: calc(-1 * var(--thread-gap) - 1px);
   border-left: var(--thread-line);
 }
 
@@ -469,6 +476,7 @@ kbd {
 .thread--sub {
   --thread-x: 8px;
   --thread-row: 22px;
+  --thread-gap: 0px;
   margin: 0;
 }
 
@@ -489,6 +497,10 @@ kbd {
   font-size: 12px;
   color: var(--text-muted);
   text-align: left;
+}
+
+.thread-item--has-uptime {
+  padding-right: 44px;
 }
 
 .thread-item:hover {

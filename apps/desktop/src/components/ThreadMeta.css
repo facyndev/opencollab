@@ -95,9 +95,55 @@
   }
 }
 
-/* Separador entre partes: "Bash: echo hi · 12m". */
-.thread-meta-part + .thread-meta-part::before {
+/* Cuando solo muestra el tiempo (sin herramienta activa), no ocupa espacio en el flujo. */
+.thread-meta--uptime-only {
+  padding: 0;
+  margin: 0;
+  height: 0;
+  line-height: 0;
+}
+
+/* Tiempo transcurrido: en la esquina superior derecha de cada terminal del sidebar,
+   con posición absoluta y con el color del contenedor (var(--surface-2)). */
+.thread-meta-uptime {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+/* El badge absoluto no lleva separador con viñeta. */
+.thread-meta-part + .thread-meta-uptime::before {
+  content: none;
+  margin: 0;
+}
+
+/* Al enfocar o pasar el cursor sobre la terminal, destacar el badge sutilmente. */
+.thread-item:hover ~ .thread-meta .thread-meta-uptime,
+.thread-item--focused ~ .thread-meta .thread-meta-uptime {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Separador entre partes de la línea secundaria: "Bash: echo hi · ...". */
+.thread-meta-part + .thread-meta-part:not(.thread-meta-uptime)::before {
   content: "·";
   margin-right: 6px;
   color: var(--text-faint);
 }
+
