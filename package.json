@@ -1,0 +1,12 @@
+{
+  "name": "opencollab",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo de OpenCollab: desktop (Tauri), server (NestJS) y web (Vite). El core Rust vive en crates/ y se maneja con Cargo.",
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r --if-present typecheck"
+  }
+}

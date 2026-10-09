@@ -1,16 +1,21 @@
 # syntax=docker/dockerfile:1
-# Relay server image. Build context: packages/server.
+# Relay server image. Build context: the repo root (single pnpm workspace and lockfile).
+#   docker build -f packages/server/Dockerfile .
 
 FROM node:24-slim AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY prisma ./prisma
-COPY prisma.config.ts tsconfig.json tsconfig.build.json ./
+COPY packages/server/package.json ./packages/server/
+COPY packages/server/prisma ./packages/server/prisma
+COPY packages/server/prisma.config.ts packages/server/tsconfig.json packages/server/tsconfig.build.json ./packages/server/
 # postinstall runs `prisma generate`: it needs the schema, config and tsconfig (the latter decides the import extensions it emits).
-RUN pnpm install --frozen-lockfile
-COPY src ./src
-RUN pnpm build
+RUN pnpm install --frozen-lockfile --filter @opencollab/server...
+COPY packages/server/src ./packages/server/src
+RUN pnpm --filter @opencollab/server build
+# Self-contained node_modules for the runtime. The Prisma CLI (a devDependency)
+# stays in it: it applies the migrations on startup, so nothing is pruned.
+RUN pnpm --filter @opencollab/server deploy --legacy /deploy
 
 FROM node:24-slim
 ENV NODE_ENV=production \
@@ -19,12 +24,10 @@ ENV NODE_ENV=production \
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# The Prisma CLI (a devDependency) stays in node_modules: it applies the
-# migrations on startup, so the whole tree is copied instead of pruned.
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/dist ./dist
-COPY --from=build --chown=node:node /app/prisma ./prisma
-COPY --from=build --chown=node:node /app/prisma.config.ts /app/package.json ./
+COPY --from=build --chown=node:node /deploy/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/packages/server/dist ./dist
+COPY --from=build --chown=node:node /app/packages/server/prisma ./prisma
+COPY --from=build --chown=node:node /app/packages/server/prisma.config.ts /app/packages/server/package.json ./
 USER node
 EXPOSE 8787
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \

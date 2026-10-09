@@ -1,9 +1,8 @@
 {
-  "name": "opencollab-desktop",
+  "name": "@opencollab/desktop",
   "private": true,
   "version": "0.3.0",
   "type": "module",
-  "packageManager": "pnpm@11.1.1",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

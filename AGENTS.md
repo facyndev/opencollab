@@ -49,7 +49,7 @@ Los agentes son **agnósticos**: el sistema no debe tener lógica específica de
 - **Frontend:** React + TypeScript, terminales con `xterm.js`.
 - **Colaboración:** servidor relay en NestJS sobre WebSockets (autenticación, sesiones compartidas, invitaciones y retransmisión de streams de PTY).
 - **Web:** Vite + React + TypeScript (`packages/web`), puerta de autenticación del navegador; mismo toolchain que el desktop.
-- **Monorepo:** Cargo workspace para el core Rust del desktop + paquetes pnpm para el server Nest y los frontends; desktop y server comparten el wire como contrato versionado, no como código.
+- **Monorepo:** un único workspace pnpm en la raíz (`package.json` privado + `pnpm-workspace.yaml` con `packages/*` + un solo `pnpm-lock.yaml`) para los paquetes JS (`@opencollab/desktop`, `@opencollab/server`, `@opencollab/web`) y un Cargo workspace para el core Rust (`crates/` + `packages/desktop/src-tauri`); desktop y server comparten el wire como contrato versionado, no como código.
 
 ## Arquitectura (Clean Architecture)
 
@@ -109,19 +109,19 @@ Remoto: `origin` → https://github.com/facyndev/opencollab (licencia MIT).
 |---|---|---|---|
 | **desktop** (app Tauri) | Tres fuentes que tienen que coincidir: `Cargo.toml` raíz (`[workspace.package] version`, los crates la heredan con `version.workspace = true`), `packages/desktop/package.json` y `packages/desktop/src-tauri/tauri.conf.json` (la que muestra el instalador) | `vX.Y.Z` (sin prefijo) | `release.yml`: CI completo, build de Tauri y release de GitHub |
 | **server** (relay NestJS) | `packages/server/package.json` | `server-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
-| **web** | `packages/web/package.json` | `web-vX.Y.Z` | Nada por ahora (sin release de GitHub); el paquete aún no existe en el repo |
+| **web** | `packages/web/package.json` | `web-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
 
 Solo el desktop genera releases de GitHub: `release.yml` escucha `v*.*.*` y los tags `server-v*` / `web-v*` no lo disparan.
 
 La versión de un paquete se sube **solo** en la rama `release/*` o `hotfix/*` de ese paquete, como un commit propio, nunca dentro de una feature. El tag se crea sobre el merge a `main`.
 
-`pwsh scripts/check-version.ps1 -Package desktop|server|web` verifica las fuentes del paquete (por defecto `desktop`) y, con `-Tag <tag>`, que el tag tenga el formato de la tabla y sea esa versión. El CI chequea desktop siempre; server y web, solo si existe su `package.json` (si no, lo informa en el log y lo saltea). Invocado a mano con un paquete inexistente, el script falla con un mensaje claro.
+`pwsh scripts/check-version.ps1 -Package desktop|server|web` verifica las fuentes del paquete (por defecto `desktop`) y, con `-Tag <tag>`, que el tag tenga el formato de la tabla y sea esa versión. El CI chequea desktop siempre; server y web, solo si existe su `package.json`. Invocado a mano con un paquete inexistente, el script falla con un mensaje claro.
 
 El **protocolo de red** tiene su propia versión, independiente de las tres: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
 
 ## CI/CD (GitHub Actions)
 
-- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión (desktop; server y web si existen). Job `server`: Vitest + typecheck + build del relay Nest.
+- **`.github/workflows/ci.yml`**: en cada push a las ramas de Git Flow y en cada PR, sobre `windows-latest`. Job `frontend`: Vitest → `pnpm --filter @opencollab/desktop build` (typecheck + Vite) → E2E de la interfaz. Job `rust` (usa el `dist/` del anterior, porque la app desktop lo embebe al compilar): `fmt --check` → clippy → `cargo test --workspace` → E2E de PTY real (`shell_integration_e2e`) → consistencia de versión (desktop, server y web). Job `server`: Vitest + typecheck + build del relay Nest.
 - **`.github/workflows/release.yml`**: al pushear un tag `vX.Y.Z` del desktop (sobre `main`; `server-v*` y `web-v*` no lo disparan). Verifica tag = versión del desktop (`check-version.ps1 -Package desktop`), corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`v1.0.0-beta.1`) salen como pre-release.
 - **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`opencollab-<os>-<versión>.<extensión>`** → `opencollab-windows-0.2.0.exe` (NSIS) y `opencollab-windows-0.2.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
 - Para publicar una versión del **desktop**: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → merge de vuelta a `develop`.
@@ -137,26 +137,27 @@ Rust (desde la raíz del repo):
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo fmt --all` (en CI: `cargo fmt --all --check`)
 
-Desktop (desde `packages/desktop`, usa pnpm):
+JS (todo desde la raíz del repo; un solo `pnpm install` instala desktop, server y web; `pnpm test`, `pnpm build` y `pnpm typecheck` corren en todos los paquetes con `pnpm -r`). Desktop (los comandos de Tauri se corren desde `packages/desktop`):
 
-- `pnpm install`
-- `cargo tauri dev`: levanta Vite en `localhost:1420` y abre la ventana.
-- `pnpm build`: typecheck (`tsc --noEmit`) + build de Vite.
-- `pnpm test`: tests unitarios del frontend (Vitest, archivos `src/**/*.test.ts`). Uno puntual: `pnpm test -- -t "parseOsc7"`.
-- `pnpm test:e2e`: E2E de la interfaz sobre el build de producción (correr `pnpm build` antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.
+- `pnpm install` (raíz)
+- `cargo tauri dev` (desde `packages/desktop`): levanta Vite en `localhost:1420` y abre la ventana.
+- `pnpm --filter @opencollab/desktop build`: typecheck (`tsc --noEmit`) + build de Vite.
+- `pnpm --filter @opencollab/desktop test`: tests unitarios del frontend (Vitest, archivos `src/**/*.test.ts`). Uno puntual: `pnpm --filter @opencollab/desktop test -- -t "parseOsc7"`.
+- `pnpm --filter @opencollab/desktop test:e2e`: E2E de la interfaz sobre el build de producción (correr el build antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.
 - `cargo tauri build`: instaladores en `target/release/bundle/{nsis,msi}`; `pwsh scripts/package-release.ps1 -Version X.Y.Z` los deja en `release/` con el nombre y los hashes de release.
 
-Server: corre solo en Docker (ver abajo; no hay `.env` para correrlo suelto). Escucha en `127.0.0.1:8787` (dentro del contenedor, `RELAY_ADDR=0.0.0.0:8787`); expone `/health` y `/ws`; el cliente WS manda `Sec-WebSocket-Protocol: opencollab.v1, bearer.<access JWT>` y sin token válido se rechaza el upgrade con 401. Tests: `pnpm --dir packages/server test` (Vitest).
+Server: corre solo en Docker (ver abajo; no hay `.env` para correrlo suelto). Escucha en `127.0.0.1:8787` (dentro del contenedor, `RELAY_ADDR=0.0.0.0:8787`); expone `/health` y `/ws`; el cliente WS manda `Sec-WebSocket-Protocol: opencollab.v1, bearer.<access JWT>` y sin token válido se rechaza el upgrade con 401. Tests: `pnpm --filter @opencollab/server test` (Vitest).
 
-Web: `pnpm --dir packages/web dev` (puerto 1421, hace proxy de `/auth` al server en `127.0.0.1:8787`, o a `OPENCOLLAB_API`), `pnpm --dir packages/web test` (Vitest + Testing Library), `pnpm --dir packages/web build` (typecheck + Vite).
+Web: `pnpm --filter @opencollab/web dev` (puerto 1421, hace proxy de `/auth` al server en `127.0.0.1:8787`, o a `OPENCOLLAB_API`), `pnpm --filter @opencollab/web test` (Vitest + Testing Library), `pnpm --filter @opencollab/web build` (typecheck + Vite).
 
 Docker (server + web + Postgres; el desktop **no** va en contenedor: se instala la release y corre nativo contra este server):
 
 - `cp .env.example .env`, completar `JWT_SECRET` (32+ caracteres: `openssl rand -base64 48`) y las credenciales OAuth de **GitHub y Google** (`GITHUB_CLIENT_ID`/`_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET`; callback a registrar en cada proveedor: `<PUBLIC_BASE_URL>/auth/oauth/<github|google>/callback`), y `docker compose up -d --build`. El `.env` raíz está ignorado. Todas son obligatorias: si falta alguna, el contenedor del server sale al arrancar (`docker compose logs server` dice cuál). Las migraciones de Prisma se aplican al iniciar el contenedor del server (`prisma migrate deploy`).
+- El contexto de build de las imágenes es la raíz del repo (un solo lockfile): `packages/server/Dockerfile` y `packages/web/Dockerfile` instalan con `pnpm install --frozen-lockfile --filter <paquete>...`; la imagen del server arma su `node_modules` autocontenido con `pnpm deploy --legacy`. Un `.dockerignore` raíz deja afuera `node_modules`, `target`, `.git`, etc.
 - Puertos, todos solo en `127.0.0.1`: web `8080` (nginx: SPA con fallback a `index.html`, proxy de `/auth` y `/ws` al server, misma CSP que `vite preview`), server `8787` (`/health`, `/auth/desktop/token`; el desktop habla directo con él), Postgres `5432`.
 - El server corre con `TRUST_PROXY=1` (nginx es un salto) y `WEB_ORIGIN`/`PUBLIC_BASE_URL` = `http://localhost:8080`: los callbacks de OAuth pasan por la web.
 - Apuntar el desktop a la web del contenedor: `OPENCOLLAB_WEB_ORIGIN=http://localhost:8080` (la dirección del server por defecto, `127.0.0.1:8787`, ya coincide).
-- `docker compose up -d postgres` levanta solo la base para los tests de integración del server: `DATABASE_URL=postgresql://opencollab:opencollab@127.0.0.1:5432/opencollab pnpm --dir packages/server test:integration` (usan la base `opencollab_test`, nunca la de desarrollo).
+- `docker compose up -d postgres` levanta solo la base para los tests de integración del server: `DATABASE_URL=postgresql://opencollab:opencollab@127.0.0.1:5432/opencollab pnpm --filter @opencollab/server test:integration` (usan la base `opencollab_test`, nunca la de desarrollo).
 - La CSP vive en dos lugares (`CSP` en `packages/web/vite.config.ts` y `packages/web/nginx.conf`); `packages/web/src/nginx.test.ts` falla si divergen.
 
 ### Particularidades

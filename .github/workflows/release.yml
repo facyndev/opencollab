@@ -43,25 +43,23 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: packages/desktop/package.json
+          package_json_file: package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: packages/desktop/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Instalar dependencias del frontend
-        working-directory: packages/desktop
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter @opencollab/desktop...
 
       - name: Build de Tauri (NSIS + MSI)
-        working-directory: packages/desktop
-        run: pnpm tauri build
+        run: pnpm --filter @opencollab/desktop tauri build
 
       - name: Renombrar y calcular hashes
         shell: pwsh

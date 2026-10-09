@@ -22,32 +22,29 @@ jobs:
   frontend:
     name: Frontend · unit + E2E
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: packages/desktop
     steps:
       - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: packages/desktop/package.json
+          package_json_file: package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: packages/desktop/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --filter @opencollab/desktop...
 
       - name: Tests unitarios (Vitest)
-        run: pnpm test
+        run: pnpm --filter @opencollab/desktop test
 
       - name: Typecheck + build
-        run: pnpm build
+        run: pnpm --filter @opencollab/desktop build
 
       - name: Tests E2E de la interfaz (Chrome headless, núcleo simulado)
-        run: pnpm test:e2e
+        run: pnpm --filter @opencollab/desktop test:e2e
 
       # El crate de la app desktop embebe dist/ al compilar: el job de Rust lo necesita.
       - uses: actions/upload-artifact@v7
@@ -61,9 +58,6 @@ jobs:
     # Linux: GitHub service containers (Postgres) do not run on Windows
     # runners, and the server is not Windows-bound.
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/server
     env:
       DATABASE_URL: postgresql://opencollab:opencollab@localhost:5432/opencollab
     services:
@@ -85,60 +79,57 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: packages/server/package.json
+          package_json_file: package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: packages/server/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --filter @opencollab/server...
 
       - name: Prisma client
-        run: pnpm db:generate
+        run: pnpm --filter @opencollab/server db:generate
 
       - name: Migraciones
-        run: pnpm db:deploy
+        run: pnpm --filter @opencollab/server db:deploy
 
       - name: Tests unitarios (Vitest)
-        run: pnpm test
+        run: pnpm --filter @opencollab/server test
 
       - name: Tests de integración (Postgres)
-        run: pnpm test:integration
+        run: pnpm --filter @opencollab/server test:integration
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm --filter @opencollab/server typecheck
 
       - name: Build
-        run: pnpm build
+        run: pnpm --filter @opencollab/server build
 
   web:
     name: Web · unit + build
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: packages/web
     steps:
       - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: packages/web/package.json
+          package_json_file: package.json
 
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: packages/web/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --filter @opencollab/web...
 
       - name: Tests unitarios (Vitest)
-        run: pnpm test
+        run: pnpm --filter @opencollab/web test
 
       - name: Typecheck + build
-        run: pnpm build
+        run: pnpm --filter @opencollab/web build
 
   rust:
     name: Rust · fmt, clippy, unit + E2E
