@@ -165,6 +165,22 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
 - [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
+  - Rama `feature/domain-slim` (apilada sobre `feature/monorepo-packages`).
+    Ruta: delegada (mapeo con un Explore; escritor único, 2+ archivos no
+    triviales). TDD estricto (configuración de la sesión), runner
+    `cargo test --workspace`.
+  - Diseño: se borran `Workspace`, `WorkspaceMember`, `Invitation`,
+    `InvitationTarget`, `InvitationId`, `SessionGuest`, `ParticipantRole`,
+    `WorkspaceId` y la resolución de permisos por membresía. `Session` queda
+    como sesión local del host: id, nombre, dueño, terminales y un mapa de
+    `AccessLevel` por usuario que **llena el server** (`Joined` /
+    `AccessChanged`). Sin entrada = `None` (falla cerrado: el server decide);
+    el dueño siempre escribe. `AccessLevel` sigue siendo el tipo ordenado
+    (Escribir sin Ver irrepresentable). `ChangeParticipantAccess` (que
+    difundía cambios por `CollabTransport`) se reemplaza por un caso de uso
+    que aplica el nivel recibido del server; `WorkspaceRepository` pasa a
+    ser un repositorio de sesiones. `SessionCollaborators` cuenta dueño +
+    usuarios con Ver.
 - [x] **T8** — Docker (pedido del usuario antes del push): `docker compose`
   levanta Postgres + server + web; el desktop NO va en contenedor (se
   descarga el instalador de la release y corre nativo contra el server del

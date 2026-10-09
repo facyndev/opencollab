@@ -7,9 +7,7 @@ use std::time::Duration;
 use crate::agent_detection::ProcessInfo;
 use crate::git::Branch;
 
-use domain::{
-    AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId,
-};
+use domain::{AgentProfile, Session, SessionId, TerminalId};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -81,19 +79,8 @@ pub trait RelayProbe: Send + Sync {
     fn probe(&self) -> Result<Duration, PortError>;
 }
 
-pub trait WorkspaceRepository: Send + Sync {
-    fn find_workspace(&self, id: WorkspaceId) -> Result<Option<Workspace>, PortError>;
-    fn save_workspace(&self, workspace: Workspace) -> Result<(), PortError>;
+/// Guarda la sesión local del host, incluido el nivel de acceso vigente que mandó el server.
+pub trait SessionRepository: Send + Sync {
     fn find_session(&self, id: SessionId) -> Result<Option<Session>, PortError>;
     fn save_session(&self, session: Session) -> Result<(), PortError>;
-}
-
-/// Salida hacia los demás participantes (vía relay).
-pub trait CollabTransport: Send + Sync {
-    fn access_changed(
-        &self,
-        session: SessionId,
-        user: UserId,
-        access: AccessLevel,
-    ) -> Result<(), PortError>;
 }

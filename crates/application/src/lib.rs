@@ -23,6 +23,6 @@ pub use collab_status::{CheckRelay, RelayStatus, SessionCollaborators};
 pub use error::AppError;
 pub use git::Branch;
 pub use use_cases::{
-    AccessChange, ChangeParticipantAccess, CloseTerminal, DetectTerminalAgents, InspectBranch,
-    LaunchTerminal, ListSubdirectories, ResizeTerminal, SendTerminalInput,
+    ApplyAccessLevel, CloseTerminal, DetectTerminalAgents, InspectBranch, LaunchTerminal,
+    ListSubdirectories, ResizeTerminal, SendTerminalInput,
 };
