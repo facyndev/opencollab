@@ -9,9 +9,13 @@
     "desktop:dev": "pnpm --filter @opencollab/desktop dev:desktop",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "pre-push": "pnpm typecheck && pnpm test && pnpm check:rust",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
     "tsup": "^8.5.1"
   }
 }
