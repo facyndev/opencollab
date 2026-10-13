@@ -9,7 +9,7 @@ import {
   type UserId,
   type Workspace,
 } from '@opencollab/domain';
-import { FORBIDDEN, NOT_JOINED, PROTOCOL_VERSION, UNAUTHORIZED, parseFrame, type Message } from './protocol';
+import { FORBIDDEN, NOT_JOINED, PROTOCOL_VERSION, UNAUTHORIZED, parseFrame, type Message } from '@opencollab/contracts';
 
 /** Nest injection token for the hub's `SessionStore` port. */
 export const SESSION_STORE = Symbol('SESSION_STORE');

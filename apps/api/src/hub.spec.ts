@@ -18,7 +18,7 @@ import {
   NOT_JOINED,
   UNAUTHORIZED,
   type Message,
-} from './protocol';
+} from '@opencollab/contracts';
 
 class FakeConn implements HubConnection {
   readonly sent: string[] = [];

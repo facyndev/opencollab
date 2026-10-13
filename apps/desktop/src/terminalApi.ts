@@ -3,9 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import type { AgentId } from "./agents";
-import type { AgentState } from "./agentState";
-import { parseCollabStatus, type CollabStatus } from "./collabStatus";
+import { parseCollabStatus, type AgentId, type AgentState, type CollabStatus } from "@opencollab/ui";
 
 type OutputPayload = { terminalId: string; data: number[] };
 type ExitPayload = { terminalId: string };

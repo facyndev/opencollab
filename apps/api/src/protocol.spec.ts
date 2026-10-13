@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { INCOMPATIBLE_PROTOCOL_VERSION, INVALID_MESSAGE, UNAUTHORIZED, parseFrame } from './protocol';
+import { INCOMPATIBLE_PROTOCOL_VERSION, INVALID_MESSAGE, UNAUTHORIZED, parseFrame } from '@opencollab/contracts';
 
 /** The raw error a frame would be answered with, or undefined when it is accepted. */
 function replyForTextFrame(text: string): string | undefined {

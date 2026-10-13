@@ -3,17 +3,8 @@
 // memoria de este módulo (y en el núcleo tras `auth_begin_login`), los tokens
 // solo en el núcleo. El núcleo revalida todo antes de canjear.
 
-export interface AuthUser {
-  id: string;
-  username: string;
-  email: string | null;
-  displayName: string;
-}
-
-export type AuthState =
-  | { status: "unknown" }
-  | { status: "anonymous" }
-  | { status: "authenticated"; user: AuthUser };
+export type { AuthState, AuthUser } from "@opencollab/ui";
+export { initialsOf } from "@opencollab/ui";
 
 /** `true` si la URL es un callback de login del desktop (filtro rápido; el núcleo revalida). */
 export function isAuthCallback(url: string): boolean {
@@ -43,11 +34,3 @@ export async function createPkcePair(): Promise<{ verifier: string; challenge: s
   return { verifier, challenge: base64url(new Uint8Array(digest)) };
 }
 
-/** Iniciales para el avatar (hasta 2 letras, del nombre visible o del usuario). */
-export function initialsOf(user: AuthUser): string {
-  const source = user.displayName.trim() || user.username;
-  const parts = source.split(/\s+/);
-  const first = parts[0]?.charAt(0) ?? "?";
-  const second = parts.length > 1 ? (parts[parts.length - 1]?.charAt(0) ?? "") : "";
-  return (first + second).toUpperCase();
-}

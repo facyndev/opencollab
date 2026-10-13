@@ -1,26 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { opencollabLogoTransparent } from "./assets/brand";
-import { Button } from "./components/Button";
-import { Sidebar } from "./components/Sidebar";
-import { Plus } from "./icons";
-import type { AgentId } from "./agents";
-import { StatusBar } from "./components/StatusBar";
-import { TerminalPane } from "./components/TerminalPane";
-import { TopBar } from "./components/TopBar";
 import {
+  Button,
+  Plus,
+  Sidebar,
+  StatusBar,
+  TopBar,
   insertPaneAfter,
+  isMod,
   newPane,
   newSession,
   newWorkspace,
+  opencollabLogoTransparent,
   swapPanes,
+  type AgentId,
   type Layout,
   type PaneMeta,
   type PaneStatus,
   type Session,
   type Workspace,
-} from "./model";
-import { isMod } from "./shortcuts";
+} from "@opencollab/ui";
+import { TerminalPane } from "./components/TerminalPane";
 import { useAuth } from "./useAuth";
 import { useCollabStatus } from "./useCollabStatus";
 import { usePaneDrag } from "./usePaneDrag";

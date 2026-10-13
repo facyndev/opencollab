@@ -17,7 +17,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   MAX_BUFFERED_BYTES,
 } from './connection-policy';
-import { FORBIDDEN, NOT_JOINED, UNAUTHORIZED } from './protocol';
+import { FORBIDDEN, NOT_JOINED, UNAUTHORIZED } from '@opencollab/contracts';
 
 const frame = (message: object): string => JSON.stringify({ version: 1, message });
 

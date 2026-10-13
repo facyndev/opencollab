@@ -3,19 +3,32 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-import { applyActivity, applyFocus, initialActivity, isWatching, type ActivityState } from "../activity";
-import { agentInfo, type AgentId } from "../agents";
-import type { AgentState } from "../agentState";
+import {
+  Close,
+  IconButton,
+  Maximize,
+  Minus,
+  Panel,
+  TerminalIcon,
+  agentInfo,
+  applyActivity,
+  applyFocus,
+  cdCommand,
+  initialActivity,
+  isWatching,
+  localUser,
+  parseOsc7,
+  statusLabel,
+  type ActivityState,
+  type AgentId,
+  type AgentState,
+  type PaneMeta,
+  type PaneStatus,
+} from "@opencollab/ui";
 import { useGitBranch } from "../useGitBranch";
 import { useWindowFocus } from "../useWindowFocus";
-import { cdCommand, parseOsc7 } from "../cwd";
-import { Close, Maximize, Minus } from "../icons";
-import { localUser, statusLabel, type PaneMeta, type PaneStatus } from "../model";
-import { IconButton } from "./Button";
 import { CwdSwitcher } from "./CwdSwitcher";
 import { NewTerminalMenu } from "./NewTerminalMenu";
-import { Panel } from "./Panel";
-import { TerminalIcon } from "./TerminalIcon";
 import {
   attachTerminal,
   closeTerminal,

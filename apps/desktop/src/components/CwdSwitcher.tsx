@@ -2,8 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { VscChevronRight, VscFolder, VscFolderOpened } from "react-icons/vsc";
 
-import { joinPath, parentDirectories } from "../cwd";
-import { Check, ChevronsUpDown, Search } from "../icons";
+import { Check, ChevronsUpDown, Search, joinPath, parentDirectories } from "@opencollab/ui";
 import { listSubdirectories } from "../terminalApi";
 
 type Props = {
