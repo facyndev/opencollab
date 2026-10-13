@@ -420,6 +420,7 @@ kbd {
      debajo calcularía el codo sobre el alto de toda la lista y apuntaría al
      medio en vez de a su terminal. */
   --thread-row: 26px;
+  --thread-sub-row: 22px;
   --thread-gap: 6px;
   list-style: none;
   margin: 0 0 6px;
@@ -452,7 +453,7 @@ kbd {
 }
 
 /* Continuación vertical hacia la siguiente rama. */
-.thread li:not(:last-child)::after {
+.thread > li:not(:last-child)::after {
   content: "";
   position: absolute;
   left: var(--thread-x);
@@ -463,27 +464,52 @@ kbd {
   border-left: var(--thread-line);
 }
 
-/* El primer tramo no tiene nada arriba con qué superponerse. */
-.thread li:first-child::before {
+/* Si la última terminal tiene una rama de git o sub-hilo, la línea vertical
+   debe continuar hasta el codo de la rama hija sin sobrepasar la fila. */
+.thread > li:last-child:has(.thread--sub)::after {
+  content: "";
+  position: absolute;
+  left: var(--thread-x);
+  top: calc(min(50%, var(--thread-row)) - 8px);
+  bottom: calc(var(--thread-sub-row) / 2);
+  border-left: var(--thread-line);
+}
+
+/* El primer tramo de la sesión no tiene nada arriba con qué superponerse. */
+.thread:not(.thread--sub) > li:first-child::before {
   top: 0;
   height: min(50%, var(--thread-row));
   border-top-left-radius: 2px;
 }
 
 /* Nivel interno del hilo: la rama de git que cuelga de la terminal de arriba.
-   Hereda el codo de `.thread`, con menos sangría, una fila más baja y un cuerpo
-   chico para que se lea como hijo y no como otra terminal. */
+   Alinea su codo horizontalmente con el tallo de la terminal padre (cancela
+   el padding heredado del li contenedor) y mantiene el cuerpo y fila más chicos
+   para leerse como detalle hijo sin desbordar el ancho del panel. */
 .thread--sub {
-  --thread-x: 8px;
-  --thread-row: 22px;
+  --thread-x: 12px;
+  --thread-row: var(--thread-sub-row, 22px);
   --thread-gap: 0px;
   margin: 0;
+  margin-left: calc(-1 * (var(--thread-x) + 16px));
+}
+
+.thread--sub li {
+  padding-left: calc(var(--thread-x) + 16px);
 }
 
 .thread--sub .thread-item {
   gap: 6px;
   font-size: 11px;
   color: var(--text-faint);
+}
+
+.thread-branch {
+  width: 100%;
+}
+
+.thread-branch svg {
+  flex: none;
 }
 
 .thread-item {
