@@ -21,6 +21,7 @@ Branch: feature/monorepo-apps | Delivery: PR a develop | Test runner: vitest + c
 - [x] T6 (S6) — Prisma ubicado en `apps/api`: cliente generado y scripts aislados. [route: direct inline, commit: 7a5da79]
 - [x] T7 (S7) — CI/CD, Dockerfiles y scripts de release actualizados. [route: direct inline, commit: fdaaedb]
 - [x] T8 (S8) — Verificación integral (builds, unit tests, integración, E2E, Docker). [route: direct inline]
+- [x] T9 (S7) — Optimizar CI/CD y Docker: runner Ubuntu para web, eliminación de db:generate redundante, desvinculación de @opencollab/ui en web y compilación transitiva (^...). [route: direct inline, commit: 2cf2576]
 
 ## Log
 - L1: 2026-10-13 "sigamos con monorepo-apps" — Retoma de la reestructuración a apps/* y packages/* con domain como autoridad.
@@ -35,3 +36,4 @@ Branch: feature/monorepo-apps | Delivery: PR a develop | Test runner: vitest + c
   - desktop test:e2e: OK (todos los escenarios E2E pasando).
   - Scripts de versionado (check-version.ps1): OK para desktop (0.3.0), server (0.1.0), web (0.1.0).
 - L3: 2026-10-13 Limpieza de código muerto en apps/api (domain/index.ts, persistence/index.ts, protocol.ts) y conexión de apps/desktop a @opencollab/ui eliminando 24 archivos duplicados locales (-1,745 líneas netas). Tests unitarios (383/383) y E2E de desktop al 100% (commit 6ea1164).
+- L4: 2026-10-13 Optimización de CI/CD y Docker: runner web a ubuntu-latest, prisma db:generate redundante eliminado, desvinculación de @opencollab/ui en web y compilación transitiva (^...) en ci.yml y release.yml. Toda la suite de tests en verde (383/383 Vitest).

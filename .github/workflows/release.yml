@@ -59,7 +59,7 @@ jobs:
         run: pnpm install --frozen-lockfile --filter @opencollab/desktop...
 
       - name: Build dependencias de workspace
-        run: pnpm --filter @opencollab/ui build
+        run: pnpm --filter @opencollab/desktop^... build
 
       - name: Build de Tauri (NSIS + MSI)
         run: pnpm --filter @opencollab/desktop tauri build

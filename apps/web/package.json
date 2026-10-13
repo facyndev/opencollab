@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@fontsource-variable/google-sans": "^5.3.1",
-    "@opencollab/ui": "workspace:*",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

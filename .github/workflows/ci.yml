@@ -38,7 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @opencollab/desktop...
 
       - name: Build dependencias de workspace
-        run: pnpm --filter @opencollab/ui build
+        run: pnpm --filter @opencollab/desktop^... build
 
       - name: Tests unitarios (Vitest)
         run: pnpm --filter @opencollab/desktop test
@@ -93,10 +93,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @opencollab/server...
 
       - name: Build dependencias de workspace
-        run: pnpm --filter @opencollab/domain build && pnpm --filter @opencollab/contracts build
-
-      - name: Prisma client
-        run: pnpm --filter @opencollab/server db:generate
+        run: pnpm --filter @opencollab/server^... build
 
       - name: Migraciones
         run: pnpm --filter @opencollab/server db:deploy
@@ -115,7 +112,7 @@ jobs:
 
   web:
     name: Web · unit + build
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -130,9 +127,6 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile --filter @opencollab/web...
-
-      - name: Build dependencias de workspace
-        run: pnpm --filter @opencollab/ui build
 
       - name: Tests unitarios (Vitest)
         run: pnpm --filter @opencollab/web test
