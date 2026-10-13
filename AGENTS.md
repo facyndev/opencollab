@@ -50,8 +50,8 @@ Los agentes son **agnósticos**: el sistema no debe tener lógica específica de
 - **Desktop:** Tauri 2, backend en Rust (PTYs con `portable-pty`).
 - **Frontend:** React + TypeScript, terminales con `xterm.js`.
 - **Colaboración:** servidor relay en NestJS sobre WebSockets (autenticación, sesiones compartidas, invitaciones y retransmisión de streams de PTY).
-- **Web:** Vite + React + TypeScript (`packages/web`), puerta de autenticación del navegador; mismo toolchain que el desktop.
-- **Monorepo:** un único workspace pnpm en la raíz (`package.json` privado + `pnpm-workspace.yaml` con `packages/*` + un solo `pnpm-lock.yaml`) para los paquetes JS (`@opencollab/desktop`, `@opencollab/server`, `@opencollab/web`) y un Cargo workspace para el core Rust (`crates/` + `packages/desktop/src-tauri`); desktop y server comparten el wire como contrato versionado, no como código.
+- **Web:** Vite + React + TypeScript (`apps/web`), puerta de autenticación del navegador; mismo toolchain que el desktop.
+- **Monorepo:** un único workspace pnpm en la raíz (`package.json` privado + `pnpm-workspace.yaml` con `apps/*` y `packages/*` + un solo `pnpm-lock.yaml`) para las aplicaciones (`@opencollab/desktop`, `@opencollab/server`, `@opencollab/web`) y los paquetes compartidos (`@opencollab/domain`, `@opencollab/contracts`, `@opencollab/ui`, `@opencollab/config`), junto a un Cargo workspace para el core Rust (`apps/desktop/core/*` + `apps/desktop/src-tauri`); desktop y server comparten el wire contract en `@opencollab/contracts` y el dominio en `@opencollab/domain`.
 
 ## Arquitectura (Clean Architecture)
 
@@ -60,17 +60,22 @@ Regla de dependencias: las dependencias apuntan siempre hacia adentro. `domain` 
 Estructura:
 
 ```
-crates/
-  domain/          # Entidades y reglas puras del desktop: Session (local, con el AccessLevel por usuario que manda el server), Terminal, AgentProfile. Sin I/O, sin Tauri, sin tokio.
-  application/     # Casos de uso + puertos (traits): PtyPort, SessionRepository, etc.
-  protocol/        # Mensajes del wire (serde) compartidos entre desktop y relay. Versionados.
-  infrastructure/  # Adaptadores concretos: portable-pty, persistencia, cliente WebSocket.
-packages/
+apps/
   desktop/
-    src-tauri/     # Composition root de la app: wiring de dependencias + comandos/eventos Tauri (adaptadores de entrada delgados).
-    src/           # Frontend React: grilla de terminales, xterm.js, UI de workspaces.
-  server/          # Servidor NestJS: auth, sesiones compartidas, invitaciones y fan-out WebSocket (paridad de wire con protocol/).
-  web/             # Web React: login, registro, cuenta y entrega de sesión al desktop. Habla solo con /auth del server (mismo origen).
+    core/
+      domain/          # Entidades y reglas puras del desktop: Session (local, con el AccessLevel por usuario que manda el server), Terminal, AgentProfile. Sin I/O, sin Tauri, sin tokio.
+      application/     # Casos de uso + puertos (traits): PtyPort, SessionRepository, etc.
+      protocol/        # Mensajes del wire (serde) compartidos entre desktop y relay. Versionados.
+      infrastructure/  # Adaptadores concretos: portable-pty, persistencia, cliente WebSocket.
+    src-tauri/         # Composition root de la app: wiring de dependencias + comandos/eventos Tauri (adaptadores de entrada delgados).
+    src/               # Frontend React: grilla de terminales, xterm.js, UI de workspaces.
+  api/                 # Servidor NestJS (relay): auth, sesiones compartidas, invitaciones, Prisma y fan-out WebSocket.
+  web/                 # Web React: login, registro, cuenta y entrega de sesión al desktop. Habla solo con /auth del server.
+packages/
+  domain/              # Autoridad compartida de reglas colaborativas puras en TypeScript.
+  contracts/           # Wire contract en TypeScript (Zod schemas, paridad con core/protocol).
+  ui/                  # Componentes y helpers visuales compartidos.
+  config/              # Configuraciones base de TypeScript y herramientas.
 ```
 
 Principios clave:
@@ -109,9 +114,9 @@ Remoto: `origin` → https://github.com/facyndev/opencollab (licencia MIT).
 
 | Paquete | Dónde vive la versión | Tag | Qué dispara el tag |
 |---|---|---|---|
-| **desktop** (app Tauri) | Tres fuentes que tienen que coincidir: `Cargo.toml` raíz (`[workspace.package] version`, los crates la heredan con `version.workspace = true`), `packages/desktop/package.json` y `packages/desktop/src-tauri/tauri.conf.json` (la que muestra el instalador) | `desktop-vX.Y.Z` | `release.yml`: CI completo, build de Tauri y release de GitHub |
-| **server** (relay NestJS) | `packages/server/package.json` | `server-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
-| **web** | `packages/web/package.json` | `web-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
+| **desktop** (app Tauri) | Tres fuentes que tienen que coincidir: `Cargo.toml` raíz (`[workspace.package] version`, los crates la heredan con `version.workspace = true`), `apps/desktop/package.json` y `apps/desktop/src-tauri/tauri.conf.json` (la que muestra el instalador) | `desktop-vX.Y.Z` | `release.yml`: CI completo, build de Tauri y release de GitHub |
+| **server** (relay NestJS) | `apps/api/package.json` | `server-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
+| **web** | `apps/web/package.json` | `web-vX.Y.Z` | Nada por ahora (sin release de GitHub) |
 
 Solo el desktop genera releases de GitHub: `release.yml` escucha `desktop-v*.*.*` y los tags `server-v*` / `web-v*` no lo disparan. Los tags `v0.1.0` a `v0.3.0` son históricos (anteriores al prefijo): se conservan y ya no disparan nada.
 
@@ -119,7 +124,7 @@ La versión de un paquete se sube **solo** en la rama `release/*` o `hotfix/*` d
 
 `pwsh scripts/check-version.ps1 -Package desktop|server|web` verifica las fuentes del paquete (por defecto `desktop`) y, con `-Tag <tag>`, que el tag tenga el formato de la tabla y sea esa versión. El CI chequea desktop siempre; server y web, solo si existe su `package.json`. Invocado a mano con un paquete inexistente, el script falla con un mensaje claro.
 
-El **protocolo de red** tiene su propia versión, independiente de las tres: `PROTOCOL_VERSION` en `crates/protocol/src/lib.rs`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
+El **protocolo de red** tiene su propia versión, independiente de las tres: `PROTOCOL_VERSION` en `apps/desktop/core/protocol/src/lib.rs` y `@opencollab/contracts`. Se incrementa solo cuando cambia el formato de los mensajes de forma incompatible (desktop y relay rechazan mensajes de otra versión).
 
 ## CI/CD (GitHub Actions)
 
@@ -127,7 +132,7 @@ El **protocolo de red** tiene su propia versión, independiente de las tres: `PR
 - **`.github/workflows/release.yml`**: al pushear un tag `desktop-vX.Y.Z` (sobre `main`; `server-v*` y `web-v*` no lo disparan). Verifica tag = versión del desktop (`check-version.ps1 -Package desktop`), corre **todo el CI** (si falla no se construye nada), hace `pnpm tauri build` y `scripts/package-release.ps1`, y publica la release de GitHub. Tags con sufijo (`desktop-v1.0.0-beta.1`) salen como pre-release.
 - **Releases: solo Windows** por ahora. Convención de nombre de todo build: **`opencollab-<os>-<versión>.<extensión>`** → `opencollab-windows-0.2.0.exe` (NSIS) y `opencollab-windows-0.2.0.msi`. Junto a cada uno va `<archivo>.sha256` y un `SHA256SUMS.txt` con todos (formato de `sha256sum`, finales LF: con CRLF `sha256sum -c` falla). La tabla de descargas con los hashes queda en el cuerpo de la release.
 - Para publicar una versión del **desktop**: `release/X.Y.Z` desde `develop` → subir la versión en las tres fuentes → merge a `main` → `git tag desktop-vX.Y.Z` → `git push origin desktop-vX.Y.Z` → merge de vuelta a `develop`.
-- Para versionar el **server** (o la **web**, igual con `web-`): `release/server-X.Y.Z` desde `develop` → subir la versión en `packages/server/package.json` → merge a `main` → `git tag server-vX.Y.Z` → `git push origin server-vX.Y.Z` → merge de vuelta a `develop`. No genera release de GitHub.
+- Para versionar el **server** (o la **web**, igual con `web-`): `release/server-X.Y.Z` desde `develop` → subir la versión en `apps/api/package.json` → merge a `main` → `git tag server-vX.Y.Z` → `git push origin server-vX.Y.Z` → merge de vuelta a `develop`. No genera release de GitHub.
 
 ## Comandos
 
@@ -139,10 +144,10 @@ Rust (desde la raíz del repo):
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo fmt --all` (en CI: `cargo fmt --all --check`)
 
-JS (todo desde la raíz del repo; un solo `pnpm install` instala desktop, server y web; `pnpm test`, `pnpm build` y `pnpm typecheck` corren en todos los paquetes con `pnpm -r`). Desktop (los comandos de Tauri se corren desde `packages/desktop`):
+JS (todo desde la raíz del repo; un solo `pnpm install` instala desktop, server y web; `pnpm test`, `pnpm build` y `pnpm typecheck` corren en todos los paquetes con `pnpm -r`). Desktop (los comandos de Tauri se corren desde `apps/desktop`):
 
 - `pnpm install` (raíz)
-- `cargo tauri dev` (desde `packages/desktop`): levanta Vite en `localhost:1420` y abre la ventana.
+- `cargo tauri dev` (desde `apps/desktop`): levanta Vite en `localhost:1420` y abre la ventana.
 - `pnpm --filter @opencollab/desktop build`: typecheck (`tsc --noEmit`) + build de Vite.
 - `pnpm --filter @opencollab/desktop test`: tests unitarios del frontend (Vitest, archivos `src/**/*.test.ts`). Uno puntual: `pnpm --filter @opencollab/desktop test -- -t "parseOsc7"`.
 - `pnpm --filter @opencollab/desktop test:e2e`: E2E de la interfaz sobre el build de producción (correr el build antes). Levanta `vite preview` en el puerto 4173, abre Chrome headless (el del sistema, o `CHROME_PATH`) e inyecta un **núcleo de Tauri simulado** (`e2e/tauri-mock.js`) que responde los mismos comandos y eventos que el real. Escenarios en `e2e/scenarios/`; para sumar uno, registrarlo en `e2e/run.mjs`. Si cambia un comando o evento del núcleo, actualizar también el mock.

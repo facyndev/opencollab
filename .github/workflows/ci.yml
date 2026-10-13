@@ -37,6 +37,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --filter @opencollab/desktop...
 
+      - name: Build dependencias de workspace
+        run: pnpm --filter @opencollab/ui build
+
       - name: Tests unitarios (Vitest)
         run: pnpm --filter @opencollab/desktop test
 
@@ -50,7 +53,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
-          path: packages/desktop/dist
+          path: apps/desktop/dist
           retention-days: 1
 
   server:
@@ -89,6 +92,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --filter @opencollab/server...
 
+      - name: Build dependencias de workspace
+        run: pnpm --filter @opencollab/domain build && pnpm --filter @opencollab/contracts build
+
       - name: Prisma client
         run: pnpm --filter @opencollab/server db:generate
 
@@ -125,6 +131,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --filter @opencollab/web...
 
+      - name: Build dependencias de workspace
+        run: pnpm --filter @opencollab/ui build
+
       - name: Tests unitarios (Vitest)
         run: pnpm --filter @opencollab/web test
 
@@ -143,7 +152,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
-          path: packages/desktop/dist
+          path: apps/desktop/dist
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -170,12 +179,5 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/check-version.ps1 -Package desktop
-          # server y web se verifican desde que existen en el repo. El script corta
-          # con un error terminante si algo no coincide, y eso falla el paso.
-          foreach ($package in 'server', 'web') {
-            if (Test-Path "packages/$package/package.json") {
-              ./scripts/check-version.ps1 -Package $package
-            } else {
-              Write-Host "Versión ($package): se saltea, no existe packages/$package/package.json."
-            }
-          }
+          ./scripts/check-version.ps1 -Package server
+          ./scripts/check-version.ps1 -Package web

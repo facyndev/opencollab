@@ -1,6 +1,6 @@
 {
-  // Shared base: exactly what packages/desktop, packages/server and
-  // packages/web tsconfig.json already agree on (verified 2026-10-13).
+  // Shared base: exactly what apps/desktop, apps/api and
+  // apps/web tsconfig.json already agree on (verified 2026-10-13).
   // App-specific options (module, jsx, decorators, outDir, types, ...)
   // stay in each package's own tsconfig; wiring `extends` comes later.
   "compilerOptions": {

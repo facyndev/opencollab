@@ -7,12 +7,10 @@
 odd
 target
 release
-crates
 **/node_modules
 **/dist
 **/.env
 .env
-**/src-tauri
-packages/desktop
+apps/desktop
 **/*.log
-packages/server/src/generated
+apps/api/src/generated

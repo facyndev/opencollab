@@ -58,6 +58,9 @@ jobs:
       - name: Instalar dependencias del frontend
         run: pnpm install --frozen-lockfile --filter @opencollab/desktop...
 
+      - name: Build dependencias de workspace
+        run: pnpm --filter @opencollab/ui build
+
       - name: Build de Tauri (NSIS + MSI)
         run: pnpm --filter @opencollab/desktop tauri build
 
