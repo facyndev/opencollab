@@ -13,7 +13,7 @@ Branch: feature/monorepo-apps | Delivery: PR a develop | Test runner: vitest + c
 - S8: Verificación integral de la suite completa: `pnpm -r build`, `pnpm -r typecheck`, `pnpm -r test`, `cargo test --workspace`, `cargo clippy`, `cargo fmt --check`, E2E desktop y tests de integración.
 
 ## Tasks
-- [ ] T1 (S1) — `packages/domain`: consolidar `packages/domain` (@opencollab/domain) con TS puro; server re-exporta; tests de dominio pasan. [route: direct inline]
+- [x] T1 (S1) — `packages/domain`: consolidar `packages/domain` (@opencollab/domain) con TS puro; server re-exporta; tests de dominio pasan. [route: direct inline, commit: 83d9cde]
 - [ ] T2 (S2) — `packages/contracts`: wire contract Zod único y paridad de bytes con Rust verificado; server y apps consumen contracts. [route: direct inline]
 - [ ] T3 (S3) — Mudanza estructural a `apps/*` y `apps/desktop/core/*`: Cargo.toml, pnpm-workspace.yaml, turbo.json. [route: direct inline]
 - [ ] T4 (S4) — `packages/ui`: extracción de componentes presentacionales compartidos. [route: direct inline]
