@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 
-import type { UserId } from '../domain';
+import type { UserId } from '@opencollab/domain';
 import { AuthRepository, isUniqueViolation } from '../persistence/auth.repository';
 import { UserRepository, type UserRecord } from '../persistence/user.repository';
 import { PasswordService } from './password.service';

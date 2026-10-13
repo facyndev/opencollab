@@ -1,7 +1,3 @@
-export * from './error';
-export * from './ids';
-export * from './invitation';
-export * from './permission';
-export * from './session';
-export * from './terminal';
-export * from './workspace';
+// Re-export pure collaborative domain from @opencollab/domain.
+// The domain package is the single authority for collaborative rules.
+export * from '@opencollab/domain';

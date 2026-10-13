@@ -9,7 +9,7 @@ import {
   type SessionId,
   type TerminalId,
   type UserId,
-} from './domain';
+} from '@opencollab/domain';
 import { SessionHub, UNAVAILABLE, type HubConnection, type SessionStore } from './hub';
 import {
   FORBIDDEN,

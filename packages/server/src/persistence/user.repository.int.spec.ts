@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { newUserId } from '../domain';
+import { newUserId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import { openTestClient, truncateAll } from './test-db';
 import { UserRepository } from './user.repository';

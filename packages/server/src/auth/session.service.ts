@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import jwt from 'jsonwebtoken';
 
-import type { UserId } from '../domain';
+import type { UserId } from '@opencollab/domain';
 import { AuthRepository, type NewRefreshToken } from '../persistence/auth.repository';
 import { CLOCK, type Clock } from './clock';
 import { AUTH_CONFIG, type AuthConfig } from './config';

@@ -6,7 +6,7 @@ import {
   type TerminalId,
   type UserId,
   type WorkspaceId,
-} from '../domain';
+} from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import type { AccessLevel as DbAccessLevel } from '../generated/prisma/enums';
 import { accessFromDb, accessToDb } from './mappers';

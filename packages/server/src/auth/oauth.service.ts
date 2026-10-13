@@ -10,7 +10,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import type { UserId } from '../domain';
+import type { UserId } from '@opencollab/domain';
 import { AuthRepository, isUniqueViolation } from '../persistence/auth.repository';
 import { UserRepository, type UserRecord } from '../persistence/user.repository';
 import { AuthService, toUserView, type AuthResult } from './auth.service';

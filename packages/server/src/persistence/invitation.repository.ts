@@ -5,7 +5,7 @@ import type {
   SessionId,
   UserId,
   WorkspaceId,
-} from '../domain';
+} from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import type { InvitationKind, InvitationStatus as DbStatus } from '../generated/prisma/enums';
 

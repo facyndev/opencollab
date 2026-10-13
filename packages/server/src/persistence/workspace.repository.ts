@@ -1,4 +1,4 @@
-import { Workspace, type UserId, type WorkspaceId } from '../domain';
+import { Workspace, type UserId, type WorkspaceId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 
 // Aggregate-level port: the whole Workspace (with its members) in and out.

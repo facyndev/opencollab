@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { Session, Workspace, newAgentProfile, newWorkspaceId } from '../domain';
+import { Session, Workspace, newAgentProfile, newWorkspaceId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import { SessionRepository } from './session.repository';
 import { openTestClient, truncateAll } from './test-db';

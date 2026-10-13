@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { Session, Workspace, newInvitationId } from '../domain';
+import { Session, Workspace, newInvitationId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import { InvitationRepository } from './invitation.repository';
 import { SessionRepository } from './session.repository';

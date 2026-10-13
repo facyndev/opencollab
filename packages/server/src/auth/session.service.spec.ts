@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { describe, expect, it } from 'vitest';
 
-import { newUserId } from '../domain';
+import { newUserId } from '@opencollab/domain';
 import type { AuthRepository, RefreshRow } from '../persistence/auth.repository';
 import type { Clock } from './clock';
 import type { AuthConfig } from './config';

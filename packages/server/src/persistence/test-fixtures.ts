@@ -1,4 +1,4 @@
-import type { UserId } from '../domain';
+import type { UserId } from '@opencollab/domain';
 import type { UserRepository } from './user.repository';
 
 let counter = 0;

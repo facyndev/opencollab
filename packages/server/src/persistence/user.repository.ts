@@ -1,4 +1,4 @@
-import { newUserId, type UserId } from '../domain';
+import { newUserId, type UserId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 
 export interface UserRecord {

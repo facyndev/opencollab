@@ -8,7 +8,7 @@ import {
   type TerminalId,
   type UserId,
   type Workspace,
-} from './domain';
+} from '@opencollab/domain';
 import { FORBIDDEN, NOT_JOINED, PROTOCOL_VERSION, UNAUTHORIZED, parseFrame, type Message } from './protocol';
 
 /** Nest injection token for the hub's `SessionStore` port. */

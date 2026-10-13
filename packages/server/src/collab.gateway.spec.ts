@@ -9,7 +9,7 @@ import WebSocket from 'ws';
 import { SessionRevocations } from './auth/session-revocations';
 import { SessionService } from './auth/session.service';
 import { CollabGateway } from './collab.gateway';
-import { Session, Workspace, newAgentProfile, newUserId, type SessionId, type UserId } from './domain';
+import { Session, Workspace, newAgentProfile, newUserId, type SessionId, type UserId } from '@opencollab/domain';
 import { SESSION_STORE, SessionHub, type SessionStore } from './hub';
 import { ConnectionDeadline, TOKEN_GRACE_MS } from './connection-deadline';
 import {

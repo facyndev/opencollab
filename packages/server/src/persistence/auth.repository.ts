@@ -1,4 +1,4 @@
-import type { UserId } from '../domain';
+import type { UserId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import type { OAuthProvider } from '../generated/prisma/enums';
 import { newUserData, toUserRecord, type NewUser, type UserRecord } from './user.repository';

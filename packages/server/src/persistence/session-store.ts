@@ -1,4 +1,4 @@
-import type { Session, SessionId } from '../domain';
+import type { Session, SessionId } from '@opencollab/domain';
 import type { SessionState, SessionStore } from '../hub';
 import type { SessionRepository } from './session.repository';
 import type { WorkspaceRepository } from './workspace.repository';

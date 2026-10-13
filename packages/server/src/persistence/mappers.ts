@@ -1,4 +1,4 @@
-import type { AccessLevel } from '../domain';
+import type { AccessLevel } from '@opencollab/domain';
 import type { AccessLevel as DbAccessLevel } from '../generated/prisma/enums';
 
 const TO_DB: Record<AccessLevel, DbAccessLevel> = { none: 'NONE', view: 'VIEW', write: 'WRITE' };
