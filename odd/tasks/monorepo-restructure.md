@@ -34,3 +34,4 @@ Branch: feature/monorepo-apps | Delivery: PR a develop | Test runner: vitest + c
   - shell_integration_e2e: OK (2/2 tests de PTY y shell real).
   - desktop test:e2e: OK (todos los escenarios E2E pasando).
   - Scripts de versionado (check-version.ps1): OK para desktop (0.3.0), server (0.1.0), web (0.1.0).
+- L3: 2026-10-13 Limpieza de código muerto en apps/api (domain/index.ts, persistence/index.ts, protocol.ts) y conexión de apps/desktop a @opencollab/ui eliminando 24 archivos duplicados locales (-1,745 líneas netas). Tests unitarios (383/383) y E2E de desktop al 100% (commit 6ea1164).
