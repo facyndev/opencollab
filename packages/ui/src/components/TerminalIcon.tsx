@@ -33,7 +33,14 @@ export function TerminalIcon({ agent, shellName, size = 18 }: Props) {
           className="terminal-icon terminal-icon--logo"
           role="img"
           aria-label={info.name}
-          style={{ ...box, "--logo": `url("${info.logo}")` } as React.CSSProperties}
+          style={
+            {
+              ...box,
+              "--logo": `url("${info.logo}")`,
+              WebkitMask: `url("${info.logo}") center / contain no-repeat`,
+              mask: `url("${info.logo}") center / contain no-repeat`,
+            } as React.CSSProperties
+          }
         />
       );
     }
