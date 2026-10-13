@@ -1,0 +1,149 @@
+/* Línea secundaria bajo cada terminal del hilo del sidebar. */
+.thread-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.thread-meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* Estado del agente junto al título: "Claude Code · Working". El nombre se
+   recorta antes que el estado. */
+.thread-heading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.thread-heading .thread-label {
+  flex: 0 1 auto;
+}
+
+.thread-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 100 auto;
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+.thread-state-sep {
+  white-space: pre;
+}
+
+.thread-state-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-state svg {
+  flex: none;
+}
+
+.thread-state--working {
+  color: var(--text-muted);
+}
+
+.thread-state--working svg {
+  color: var(--accent-soft);
+  animation: thread-meta-pulse 1.4s ease-in-out infinite;
+}
+
+/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
+.thread-state--attention,
+.thread-state--approval {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.thread-state--error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* Herramienta en curso (`Bash: echo hi`) o detalle del error: una línea, recortada. */
+.thread-meta-tool {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+
+@keyframes thread-meta-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-state--working svg {
+    animation: none;
+  }
+}
+
+/* Cuando solo muestra el tiempo (sin herramienta activa), no ocupa espacio en el flujo. */
+.thread-meta--uptime-only {
+  padding: 0;
+  margin: 0;
+  height: 0;
+  line-height: 0;
+}
+
+/* Tiempo transcurrido: en la esquina superior derecha de cada terminal del sidebar,
+   con posición absoluta y con el color del contenedor (var(--surface-2)). */
+.thread-meta-uptime {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+/* El badge absoluto no lleva separador con viñeta. */
+.thread-meta-part + .thread-meta-uptime::before {
+  content: none;
+  margin: 0;
+}
+
+/* Al enfocar o pasar el cursor sobre la terminal, destacar el badge sutilmente. */
+.thread-item:hover ~ .thread-meta .thread-meta-uptime,
+.thread-item--focused ~ .thread-meta .thread-meta-uptime {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Separador entre partes de la línea secundaria: "Bash: echo hi · ...". */
+.thread-meta-part + .thread-meta-part:not(.thread-meta-uptime)::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--text-faint);
+}
+
