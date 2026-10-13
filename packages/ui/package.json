@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Componentes visuales compartidos de OpenCollab (sin negocio, sin dependencias de Tauri ni xterm).",
   "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "files": [
     "dist"
@@ -10,12 +11,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsup && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -32,6 +34,7 @@
     "@types/react-dom": "^19.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "tsup": "^8.5.1",
     "typescript": "~5.9.0",
     "vite": "^8.3.2",
     "vitest": "^5.0.0"

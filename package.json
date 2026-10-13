@@ -8,5 +8,8 @@
     "test": "pnpm -r test",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
   }
 }

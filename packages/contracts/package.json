@@ -3,17 +3,21 @@
   "version": "0.1.0",
   "description": "Wire contract de OpenCollab (única fuente del protocolo Envelope/Message): schemas zod + tipos inferidos + PROTOCOL_VERSION + errores.",
   "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -22,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
     "typescript": "~5.9.0",
     "vitest": "^5.0.0"
   }
