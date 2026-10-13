@@ -5,7 +5,7 @@ import { VscTerminal } from "react-icons/vsc";
 import { agentInfo } from "../agents";
 import { opencollabLogoRounded } from "../brand";
 import { initialsOf, type AuthState } from "../authTypes";
-import { Check, ChevronDown, ChevronsUpDown, Plus, Search, SignOut } from "../icons";
+import { Check, ChevronDown, Plus, Search, SignOut } from "../icons";
 import {
   sessionSummary,
   type PaneMeta,
@@ -302,7 +302,6 @@ function AuthCard(props: {
           Browser didn&apos;t open? Open manually
         </a>
       ) : undefined}
-      <ChevronsUpDown />
     </div>
   );
 }
