@@ -46,6 +46,7 @@ packages/
 - **Transitive builds:** build internal dependencies automatically with `pnpm --filter <app>^... build`.
 - **Task runner:** Turborepo handles task orchestration (`turbo.json`).
 - **Prisma:** schema located at `apps/api/prisma/schema.prisma`. Running `pnpm install` automatically triggers `postinstall: prisma generate`.
+- **Desktop development:** run `pnpm desktop:dev` from the root (uses `tauri.dev.conf.json` with identifier `dev.opencollab.app.dev` to run alongside production instances without WebView2 lock contention).
 
 ### Verification commands
 
