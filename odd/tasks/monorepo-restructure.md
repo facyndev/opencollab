@@ -17,7 +17,7 @@ Branch: feature/monorepo-apps | Delivery: PR a develop | Test runner: vitest + c
 - [x] T2 (S2) — `packages/contracts`: wire contract Zod único y paridad de bytes con Rust verificado; server y apps consumen contracts. [route: direct inline, commit: da245c4]
 - [x] T3 (S3) — Mudanza estructural a `apps/*` y `apps/desktop/core/*`: Cargo.toml, pnpm-workspace.yaml, turbo.json. [route: direct inline, commit: 7a5da79]
 - [x] T4 (S4) — `packages/ui`: extracción de componentes presentacionales compartidos. [route: direct inline, commit: 51d27d1]
-- [ ] T5 (S5) — Builds con tsup en packages y empaquetado CJS/ESM. [route: direct inline]
+- [x] T5 (S5) — Builds con tsup en packages y empaquetado CJS/ESM. [route: direct inline, commit: 87467f1]
 - [ ] T6 (S6) — Prisma ubicado en `apps/api`. [route: direct inline]
 - [ ] T7 (S7) — CI/CD, Dockerfiles y scripts de release actualizados. [route: direct inline]
 - [ ] T8 (S8) — Verificación integral (builds, unit tests, integración, E2E, Docker). [route: direct inline]
