@@ -89,10 +89,7 @@ pub struct AuthStore {
 
 impl AuthStore {
     pub fn new(api_addr: String) -> Self {
-        let web_origin = std::env::var("OPENCOLLAB_WEB_ORIGIN")
-            .ok()
-            .filter(|origin| is_http_origin(origin))
-            .unwrap_or_else(|| DEFAULT_WEB_ORIGIN.to_string());
+        let web_origin = resolve_web_origin(|k| std::env::var(k));
         Self {
             api_addr,
             web_origin,
@@ -110,6 +107,21 @@ impl AuthStore {
             self.web_origin
         )
     }
+}
+
+/// Resuelve el origen de la web para el login:
+/// 1. `OPENCOLLAB_WEB_ORIGIN` (override específico para el desktop).
+/// 2. `WEB_ORIGIN` (variable general del monorepo / .env).
+/// 3. `DEFAULT_WEB_ORIGIN` ("http://localhost:1421").
+pub fn resolve_web_origin<F>(var_getter: F) -> String
+where
+    F: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    var_getter("OPENCOLLAB_WEB_ORIGIN")
+        .or_else(|_| var_getter("WEB_ORIGIN"))
+        .ok()
+        .filter(|origin| is_http_origin(origin))
+        .unwrap_or_else(|| DEFAULT_WEB_ORIGIN.to_string())
 }
 
 /// Solo un origen `http(s)` sin ruta, para no redirigir al navegador a otro lado.
@@ -516,5 +528,34 @@ mod tests {
         assert!(is_valid_verifier(&"a".repeat(128)));
         assert!(!is_valid_verifier(&"a".repeat(129)));
         assert!(!is_valid_verifier("corto"));
+    }
+
+    #[test]
+    fn resolve_web_origin_prefers_opencollab_origin_then_web_origin_then_default() {
+        // 1. OPENCOLLAB_WEB_ORIGIN tiene prioridad si ambas están
+        let origin = resolve_web_origin(|key| match key {
+            "OPENCOLLAB_WEB_ORIGIN" => Ok("http://localhost:9999".to_string()),
+            "WEB_ORIGIN" => Ok("http://localhost:8080".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(origin, "http://localhost:9999");
+
+        // 2. WEB_ORIGIN se usa si OPENCOLLAB_WEB_ORIGIN no está
+        let origin = resolve_web_origin(|key| match key {
+            "WEB_ORIGIN" => Ok("http://localhost:8080".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(origin, "http://localhost:8080");
+
+        // 3. DEFAULT_WEB_ORIGIN si ninguna está
+        let origin = resolve_web_origin(|_| Err(std::env::VarError::NotPresent));
+        assert_eq!(origin, "http://localhost:1421");
+
+        // 4. Si el origen es inválido (ej. con path), cae al default
+        let origin = resolve_web_origin(|key| match key {
+            "WEB_ORIGIN" => Ok("http://localhost:8080/invalid/path".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        });
+        assert_eq!(origin, "http://localhost:1421");
     }
 }

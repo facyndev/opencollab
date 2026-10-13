@@ -56,6 +56,7 @@ fn agent_adapters() -> Vec<Arc<dyn AgentAdapter>> {
 
 impl AppState {
     pub fn bootstrap() -> Result<Self, AppError> {
+        crate::env::load_dot_env();
         let repo: Arc<dyn SessionRepository> = Arc::new(InMemorySessionRepository::new());
         let pty: Arc<dyn PtyPort> = Arc::new(PortablePtyAdapter::new());
         let inspector: Arc<dyn ProcessInspector> = Arc::new(SysinfoProcessInspector::new());

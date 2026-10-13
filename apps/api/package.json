@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "node --env-file-if-exists=.env dist/main.js",
-    "start:dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "start": "node --env-file-if-exists=.env --env-file-if-exists=../../.env dist/main.js",
+    "start:dev": "tsx watch --env-file-if-exists=.env --env-file-if-exists=../../.env src/main.ts",
     "test": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.mts",
     "db:generate": "prisma generate",
