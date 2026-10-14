@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenCollab Dev",
+  "identifier": "dev.opencollab.app.dev",
+  "app": {
+    "windows": [
+      {
+        "title": "OpenCollab (Dev)"
+      }
+    ]
+  }
+}
