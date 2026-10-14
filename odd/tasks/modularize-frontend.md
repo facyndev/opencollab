@@ -32,11 +32,11 @@ Branch: feature/modularize-frontend | Delivery: PR a develop | Test runner: vite
 - S7: "Maintain strict boundaries: zero changes to `@opencollab/contracts` or `@opencollab/domain`."
 
 ## Tasks
-- [x] T1 (S1) — Decompose `apps/web/src/components.tsx` into individual components under `apps/web/src/components/`. [route: direct inline]
-- [x] T2 (S2) — Decompose `apps/web/src/pages.tsx` into individual page views under `apps/web/src/pages/`. [route: direct inline]
-- [x] T3 (S3, S5) — Move web clients to `apps/web/src/services/` and utils to `apps/web/src/utils/`, updating all web imports and tests. [route: direct inline]
-- [x] T4 (S4, S5) — Move desktop hooks to `apps/desktop/src/hooks/` and services to `apps/desktop/src/services/`, updating all desktop imports and tests. [route: direct inline]
-- [x] T5 (S6, S7) — Comprehensive verification (`pnpm -r typecheck`, `pnpm -r test`, `pnpm -r build`, `cargo test --workspace`) and boundary enforcement. [route: direct inline]
+- [x] T1 (S1) — Decompose `apps/web/src/components.tsx` into individual components under `apps/web/src/components/`. [route: direct inline, commit: 7f64c06]
+- [x] T2 (S2) — Decompose `apps/web/src/pages.tsx` into individual page views under `apps/web/src/pages/`. [route: direct inline, commit: 7f64c06]
+- [x] T3 (S3, S5) — Move web clients to `apps/web/src/services/` and utils to `apps/web/src/utils/`, updating all web imports and tests. [route: direct inline, commit: 7f64c06]
+- [x] T4 (S4, S5) — Move desktop hooks to `apps/desktop/src/hooks/` and services to `apps/desktop/src/services/`, updating all desktop imports and tests. [route: direct inline, commit: 7f64c06]
+- [x] T5 (S6, S7) — Comprehensive verification (`pnpm -r typecheck`, `pnpm -r test`, `pnpm -r build`, `cargo test --workspace`) and boundary enforcement. [route: direct inline, commit: 7f64c06]
 
 ## Log
 - L1: 2026-10-14 Verificación inicial: monorepo-apps corroborado y mergeado en develop (PR #10, commit 3c53e1f). Inicio de refactorización según Issue #11.
