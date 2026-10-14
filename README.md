@@ -10,7 +10,7 @@
 
 ---
 
-## 📌 What is OpenCollab?
+## What is OpenCollab?
 
 **OpenCollab** is a desktop application designed to centralize, monitor, and collaborate in real time with terminal-based AI agents (such as Claude Code, OpenCode, Codex, Gemini CLI, and standard shells) in a flexible multi-pane grid.
 
@@ -25,7 +25,7 @@
 
 ---
 
-## 🏗️ Architecture and monorepo structure
+## Architecture and monorepo structure
 
 The project is organized as a monorepo managed with **pnpm workspaces** and **Turborepo**, following clean architecture principles with strict inward-pointing dependencies.
 
@@ -83,7 +83,7 @@ flowchart TD
 
 ---
 
-## ⚙️ Prerequisites
+## Prerequisites
 
 To build and run the project locally, make sure you have:
 
@@ -95,7 +95,7 @@ To build and run the project locally, make sure you have:
 
 ---
 
-## 🚀 Getting started locally
+## Getting started locally
 
 ### 1. Clone the repository and configure environment variables
 
@@ -153,7 +153,7 @@ pnpm --filter @opencollab/web dev
 
 ---
 
-## 🧪 Testing and code quality
+## Testing and code quality
 
 The repository includes automated validation pipelines and comprehensive test suites:
 
