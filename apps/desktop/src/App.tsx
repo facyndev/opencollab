@@ -21,9 +21,7 @@ import {
   type Workspace,
 } from "@opencollab/ui";
 import { TerminalPane } from "./components/TerminalPane";
-import { useAuth } from "./useAuth";
-import { useCollabStatus } from "./useCollabStatus";
-import { usePaneDrag } from "./usePaneDrag";
+import { useAuth, useCollabStatus, usePaneDrag } from "./hooks";
 
 function initialWorkspaces(): Workspace[] {
   const ws = newWorkspace("OpenCollab");

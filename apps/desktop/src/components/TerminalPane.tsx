@@ -25,8 +25,8 @@ import {
   type PaneMeta,
   type PaneStatus,
 } from "@opencollab/ui";
-import { useGitBranch } from "../useGitBranch";
-import { useWindowFocus } from "../useWindowFocus";
+import { useGitBranch } from "../hooks/useGitBranch";
+import { useWindowFocus } from "../hooks/useWindowFocus";
 import { CwdSwitcher } from "./CwdSwitcher";
 import { NewTerminalMenu } from "./NewTerminalMenu";
 import {
@@ -35,7 +35,7 @@ import {
   openShell,
   resizeTerminal,
   writeTerminal,
-} from "../terminalApi";
+} from "../services/terminalApi";
 
 type Props = {
   paneId: string;

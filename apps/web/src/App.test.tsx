@@ -2,8 +2,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { createAuthClient } from "./authClient";
-import { captureInitialHandoff } from "./handoff";
+import { createAuthClient } from "./services/authClient";
+import { captureInitialHandoff } from "./services/handoff";
 
 const user = { id: "u1", username: "ada", email: "ada@example.com", displayName: "Ada L", emailVerifiedAt: null };
 const tokens = { accessToken: "access-1", expiresIn: 900, tokenType: "Bearer" };

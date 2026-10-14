@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { DEFAULT_COLLAB_STATUS, type CollabStatus } from "@opencollab/ui";
-import { getCollabStatus, onCollabStatus } from "./terminalApi";
+import { getCollabStatus, onCollabStatus } from "../services/terminalApi";
 
 /// Estado real de la status bar: pide el valor actual una vez y después escucha
 /// los cambios que emite el núcleo. Mientras tanto (o si falla) muestra el
