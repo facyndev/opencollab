@@ -1,0 +1,7 @@
+{
+  "name": "@opencollab/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configuración TypeScript compartida de OpenCollab (tsconfig base, sin build).",
+  "files": ["tsconfig.base.json"]
+}

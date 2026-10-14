@@ -1,5 +1,0 @@
-allowBuilds:
-  '@prisma/engines': true
-  argon2: false
-  esbuild: true
-  prisma: true

@@ -420,9 +420,17 @@ kbd {
      debajo calcularía el codo sobre el alto de toda la lista y apuntaría al
      medio en vez de a su terminal. */
   --thread-row: 26px;
+  --thread-sub-row: 22px;
+  --thread-gap: 6px;
   list-style: none;
   margin: 0 0 6px;
   padding: 0;
+}
+
+.thread:not(.thread--sub) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--thread-gap);
 }
 
 .thread li {
@@ -445,37 +453,63 @@ kbd {
 }
 
 /* Continuación vertical hacia la siguiente rama. */
-.thread li:not(:last-child)::after {
+.thread > li:not(:last-child)::after {
   content: "";
   position: absolute;
   left: var(--thread-x);
   /* Arranca donde empieza la curva del codo (su radio es 8px), no donde termina:
      si no, la línea recta queda cortada a la altura de cada rama. */
   top: calc(min(50%, var(--thread-row)) - 8px);
-  bottom: -1px;
+  bottom: calc(-1 * var(--thread-gap) - 1px);
   border-left: var(--thread-line);
 }
 
-/* El primer tramo no tiene nada arriba con qué superponerse. */
-.thread li:first-child::before {
+/* Si la última terminal tiene una rama de git o sub-hilo, la línea vertical
+   debe continuar hasta el codo de la rama hija sin sobrepasar la fila. */
+.thread > li:last-child:has(.thread--sub)::after {
+  content: "";
+  position: absolute;
+  left: var(--thread-x);
+  top: calc(min(50%, var(--thread-row)) - 8px);
+  bottom: calc(var(--thread-sub-row) / 2);
+  border-left: var(--thread-line);
+}
+
+/* El primer tramo de la sesión no tiene nada arriba con qué superponerse. */
+.thread:not(.thread--sub) > li:first-child::before {
   top: 0;
   height: min(50%, var(--thread-row));
   border-top-left-radius: 2px;
 }
 
 /* Nivel interno del hilo: la rama de git que cuelga de la terminal de arriba.
-   Hereda el codo de `.thread`, con menos sangría, una fila más baja y un cuerpo
-   chico para que se lea como hijo y no como otra terminal. */
+   Alinea su codo horizontalmente con el tallo de la terminal padre (cancela
+   el padding heredado del li contenedor) y mantiene el cuerpo y fila más chicos
+   para leerse como detalle hijo sin desbordar el ancho del panel. */
 .thread--sub {
-  --thread-x: 8px;
-  --thread-row: 22px;
+  --thread-x: 12px;
+  --thread-row: var(--thread-sub-row, 22px);
+  --thread-gap: 0px;
   margin: 0;
+  margin-left: calc(-1 * (var(--thread-x) + 16px));
+}
+
+.thread--sub li {
+  padding-left: calc(var(--thread-x) + 16px);
 }
 
 .thread--sub .thread-item {
   gap: 6px;
   font-size: 11px;
   color: var(--text-faint);
+}
+
+.thread-branch {
+  width: 100%;
+}
+
+.thread-branch svg {
+  flex: none;
 }
 
 .thread-item {
@@ -489,6 +523,10 @@ kbd {
   font-size: 12px;
   color: var(--text-muted);
   text-align: left;
+}
+
+.thread-item--has-uptime {
+  padding-right: 44px;
 }
 
 .thread-item:hover {
@@ -804,6 +842,7 @@ kbd {
 .terminal-icon--logo {
   display: inline-block;
   background-color: var(--text);
+  -webkit-mask: var(--logo) center / contain no-repeat;
   mask: var(--logo) center / contain no-repeat;
 }
 
@@ -1051,3 +1090,153 @@ button.cwd-item:hover {
 .new-terminal-label {
   flex: none;
 }
+
+/* ---------- ThreadMeta (línea secundaria y badge absoluto de uptime) ---------- */
+
+.thread-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.thread-meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* Estado del agente junto al título: "Claude Code · Working". El nombre se recorta antes que el estado. */
+.thread-heading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.thread-heading .thread-label {
+  flex: 0 1 auto;
+}
+
+.thread-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 100 auto;
+  min-width: 0;
+  color: var(--text-faint);
+}
+
+.thread-state-sep {
+  white-space: pre;
+}
+
+.thread-state-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-state svg {
+  flex: none;
+}
+
+.thread-state--working {
+  color: var(--text-muted);
+}
+
+.thread-state--working svg {
+  color: var(--accent-soft);
+  animation: thread-meta-pulse 1.4s ease-in-out infinite;
+}
+
+/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
+.thread-state--attention,
+.thread-state--approval {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.thread-state--error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* Herramienta en curso (`Bash: echo hi`) o detalle del error: una línea, recortada. */
+.thread-meta-tool {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+
+@keyframes thread-meta-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-state--working svg {
+    animation: none;
+  }
+}
+
+/* Cuando solo muestra el tiempo (sin herramienta activa), no ocupa espacio en el flujo. */
+.thread-meta--uptime-only {
+  padding: 0;
+  margin: 0;
+  height: 0;
+  line-height: 0;
+}
+
+/* Tiempo transcurrido: en la esquina superior derecha de cada terminal del sidebar,
+   con posición absoluta y con el color del contenedor (var(--surface-2)). */
+.thread-meta-uptime {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+/* El badge absoluto no lleva separador con viñeta. */
+.thread-meta-part + .thread-meta-uptime::before {
+  content: none;
+  margin: 0;
+}
+
+/* Al enfocar o pasar el cursor sobre la terminal, destacar el badge sutilmente. */
+.thread-item:hover ~ .thread-meta .thread-meta-uptime,
+.thread-item--focused ~ .thread-meta .thread-meta-uptime {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Separador entre partes de la línea secundaria: "Bash: echo hi · ...". */
+.thread-meta-part + .thread-meta-part:not(.thread-meta-uptime)::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--text-faint);
+}
+

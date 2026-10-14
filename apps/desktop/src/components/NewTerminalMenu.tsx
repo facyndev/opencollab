@@ -2,11 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { VscFolderOpened, VscHome } from "react-icons/vsc";
 
-import { agentInfo, type AgentId } from "../agents";
-import { Plus } from "../icons";
-import { modKey, shiftKey } from "../shortcuts";
-import { availableAgents } from "../terminalApi";
-import { TerminalIcon } from "./TerminalIcon";
+import { Plus, TerminalIcon, agentInfo, modKey, shiftKey, type AgentId } from "@opencollab/ui";
+import { availableAgents } from "../services/terminalApi";
 
 type Props = {
   /// Carpeta actual de la terminal (`null` si todavía no se conoce).

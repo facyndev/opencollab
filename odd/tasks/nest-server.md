@@ -162,9 +162,38 @@ sí aporta en el core del desktop (PTYs, procesos del SO).
     rechaza si el server no confirma, timeout de 10 s en cada request
     (libera el Web Lock), `ContinuePage` con error y reintento, captura del
     handoff fuera de React (`main.tsx`).
-- [ ] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
+- [x] **T7** — Achicar `crates/domain` a lo que necesita el desktop (PTY,
   terminal, validación final con el `AccessLevel` que manda el server) y
   actualizar `AGENTS.md` (deja de regir "el dominio Rust manda").
+  - Rama `feature/domain-slim` (apilada sobre `feature/monorepo-packages`).
+    Ruta: delegada (mapeo con un Explore; escritor único, 2+ archivos no
+    triviales). TDD estricto (configuración de la sesión), runner
+    `cargo test --workspace`.
+  - Diseño: se borran `Workspace`, `WorkspaceMember`, `Invitation`,
+    `InvitationTarget`, `InvitationId`, `SessionGuest`, `ParticipantRole`,
+    `WorkspaceId` y la resolución de permisos por membresía. `Session` queda
+    como sesión local del host: id, nombre, dueño, terminales y un mapa de
+    `AccessLevel` por usuario que **llena el server** (`Joined` /
+    `AccessChanged`). Sin entrada = `None` (falla cerrado: el server decide);
+    el dueño siempre escribe. `AccessLevel` sigue siendo el tipo ordenado
+    (Escribir sin Ver irrepresentable). `ChangeParticipantAccess` (que
+    difundía cambios por `CollabTransport`) se reemplaza por un caso de uso
+    que aplica el nivel recibido del server; `WorkspaceRepository` pasa a
+    ser un repositorio de sesiones. `SessionCollaborators` cuenta dueño +
+    usuarios con Ver.
+  - Evidencia: commit `d15cc16`. RED observado: `owner_always_writes`,
+    `server_levels_drive_view_and_write`, `participants_are_owner_plus_viewers`
+    (domain) y `applying_view_then_write_from_server_allows_input`,
+    `revoking_to_none_from_server_blocks_next_input`,
+    `applying_access_to_unknown_session_or_owner_is_rejected` (application)
+    fallaban contra un stub; GREEN tras implementar. `cargo fmt --check`,
+    clippy `-D warnings` y `cargo test --workspace` (194 tests) en verde;
+    build y Vitest del desktop en verde. `CollabTransport` se retira (vuelve
+    con el cliente WS).
+  - Revisión (RDD, riesgo medio, consentida): una lente (confiabilidad),
+    aprobada sin hallazgos y reconocida (lineage `review-382acf7be262846b`).
+    Spot check del padre: `cargo test -p domain -p application` en verde.
+    Sin correr: E2E de la interfaz (no cambió ningún comando ni evento).
 - [x] **T8** — Docker (pedido del usuario antes del push): `docker compose`
   levanta Postgres + server + web; el desktop NO va en contenedor (se
   descarga el instalador de la release y corre nativo contra el server del

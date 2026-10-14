@@ -6,11 +6,13 @@ mod agent_watcher;
 mod auth;
 mod collab_status;
 mod commands;
+mod env;
 mod state;
 
 use tauri::Manager;
 
 fn main() {
+    env::load_dot_env();
     let mut builder = tauri::Builder::default();
     // Único: el deep link que llega como argumento de un segundo proceso se
     // reenvía a esta instancia (el plugin `deep-link` lo entrega igual).

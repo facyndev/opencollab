@@ -1,0 +1,21 @@
+{
+  "name": "opencollab",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo de OpenCollab: desktop (Tauri), server (NestJS) y web (Vite). El core Rust vive en crates/ y se maneja con Cargo.",
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "dev": "pnpm --filter @opencollab/desktop dev",
+    "desktop:dev": "pnpm --filter @opencollab/desktop dev:desktop",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "pre-push": "pnpm typecheck && pnpm test && pnpm check:rust",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "tsup": "^8.5.1"
+  }
+}

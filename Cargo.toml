@@ -1,25 +1,25 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/domain",
-    "crates/application",
-    "crates/protocol",
-    "crates/infrastructure",
+    "apps/desktop/core/domain",
+    "apps/desktop/core/application",
+    "apps/desktop/core/protocol",
+    "apps/desktop/core/infrastructure",
     "apps/desktop/src-tauri",
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
 # Internal crates
-domain = { path = "crates/domain" }
-application = { path = "crates/application" }
-protocol = { path = "crates/protocol" }
-infrastructure = { path = "crates/infrastructure" }
+domain = { path = "apps/desktop/core/domain" }
+application = { path = "apps/desktop/core/application" }
+protocol = { path = "apps/desktop/core/protocol" }
+infrastructure = { path = "apps/desktop/core/infrastructure" }
 
 # External
 uuid = { version = "1", features = ["v4"] }

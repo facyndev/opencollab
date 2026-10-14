@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
   Empaqueta los instaladores de Windows que genera `cargo tauri build` con el
-  nombre de release `<os>_<versión>.<extensión>` y sus hashes SHA-256.
+  nombre de release `opencollab-<os>-<versión>.<extensión>` y sus hashes SHA-256.
 
 .DESCRIPTION
   Toma de target/release/bundle:
-    nsis/*.exe  ->  windows_<versión>.exe   (instalador)
-    msi/*.msi   ->  windows_<versión>.msi   (instalador MSI)
+    nsis/*.exe  ->  opencollab-windows-<versión>.exe   (instalador)
+    msi/*.msi   ->  opencollab-windows-<versión>.msi   (instalador MSI)
   y en -OutDir deja además:
     <archivo>.sha256    hash de cada archivo, formato de `sha256sum`
     SHA256SUMS.txt      todos los hashes juntos
@@ -45,7 +45,7 @@ $artifacts = foreach ($s in $sources) {
   if ($found.Count -ne 1) {
     Write-Error "Se esperaba 1 archivo $($s.Filter) de la versión $Version en $($s.Dir), hay $($found.Count)."
   }
-  $name = "${os}_${Version}.$($s.Ext)"
+  $name = "opencollab-${os}-${Version}.$($s.Ext)"
   $dest = Join-Path $OutDir $name
   Copy-Item $found[0].FullName $dest
   $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLowerInvariant()

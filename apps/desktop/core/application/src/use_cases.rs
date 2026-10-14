@@ -1,0 +1,651 @@
+use std::sync::Arc;
+
+use domain::{AccessLevel, AgentProfile, Session, SessionId, TerminalId, UserId};
+
+use crate::agent_detection::{detect_agents_within, AgentTree};
+use crate::error::AppError;
+use crate::git::Branch;
+use crate::ports::{
+    DirectoryBrowser, ProcessInspector, PtyPort, RepositoryInspector, SessionRepository,
+    TerminalOutputSink, TerminalSize,
+};
+
+fn load(repo: &dyn SessionRepository, session_id: SessionId) -> Result<Session, AppError> {
+    repo.find_session(session_id)?
+        .ok_or(AppError::SessionNotFound(session_id))
+}
+
+/// Agrega una terminal a la sesión y lanza su PTY.
+pub struct LaunchTerminal {
+    repo: Arc<dyn SessionRepository>,
+    pty: Arc<dyn PtyPort>,
+}
+
+impl LaunchTerminal {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
+        Self { repo, pty }
+    }
+
+    pub fn execute(
+        &self,
+        actor: UserId,
+        session_id: SessionId,
+        profile: AgentProfile,
+        size: TerminalSize,
+        sink: Arc<dyn TerminalOutputSink>,
+    ) -> Result<TerminalId, AppError> {
+        let mut session = load(self.repo.as_ref(), session_id)?;
+        let terminal = session.add_terminal(actor, profile.clone())?;
+        self.pty.spawn(terminal, &profile, size, sink)?;
+        self.repo.save_session(session)?;
+        Ok(terminal)
+    }
+}
+
+/// Escribe input en una terminal. Es el único camino de entrada al PTY, tanto
+/// local como remoto: valida contra el permiso vigente en cada llamada.
+pub struct SendTerminalInput {
+    repo: Arc<dyn SessionRepository>,
+    pty: Arc<dyn PtyPort>,
+}
+
+impl SendTerminalInput {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
+        Self { repo, pty }
+    }
+
+    pub fn execute(
+        &self,
+        actor: UserId,
+        session_id: SessionId,
+        terminal: TerminalId,
+        data: &[u8],
+    ) -> Result<(), AppError> {
+        ensure_can_write(self.repo.as_ref(), actor, session_id, terminal)?;
+        self.pty.write(terminal, data)?;
+        Ok(())
+    }
+}
+
+pub struct ResizeTerminal {
+    repo: Arc<dyn SessionRepository>,
+    pty: Arc<dyn PtyPort>,
+}
+
+impl ResizeTerminal {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
+        Self { repo, pty }
+    }
+
+    pub fn execute(
+        &self,
+        actor: UserId,
+        session_id: SessionId,
+        terminal: TerminalId,
+        size: TerminalSize,
+    ) -> Result<(), AppError> {
+        ensure_can_write(self.repo.as_ref(), actor, session_id, terminal)?;
+        self.pty.resize(terminal, size)?;
+        Ok(())
+    }
+}
+
+/// Quita una terminal de la sesión y termina su proceso.
+pub struct CloseTerminal {
+    repo: Arc<dyn SessionRepository>,
+    pty: Arc<dyn PtyPort>,
+}
+
+impl CloseTerminal {
+    pub fn new(repo: Arc<dyn SessionRepository>, pty: Arc<dyn PtyPort>) -> Self {
+        Self { repo, pty }
+    }
+
+    pub fn execute(
+        &self,
+        actor: UserId,
+        session_id: SessionId,
+        terminal: TerminalId,
+    ) -> Result<(), AppError> {
+        let mut session = load(self.repo.as_ref(), session_id)?;
+        session.remove_terminal(actor, terminal)?;
+        self.pty.kill(terminal)?;
+        self.repo.save_session(session)?;
+        Ok(())
+    }
+}
+
+/// Subcarpetas de un directorio, para "ir hacia adelante" desde la ruta de una
+/// terminal. Ordenadas como un explorador: alfabético sin distinguir mayúsculas,
+/// con las ocultas (`.git`, `.cache`…) al final.
+pub struct ListSubdirectories {
+    browser: Arc<dyn DirectoryBrowser>,
+}
+
+impl ListSubdirectories {
+    /// Tope para no mandar miles de entradas a la UI (p. ej. `node_modules`).
+    pub const LIMIT: usize = 500;
+
+    pub fn new(browser: Arc<dyn DirectoryBrowser>) -> Self {
+        Self { browser }
+    }
+
+    pub fn execute(&self, path: &std::path::Path) -> Result<Vec<String>, AppError> {
+        let mut names = self.browser.subdirectories(path)?;
+        names.sort_by_key(|name| (name.starts_with('.'), name.to_lowercase()));
+        names.truncate(Self::LIMIT);
+        Ok(names)
+    }
+}
+
+/// Rama de git de la carpeta en la que está una terminal (`None` fuera de un
+/// repositorio). Vale para cualquier terminal, corra un agente o no.
+pub struct InspectBranch {
+    repositories: Arc<dyn RepositoryInspector>,
+}
+
+impl InspectBranch {
+    pub fn new(repositories: Arc<dyn RepositoryInspector>) -> Self {
+        Self { repositories }
+    }
+
+    pub fn execute(&self, path: &std::path::Path) -> Option<Branch> {
+        self.repositories.current_branch(path)
+    }
+}
+
+/// Qué agentes conocidos corren en cada terminal viva de la sesión: el principal
+/// de cada una y los que ese agente tiene anidados.
+pub struct DetectTerminalAgents {
+    repo: Arc<dyn SessionRepository>,
+    pty: Arc<dyn PtyPort>,
+    inspector: Arc<dyn ProcessInspector>,
+    /// Ejecutables en los que el recorrido se detiene (otras instancias de la app).
+    stop_at: Vec<String>,
+}
+
+impl DetectTerminalAgents {
+    pub fn new(
+        repo: Arc<dyn SessionRepository>,
+        pty: Arc<dyn PtyPort>,
+        inspector: Arc<dyn ProcessInspector>,
+    ) -> Self {
+        Self {
+            repo,
+            pty,
+            inspector,
+            stop_at: Vec::new(),
+        }
+    }
+
+    /// No baja por procesos con estos nombres de ejecutable (sin distinguir
+    /// mayúsculas ni `.exe`): una instancia de la propia app tiene sus terminales.
+    pub fn stopping_at(mut self, executables: Vec<String>) -> Self {
+        self.stop_at = executables;
+        self
+    }
+
+    pub fn execute(&self, session_id: SessionId) -> Result<Vec<(TerminalId, AgentTree)>, AppError> {
+        let session = self
+            .repo
+            .find_session(session_id)?
+            .ok_or(AppError::SessionNotFound(session_id))?;
+        let live: Vec<(TerminalId, u32)> = session
+            .terminals()
+            .iter()
+            .filter_map(|t| self.pty.process_id(t.id).map(|pid| (t.id, pid)))
+            .collect();
+        if live.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Una sola foto del sistema para todas las terminales.
+        let processes = self.inspector.snapshot()?;
+        Ok(live
+            .into_iter()
+            .map(|(terminal, pid)| {
+                (
+                    terminal,
+                    detect_agents_within(&processes, pid, &self.stop_at),
+                )
+            })
+            .collect())
+    }
+}
+
+fn ensure_can_write(
+    repo: &dyn SessionRepository,
+    actor: UserId,
+    session_id: SessionId,
+    terminal: TerminalId,
+) -> Result<(), AppError> {
+    let session = load(repo, session_id)?;
+    session.ensure_has_terminal(terminal)?;
+    if !session.can_write(actor) {
+        return Err(AppError::WriteNotAllowed {
+            user: actor,
+            terminal,
+        });
+    }
+    Ok(())
+}
+
+/// Aplica a la sesión el nivel de acceso que mandó el server (`Joined` /
+/// `AccessChanged`) y lo persiste: el siguiente input se valida contra él.
+/// El server decide quién puede qué; acá solo se guarda para la validación final.
+pub struct ApplyAccessLevel {
+    repo: Arc<dyn SessionRepository>,
+}
+
+impl ApplyAccessLevel {
+    pub fn new(repo: Arc<dyn SessionRepository>) -> Self {
+        Self { repo }
+    }
+
+    pub fn execute(
+        &self,
+        session_id: SessionId,
+        user: UserId,
+        level: AccessLevel,
+    ) -> Result<(), AppError> {
+        let mut session = load(self.repo.as_ref(), session_id)?;
+        session.set_access(user, level)?;
+        self.repo.save_session(session)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use domain::DomainError;
+
+    use super::*;
+    use crate::agent_detection::KnownAgent;
+    use crate::ports::PortError;
+
+    #[derive(Default)]
+    struct FakeRepo {
+        sessions: Mutex<HashMap<SessionId, Session>>,
+    }
+
+    impl SessionRepository for FakeRepo {
+        fn find_session(&self, id: SessionId) -> Result<Option<Session>, PortError> {
+            Ok(self.sessions.lock().unwrap().get(&id).cloned())
+        }
+        fn save_session(&self, session: Session) -> Result<(), PortError> {
+            self.sessions.lock().unwrap().insert(session.id(), session);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FakePty {
+        spawned: Mutex<Vec<TerminalId>>,
+        profiles: Mutex<Vec<AgentProfile>>,
+        written: Mutex<Vec<(TerminalId, Vec<u8>)>>,
+        killed: Mutex<Vec<TerminalId>>,
+    }
+
+    impl PtyPort for FakePty {
+        fn spawn(
+            &self,
+            terminal: TerminalId,
+            profile: &AgentProfile,
+            _size: TerminalSize,
+            _sink: Arc<dyn TerminalOutputSink>,
+        ) -> Result<(), PortError> {
+            self.spawned.lock().unwrap().push(terminal);
+            self.profiles.lock().unwrap().push(profile.clone());
+            Ok(())
+        }
+        fn write(&self, terminal: TerminalId, data: &[u8]) -> Result<(), PortError> {
+            self.written.lock().unwrap().push((terminal, data.to_vec()));
+            Ok(())
+        }
+        fn resize(&self, _terminal: TerminalId, _size: TerminalSize) -> Result<(), PortError> {
+            Ok(())
+        }
+        fn kill(&self, terminal: TerminalId) -> Result<(), PortError> {
+            self.killed.lock().unwrap().push(terminal);
+            Ok(())
+        }
+        fn process_id(&self, terminal: TerminalId) -> Option<u32> {
+            // Pid ficticio y estable por terminal: su posición entre las lanzadas.
+            let spawned = self.spawned.lock().unwrap();
+            let killed = self.killed.lock().unwrap();
+            let index = spawned.iter().position(|t| *t == terminal)?;
+            (!killed.contains(&terminal)).then_some(1000 + index as u32)
+        }
+    }
+
+    struct FakeInspector(Vec<crate::agent_detection::ProcessInfo>);
+
+    impl ProcessInspector for FakeInspector {
+        fn snapshot(&self) -> Result<Vec<crate::agent_detection::ProcessInfo>, PortError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    struct NullSink;
+    impl TerminalOutputSink for NullSink {
+        fn output(&self, _terminal: TerminalId, _data: &[u8]) {}
+        fn exited(&self, _terminal: TerminalId) {}
+    }
+
+    struct World {
+        owner: UserId,
+        member: UserId,
+        session_id: SessionId,
+        terminal: TerminalId,
+        repo: Arc<FakeRepo>,
+        pty: Arc<FakePty>,
+    }
+
+    fn world() -> World {
+        let owner = UserId::new();
+        let member = UserId::new();
+        let session = Session::new(owner, "sesión");
+        let session_id = session.id();
+
+        let repo = Arc::new(FakeRepo::default());
+        repo.save_session(session).unwrap();
+        let pty = Arc::new(FakePty::default());
+
+        let terminal = LaunchTerminal::new(repo.clone(), pty.clone())
+            .execute(
+                owner,
+                session_id,
+                AgentProfile::new("shell", "sh").unwrap(),
+                TerminalSize::default(),
+                Arc::new(NullSink),
+            )
+            .unwrap();
+
+        World {
+            owner,
+            member,
+            session_id,
+            terminal,
+            repo,
+            pty,
+        }
+    }
+
+    #[test]
+    fn launch_terminal_spawns_and_persists() {
+        let w = world();
+        assert_eq!(*w.pty.spawned.lock().unwrap(), vec![w.terminal]);
+        let session = w.repo.find_session(w.session_id).unwrap().unwrap();
+        assert!(session.terminal(w.terminal).is_some());
+    }
+
+    struct FakeBrowser(Vec<&'static str>);
+
+    impl DirectoryBrowser for FakeBrowser {
+        fn subdirectories(&self, _path: &std::path::Path) -> Result<Vec<String>, PortError> {
+            Ok(self.0.iter().map(|s| s.to_string()).collect())
+        }
+    }
+
+    #[test]
+    fn subdirectories_are_sorted_like_an_explorer() {
+        let list = ListSubdirectories::new(Arc::new(FakeBrowser(vec![
+            ".git", "src", "Docs", "apps", ".cache", "crates",
+        ])))
+        .execute(std::path::Path::new("x"))
+        .unwrap();
+        assert_eq!(list, ["apps", "crates", "Docs", "src", ".cache", ".git"]);
+    }
+
+    struct FakeRepositories;
+
+    impl crate::ports::RepositoryInspector for FakeRepositories {
+        fn current_branch(&self, path: &std::path::Path) -> Option<crate::Branch> {
+            path.starts_with("repo")
+                .then(|| crate::Branch::Named("main".into()))
+        }
+    }
+
+    #[test]
+    fn reports_the_branch_of_a_folder_inside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(
+            inspect.execute(std::path::Path::new("repo/src")),
+            Some(crate::Branch::Named("main".into()))
+        );
+    }
+
+    #[test]
+    fn reports_no_branch_outside_a_repository() {
+        let inspect = InspectBranch::new(Arc::new(FakeRepositories));
+        assert_eq!(inspect.execute(std::path::Path::new("elsewhere")), None);
+    }
+
+    #[test]
+    fn detects_the_agent_running_in_each_terminal() {
+        let w = world();
+        let second = LaunchTerminal::new(w.repo.clone(), w.pty.clone())
+            .execute(
+                w.owner,
+                w.session_id,
+                AgentProfile::new("shell", "sh").unwrap(),
+                TerminalSize::default(),
+                Arc::new(NullSink),
+            )
+            .unwrap();
+        // La primera terminal (pid 1000) corre Claude Code; la segunda (1001) nada.
+        let inspector = Arc::new(FakeInspector(vec![crate::agent_detection::ProcessInfo {
+            pid: 2000,
+            parent: Some(1000),
+            name: "claude.exe".into(),
+            args: vec![],
+            started_at: Some(1_700_000_000),
+        }]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(
+            detected,
+            vec![
+                (
+                    w.terminal,
+                    AgentTree {
+                        primary: Some(KnownAgent::ClaudeCode),
+                        primary_started_at: Some(1_700_000_000),
+                        nested: vec![],
+                    }
+                ),
+                (second, AgentTree::default()),
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_the_agents_nested_below_the_main_one() {
+        let w = world();
+        // Claude Code (2000) con Codex (2001) debajo, ambos en la primera terminal.
+        let inspector = Arc::new(FakeInspector(vec![
+            crate::agent_detection::ProcessInfo {
+                pid: 2000,
+                parent: Some(1000),
+                name: "claude.exe".into(),
+                args: vec![],
+                started_at: None,
+            },
+            crate::agent_detection::ProcessInfo {
+                pid: 2001,
+                parent: Some(2000),
+                name: "codex.exe".into(),
+                args: vec![],
+                started_at: None,
+            },
+        ]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(
+            detected,
+            vec![(
+                w.terminal,
+                AgentTree {
+                    primary: Some(KnownAgent::ClaudeCode),
+                    primary_started_at: None,
+                    nested: vec![KnownAgent::Codex],
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn does_not_report_agents_of_another_app_instance() {
+        let w = world();
+        let p = |pid, parent, name: &str| crate::agent_detection::ProcessInfo {
+            pid,
+            parent: Some(parent),
+            name: name.into(),
+            args: vec![],
+            started_at: None,
+        };
+        let inspector = Arc::new(FakeInspector(vec![
+            p(2000, 1000, "claude.exe"),
+            p(2001, 2000, "desktop.exe"),
+            p(2002, 2001, "opencode.exe"),
+        ]));
+
+        let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
+            .stopping_at(vec!["Desktop".into()])
+            .execute(w.session_id)
+            .unwrap();
+
+        assert_eq!(detected[0].1.primary, Some(KnownAgent::ClaudeCode));
+        assert!(detected[0].1.nested.is_empty());
+    }
+
+    #[test]
+    fn closed_terminals_are_not_inspected() {
+        let w = world();
+        CloseTerminal::new(w.repo.clone(), w.pty.clone())
+            .execute(w.owner, w.session_id, w.terminal)
+            .unwrap();
+        let detected = DetectTerminalAgents::new(
+            w.repo.clone(),
+            w.pty.clone(),
+            Arc::new(FakeInspector(vec![])),
+        )
+        .execute(w.session_id)
+        .unwrap();
+        assert!(detected.is_empty());
+    }
+
+    #[test]
+    fn close_terminal_kills_and_removes_it() {
+        let w = world();
+        let close = CloseTerminal::new(w.repo.clone(), w.pty.clone());
+
+        assert!(close.execute(w.member, w.session_id, w.terminal).is_err());
+        assert!(w.pty.killed.lock().unwrap().is_empty());
+
+        close.execute(w.owner, w.session_id, w.terminal).unwrap();
+        assert_eq!(*w.pty.killed.lock().unwrap(), vec![w.terminal]);
+        let session = w.repo.find_session(w.session_id).unwrap().unwrap();
+        assert!(session.terminal(w.terminal).is_none());
+    }
+
+    #[test]
+    fn non_owner_without_server_grant_cannot_write() {
+        let w = world();
+        let input = SendTerminalInput::new(w.repo.clone(), w.pty.clone());
+        let result = input.execute(w.member, w.session_id, w.terminal, b"ls\r");
+        assert!(matches!(result, Err(AppError::WriteNotAllowed { .. })));
+        assert!(w.pty.written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn applying_view_then_write_from_server_allows_input() {
+        let w = world();
+        let apply = ApplyAccessLevel::new(w.repo.clone());
+        let input = SendTerminalInput::new(w.repo.clone(), w.pty.clone());
+
+        apply
+            .execute(w.session_id, w.member, AccessLevel::View)
+            .unwrap();
+        assert!(input
+            .execute(w.member, w.session_id, w.terminal, b"a")
+            .is_err());
+
+        apply
+            .execute(w.session_id, w.member, AccessLevel::Write)
+            .unwrap();
+        input
+            .execute(w.member, w.session_id, w.terminal, b"a")
+            .unwrap();
+        assert_eq!(w.pty.written.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn revoking_to_none_from_server_blocks_next_input() {
+        let w = world();
+        let apply = ApplyAccessLevel::new(w.repo.clone());
+        let input = SendTerminalInput::new(w.repo.clone(), w.pty.clone());
+
+        apply
+            .execute(w.session_id, w.member, AccessLevel::Write)
+            .unwrap();
+        input
+            .execute(w.member, w.session_id, w.terminal, b"a")
+            .unwrap();
+
+        apply
+            .execute(w.session_id, w.member, AccessLevel::None)
+            .unwrap();
+        assert!(matches!(
+            input.execute(w.member, w.session_id, w.terminal, b"b"),
+            Err(AppError::WriteNotAllowed { .. })
+        ));
+        assert_eq!(w.pty.written.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn applying_access_to_unknown_session_or_owner_is_rejected() {
+        let w = world();
+        let apply = ApplyAccessLevel::new(w.repo.clone());
+        let missing = SessionId::new();
+        assert_eq!(
+            apply.execute(missing, w.member, AccessLevel::View),
+            Err(AppError::SessionNotFound(missing))
+        );
+        assert_eq!(
+            apply.execute(w.session_id, w.owner, AccessLevel::None),
+            Err(AppError::Domain(DomainError::CannotChangeOwnerAccess))
+        );
+    }
+
+    #[test]
+    fn owner_can_always_write() {
+        let w = world();
+        SendTerminalInput::new(w.repo.clone(), w.pty.clone())
+            .execute(w.owner, w.session_id, w.terminal, b"x")
+            .unwrap();
+    }
+
+    #[test]
+    fn input_to_unknown_terminal_is_rejected() {
+        let w = world();
+        let result = SendTerminalInput::new(w.repo.clone(), w.pty.clone()).execute(
+            w.owner,
+            w.session_id,
+            TerminalId::new(),
+            b"x",
+        );
+        assert!(matches!(
+            result,
+            Err(AppError::Domain(DomainError::TerminalNotInSession(_)))
+        ));
+    }
+}

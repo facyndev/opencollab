@@ -31,5 +31,5 @@ Thumbs.db
 /.env
 
 # Server: local env and generated Prisma client
-apps/server/.env
-apps/server/src/generated/
+apps/api/.env
+apps/api/src/generated/

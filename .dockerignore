@@ -1,0 +1,16 @@
+.git
+.github
+.codegraph
+.agents
+.claude
+.atl
+odd
+target
+release
+**/node_modules
+**/dist
+**/.env
+.env
+apps/desktop
+**/*.log
+apps/api/src/generated
