@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { sameBranch, watchBranch } from "./branchWatch";
-import { gitBranch, type GitBranch } from "./terminalApi";
+import { sameBranch, watchBranch } from "../services/branchWatch";
+import { gitBranch, type GitBranch } from "../services/terminalApi";
 
 /// Rama de git de `cwd` (`null` fuera de un repositorio o si no se conoce la
 /// carpeta). Se vuelve a consultar al cambiar `cwd`, cada vez que cambia

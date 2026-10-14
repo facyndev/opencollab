@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { VscChevronRight, VscFolder, VscFolderOpened } from "react-icons/vsc";
 
 import { Check, ChevronsUpDown, Search, joinPath, parentDirectories } from "@opencollab/ui";
-import { listSubdirectories } from "../terminalApi";
+import { listSubdirectories } from "../services/terminalApi";
 
 type Props = {
   cwd: string;

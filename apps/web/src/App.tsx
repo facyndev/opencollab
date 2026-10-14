@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { AuthClient } from "./authClient";
 import { messageOf } from "./components";
-import { readPendingHandoff, runPendingHandoff } from "./handoff";
 import {
   AccountPage,
   ContinuePage,
@@ -11,7 +9,9 @@ import {
   RegisterPage,
   WorkingPage,
 } from "./pages";
-import { navigate, useLocation } from "./router";
+import type { AuthClient } from "./services/authClient";
+import { readPendingHandoff, runPendingHandoff } from "./services/handoff";
+import { navigate, useLocation } from "./utils/router";
 
 type Handoff = { kind: "idle" } | { kind: "running" } | { kind: "done" } | { kind: "error"; message: string };
 

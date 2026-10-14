@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { createPkcePair, isAuthCallback, type AuthState, type AuthUser } from "./auth";
+import { createPkcePair, isAuthCallback, type AuthState, type AuthUser } from "../services/auth";
 
 type ChangedPayload = { user: AuthUser | null };
 
