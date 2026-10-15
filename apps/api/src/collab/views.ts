@@ -1,5 +1,5 @@
 import type { UserRecord } from '../persistence/user.repository';
-import type { Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId } from '@opencollab/domain';
+import type { Session, SessionId, Terminal, TerminalId, UserId, Workspace, WorkspaceId } from '@opencollab/domain';
 
 export interface WorkspaceSummary {
   id: WorkspaceId;
@@ -39,19 +39,24 @@ export interface SessionView {
   terminals: TerminalView[];
 }
 
-// Terminals stay in the aggregate's position order (S5). `cwd` is nullable:
-// a terminal without an explicit working directory persists as null.
+// `cwd` is nullable: a terminal without an explicit working directory
+// persists as null. `env` is never part of the projection (S7).
+export function toTerminalView(terminal: Terminal): TerminalView {
+  return {
+    id: terminal.id,
+    name: terminal.profile.name,
+    command: terminal.profile.command,
+    args: terminal.profile.args,
+    cwd: terminal.profile.cwd ?? null,
+  };
+}
+
+// Terminals stay in the aggregate's position order (S5).
 export function toSessionView(session: Session): SessionView {
   return {
     id: session.id,
     name: session.name,
-    terminals: session.terminals.map((t) => ({
-      id: t.id,
-      name: t.profile.name,
-      command: t.profile.command,
-      args: t.profile.args,
-      cwd: t.profile.cwd ?? null,
-    })),
+    terminals: session.terminals.map(toTerminalView),
   };
 }
 
