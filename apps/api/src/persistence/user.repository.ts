@@ -54,6 +54,13 @@ export class UserRepository {
     return row ? toUserRecord(row) : undefined;
   }
 
+  // Batch lookup (member lists, invitation enrichment). Unknown ids are skipped.
+  async findByIds(ids: readonly UserId[]): Promise<UserRecord[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.user.findMany({ where: { id: { in: [...ids] } } });
+    return rows.map(toUserRecord);
+  }
+
   // An identifier containing `@` is an email, anything else a username. The
   // two namespaces never overlap, so a login is never ambiguous.
   async findByUsernameOrEmail(identifier: string): Promise<UserRecord | undefined> {
