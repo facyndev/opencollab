@@ -72,3 +72,16 @@ export function toWorkspaceDetail(ws: Workspace, usersById: Map<UserId, UserReco
   }
   return { id: ws.id, name: ws.name, owner: ws.owner, members };
 }
+
+export type InvitationTargetView =
+  | { kind: 'workspace'; workspaceId: WorkspaceId; name: string }
+  | { kind: 'session'; sessionId: SessionId; name: string };
+
+// S9-S11: what an invitation looks like over the wire. Lifecycle fields
+// (status, expiresAt) are deliberately absent: they are server bookkeeping,
+// and S12/S13 signal them through status codes instead.
+export interface InvitationView {
+  id: string;
+  target: InvitationTargetView;
+  invitedBy: { userId: UserId; username: string; displayName: string };
+}
