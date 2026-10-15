@@ -1,5 +1,5 @@
 import type { UserRecord } from '../persistence/user.repository';
-import type { UserId, Workspace, WorkspaceId } from '@opencollab/domain';
+import type { Session, SessionId, TerminalId, UserId, Workspace, WorkspaceId } from '@opencollab/domain';
 
 export interface WorkspaceSummary {
   id: WorkspaceId;
@@ -23,6 +23,36 @@ export interface WorkspaceDetail {
 
 export function toWorkspaceSummary(ws: Workspace): WorkspaceSummary {
   return { id: ws.id, name: ws.name, owner: ws.owner, memberCount: ws.members.length };
+}
+
+export interface TerminalView {
+  id: TerminalId;
+  name: string;
+  command: string;
+  args: string[];
+  cwd: string | null;
+}
+
+export interface SessionView {
+  id: SessionId;
+  name: string;
+  terminals: TerminalView[];
+}
+
+// Terminals stay in the aggregate's position order (S5). `cwd` is nullable:
+// a terminal without an explicit working directory persists as null.
+export function toSessionView(session: Session): SessionView {
+  return {
+    id: session.id,
+    name: session.name,
+    terminals: session.terminals.map((t) => ({
+      id: t.id,
+      name: t.profile.name,
+      command: t.profile.command,
+      args: t.profile.args,
+      cwd: t.profile.cwd ?? null,
+    })),
+  };
 }
 
 // `usersById` supplies the display fields for the member ids; ids missing from

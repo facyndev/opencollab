@@ -28,7 +28,7 @@ Assumptions (marked as such, not user requirements):
 
 ## Tasks
 
-- T1 (S1-S3, S14): WorkspacesController — list/create/get + `WorkspaceRepository.listForUser` + module wiring; int tests RED→GREEN. route: inline — DONE (13 int tests, unit 166, int 107, typecheck ok)
+- T1 (S1-S3, S14): WorkspacesController — list/create/get + `WorkspaceRepository.listForUser` + module wiring; int tests RED→GREEN. route: inline — DONE (13 int tests, unit 166, int 107, typecheck ok). Review: tier high (463 lines), outcome granted/acknowledged (lineage review-78dd02cdbbd5c9c3, 0 blockers; advisory R3-001/R3-002 → L6)
 - T2 (S4-S6, S14-S15): SessionsController — create/list/get sessions + terminals in views; int tests RED→GREEN. route: inline
 - T3 (S7-S8, S14-S15): TerminalsController — add/remove terminal; int tests RED→GREEN. route: inline
 - T4 (S9-S13, S15): InvitationsController + accept/decline orchestration service; int tests RED→GREEN. route: inline
@@ -41,3 +41,4 @@ Assumptions (marked as such, not user requirements):
 - L3 (2026-10-14, user decision): Dual-mode product decisions (for Feature 2, recorded here for continuity): mode selection = "Onboarding + Settings"; collaboration in local mode = "Visibles pero inactivas"; switching local→cloud = "Migrar local → cloud".
 - L4 (2026-10-14, user decision): Scope = "Dos features secuenciales": this feature builds the API REST CRUD first; Feature 2 (desktop dual storage mode) follows in a separate feature branch.
 - L5 (2026-10-14, T1 done): WorkspacesController (POST/GET /workspaces, GET /workspaces/:id) implemented with `WorkspaceRepository.listForUser`, `UserRepository.findByIds`, zod `ZodPipe` validation, `AccessGuard`. New `CollabModule` imports PersistenceModule + AuthModule; AuthModule now exports `AuthService` and `AccessGuard` (previously only SessionService/SessionRevocations). Added `collab/test-app.ts` (bootstraps AuthModule+CollabModule against the `_test` database). Verified: unit 166/166, integration 107/107, typecheck clean.
+- L6 (2026-10-15, T1 review): RDD review of commit 2e3e113 (lineage review-78dd02cdbbd5c9c3, tier high, 463 changed lines, 3 lenses risk/readability/reliability) reached approved; authority burned, no corrections, 0 blocking findings. Advisory (non-blocking, candidates for T5 test hardening — not authorized scope by themselves): R3-001 `GET /workspaces/:id` casts the raw route param to WorkspaceId without a malformed-id failure-path assertion (400 vs 404 vs 500 unproved); R3-002 create-body upper boundary/shape handling and summary memberCount lack observable assertions (overlong name, non-string name, trimmed persistence, memberCount).
