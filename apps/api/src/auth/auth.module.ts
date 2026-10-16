@@ -47,6 +47,6 @@ function buildProviders(config: AuthConfig): OAuthProviders {
     OAuthService,
     AccessGuard,
   ],
-  exports: [SessionService, SessionRevocations],
+  exports: [SessionService, SessionRevocations, AuthService, AccessGuard],
 })
 export class AuthModule {}
