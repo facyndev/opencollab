@@ -28,3 +28,19 @@ export const addTerminalSchema = z
   .strict();
 
 export type AddTerminalBody = z.infer<typeof addTerminalSchema>;
+
+// S9/S10 body. The uuid message names the rule, never the submitted value
+// (S14: ZodPipe only emits field paths and messages).
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const inviteSchema = z
+  .object({ inviteeId: z.string().regex(UUID, { message: 'must be a uuid' }) })
+  .strict();
+
+export type InviteBody = z.infer<typeof inviteSchema>;
+
+// Malformed invitation ids answer 404, never 500: Postgres uuid columns throw
+// on non-uuid input, so the format is pre-checked before Prisma sees it.
+export function isUuid(value: string): boolean {
+  return UUID.test(value);
+}
