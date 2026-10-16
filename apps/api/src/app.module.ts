@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuthModule } from './auth/auth.module';
+import { CollabModule } from './collab/collab.module';
 import { CollabGateway } from './collab.gateway';
 import { HealthController } from './health.controller';
 import { SESSION_STORE, SessionHub, type SessionStore } from './hub';
@@ -10,7 +11,7 @@ import { SessionRepository } from './persistence/session.repository';
 import { WorkspaceRepository } from './persistence/workspace.repository';
 
 @Module({
-  imports: [AuthModule, PersistenceModule],
+  imports: [AuthModule, CollabModule, PersistenceModule],
   controllers: [HealthController],
   providers: [
     {
