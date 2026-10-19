@@ -19,6 +19,7 @@ import statusBarLive from "./scenarios/status-bar-live.mjs";
 import newTerminalHere from "./scenarios/new-terminal-here.mjs";
 import launchAgent from "./scenarios/launch-agent.mjs";
 import authSignin from "./scenarios/auth-signin.mjs";
+import snapshotLoadError from "./scenarios/snapshot-load-error.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
@@ -29,6 +30,7 @@ const scenarios = {
   "exit en la shell cierra el panel": exitClosesPane,
   "status bar con estado real": statusBarLive,
   "login vía la web": authSignin,
+  "fallo de carga no pisa el snapshot": snapshotLoadError,
 };
 
 function chromePath() {

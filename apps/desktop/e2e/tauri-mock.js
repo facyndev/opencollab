@@ -93,6 +93,9 @@ export function installTauriMock() {
           setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
           return null;
         case "snapshot_load":
+          // Fallo de carga inyectado por el escenario de regresión (?mockSnapshotLoadError=1).
+          if (new URLSearchParams(location.search).get("mockSnapshotLoadError") === "1")
+            throw new Error("snapshot_load failed (e2e)");
           // Sin snapshot guardado: primera corrida / arranque limpio.
           return saved ? JSON.parse(JSON.stringify(saved)) : null;
         case "snapshot_save":

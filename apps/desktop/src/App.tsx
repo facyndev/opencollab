@@ -63,10 +63,11 @@ export function App() {
         setWorkspaces(loaded ?? ((current: Workspace[]) => [...current]));
       })
       .catch((error) => {
-        // Error inesperado del núcleo al cargar: arranque limpio, igual que la
-        // cuarentena del archivo corrupto.
+        // Error inesperado del núcleo al cargar: la persistencia queda apagada
+        // para no pisar un snapshot que todavía puede ser válido. La cuarentena
+        // de un archivo corrupto la resuelve el núcleo y llega como `null`, no
+        // como rechazo, así que este camino nunca habilita el guardado.
         console.error("no se pudo cargar el snapshot de workspaces:", error);
-        if (!cancelled) hydratedRef.current = true;
       });
     return () => {
       cancelled = true;
