@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::agent_detection::ProcessInfo;
 use crate::git::Branch;
+use crate::storage::WorkspaceSnapshot;
 
 use domain::{AgentProfile, Session, SessionId, TerminalId};
 
@@ -83,4 +84,14 @@ pub trait RelayProbe: Send + Sync {
 pub trait SessionRepository: Send + Sync {
     fn find_session(&self, id: SessionId) -> Result<Option<Session>, PortError>;
     fn save_session(&self, session: Session) -> Result<(), PortError>;
+}
+
+/// Persiste el snapshot completo de la estructura del escritorio (workspaces,
+/// sesiones y perfiles de arranque de las terminales). El modo local lo
+/// implementa con un archivo en el directorio de datos y el modo nube con la
+/// API REST; ambos quedan detrás del mismo puerto. `None` = no hay nada
+/// guardado todavía (primera corrida o arranque limpio).
+pub trait SnapshotStore: Send + Sync {
+    fn load_snapshot(&self) -> Result<Option<WorkspaceSnapshot>, PortError>;
+    fn save_snapshot(&self, snapshot: &WorkspaceSnapshot) -> Result<(), PortError>;
 }
