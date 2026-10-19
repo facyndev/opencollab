@@ -22,3 +22,10 @@ const catalog: Record<AgentId, AgentInfo> = {
 export function agentInfo(id: AgentId) {
   return catalog[id];
 }
+
+/// ¿`value` es un id de agente vigente? Para validar datos guardados: el
+/// scheduler de un snapshot viejo podría nombrar un agente que la versión de
+/// hoy ya no conoce; ese caso cae a `null` (shell plana) en vez de romper.
+export function isAgentId(value: unknown): value is AgentId {
+  return typeof value === "string" && value in catalog;
+}

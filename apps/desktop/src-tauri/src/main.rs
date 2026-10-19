@@ -32,7 +32,13 @@ fn main() {
                     let _ = window.set_icon(icon.clone());
                 }
             }
-            app.manage(state::AppState::bootstrap()?);
+            // appdata del bundle (app_data_dir une el identificador del
+            // tauri.conf.json a la carpeta de datos del usuario).
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("no se pudo resolver el directorio de datos: {e}"))?;
+            app.manage(state::AppState::bootstrap(data_dir)?);
             agent_watcher::spawn(app.handle().clone());
             collab_status::spawn(app.handle().clone());
             Ok(())
@@ -43,6 +49,8 @@ fn main() {
             commands::write_terminal,
             commands::resize_terminal,
             commands::close_terminal,
+            commands::snapshot_load,
+            commands::snapshot_save,
             commands::list_subdirectories,
             commands::git_branch,
             commands::collab_status,

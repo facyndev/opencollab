@@ -11,6 +11,7 @@
 //   agentState(id, patch) emite terminal-agent-state con el estado completo (patch sobre el vacío)
 //   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
 //   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
+//   savedSnapshot         último payload de snapshot_save (versión 1 estampada por el mock)
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
@@ -19,6 +20,7 @@ export function installTauriMock() {
   const opened = [];
   const closed = [];
   const branches = {};
+  let saved = null; // snapshot de workspaces (snapshot_save / snapshot_load)
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -51,7 +53,7 @@ export function installTauriMock() {
       },
     });
 
-  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches };
+  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches, get savedSnapshot() { return saved; } };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -89,6 +91,13 @@ export function installTauriMock() {
           // Como el núcleo: matar el proceso dispara `terminal-exit` después.
           closed.push(args.terminalId);
           setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
+          return null;
+        case "snapshot_load":
+          // Sin snapshot guardado: primera corrida / arranque limpio.
+          return saved ? JSON.parse(JSON.stringify(saved)) : null;
+        case "snapshot_save":
+          // Guardado en memoria: los escenarios lo inspeccionan en __mock.savedSnapshot.
+          saved = { version: 1, workspaces: args.workspaces };
           return null;
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.

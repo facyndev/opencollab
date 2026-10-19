@@ -22,6 +22,7 @@ import {
 } from "@opencollab/ui";
 import { TerminalPane } from "./components/TerminalPane";
 import { useAuth, useCollabStatus, usePaneDrag } from "./hooks";
+import { loadSnapshot, saveSnapshot } from "./services/snapshot";
 
 function initialWorkspaces(): Workspace[] {
   const ws = newWorkspace("OpenCollab");
@@ -46,6 +47,38 @@ export function App() {
   const [statuses, setStatuses] = useState<Record<string, PaneStatus>>({});
   const [meta, setMeta] = useState<Record<string, PaneMeta>>({});
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // La estructura arranca con el default y a los valores reemplaza el snapshot
+  // guardado del núcleo (S5 del feature desktop-dual-storage): mientras carga,
+  // todo lo que asume `workspaces[0]` sigue funcionando.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    void loadSnapshot()
+      .then((loaded) => {
+        if (cancelled) return;
+        hydratedRef.current = true;
+        // Sin datos guardados queda el default, pero se reemite el estado para
+        // activar el guardado y fijar el baseline del primer arranque.
+        setWorkspaces(loaded ?? ((current: Workspace[]) => [...current]));
+      })
+      .catch((error) => {
+        // Error inesperado del núcleo al cargar: arranque limpio, igual que la
+        // cuarentena del archivo corrupto.
+        console.error("no se pudo cargar el snapshot de workspaces:", error);
+        if (!cancelled) hydratedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persistencia en cada mutación de la estructura; la cola del servicio
+  // (`saveSnapshot`) garantiza que dos guardados nunca se cruzan.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    void saveSnapshot(workspaces);
+  }, [workspaces]);
 
   const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0];
   const activeSession =

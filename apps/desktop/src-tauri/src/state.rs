@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use application::ports::{ProcessInspector, PtyPort, RelayProbe, SessionRepository};
+use application::ports::{ProcessInspector, PtyPort, RelayProbe, SessionRepository, SnapshotStore};
 use application::{
     ActivityTracker, AgentAdapter, AgentAdapters, AgentStates, AppError, CheckRelay, CloseTerminal,
     DetectTerminalAgents, InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal,
@@ -40,6 +40,10 @@ pub struct AppState {
     pub session_collaborators: SessionCollaborators,
     /// Sesión del desktop (tokens solo en memoria) + verifier PKCE pendiente.
     pub auth: AuthStore,
+    /// Persistencia de la estructura del escritorio (snapshot de workspaces,
+    /// sesiones y perfiles de arranque). El backend del modo lo decide la
+    /// configuración; en este momento es el archivo local en `data_dir`.
+    pub snapshot_store: Arc<dyn SnapshotStore>,
 }
 
 /// Adaptadores ricos disponibles. Si uno no puede arrancar (p. ej. no abre su
@@ -55,7 +59,9 @@ fn agent_adapters() -> Vec<Arc<dyn AgentAdapter>> {
 }
 
 impl AppState {
-    pub fn bootstrap() -> Result<Self, AppError> {
+    /// `data_dir` es el directorio de datos de la app (appdata resuelto por
+    /// Tauri en el setup); el port lo implanta en un archivo, no lo crea.
+    pub fn bootstrap(data_dir: std::path::PathBuf) -> Result<Self, AppError> {
         crate::env::load_dot_env();
         let repo: Arc<dyn SessionRepository> = Arc::new(InMemorySessionRepository::new());
         let pty: Arc<dyn PtyPort> = Arc::new(PortablePtyAdapter::new());
@@ -88,6 +94,7 @@ impl AppState {
             check_relay: CheckRelay::new(relay_probe),
             session_collaborators: SessionCollaborators::new(repo),
             auth: AuthStore::new(relay_addr),
+            snapshot_store: Arc::new(infrastructure::FsSnapshotStore::new(data_dir)),
         })
     }
 }

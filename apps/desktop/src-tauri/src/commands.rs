@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use application::ports::{TerminalOutputSink, TerminalSize};
+use application::storage::{StoredWorkspace, WorkspaceSnapshot};
 use domain::TerminalId;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -245,5 +246,33 @@ pub fn resize_terminal(
             terminal,
             TerminalSize { cols, rows },
         )
+        .map_err(|e| e.to_string())
+}
+
+// Snapshot de la estructura del escritorio (S5 del feature desktop-dual-storage).
+// Disco: `async` para no frenar la UI; las escrituras las encola el frontend
+// (una cola de promesas), así que acá no hace falta serializarlas más.
+
+/// El snapshot guardado; `None` si no hay nada (primera corrida, arranque
+/// limpio o cuarentena del archivo corrupto anterior).
+#[tauri::command(async)]
+pub fn snapshot_load(state: State<'_, AppState>) -> Result<Option<WorkspaceSnapshot>, String> {
+    state
+        .snapshot_store
+        .load_snapshot()
+        .map_err(|e| e.to_string())
+}
+
+/// Guarda la estructura completa. La versión del formato la maneja el núcleo
+/// (`WorkspaceSnapshot::new` estampa `SNAPSHOT_VERSION`).
+#[tauri::command(async)]
+pub fn snapshot_save(
+    state: State<'_, AppState>,
+    workspaces: Vec<StoredWorkspace>,
+) -> Result<(), String> {
+    let snapshot = WorkspaceSnapshot::new(workspaces);
+    state
+        .snapshot_store
+        .save_snapshot(&snapshot)
         .map_err(|e| e.to_string())
 }
