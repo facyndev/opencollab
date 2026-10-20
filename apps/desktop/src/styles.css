@@ -1321,6 +1321,13 @@ button.cwd-item:hover {
   font-size: 11px;
 }
 
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .storage-auth {
   display: flex;
   flex-direction: column;

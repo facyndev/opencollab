@@ -19,16 +19,11 @@ pub enum StorageMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageConfig {
-    #[serde(default = "current_version")]
     pub version: u32,
     pub mode: StorageMode,
     pub api_base_url: String,
     #[serde(default)]
     pub onboarding_complete: bool,
-}
-
-fn current_version() -> u32 {
-    CONFIG_VERSION
 }
 
 impl StorageConfig {
@@ -59,10 +54,12 @@ impl StorageConfig {
         if config.version != CONFIG_VERSION {
             return fallback;
         }
-        match normalize_api_base_url(&config.api_base_url) {
-            Ok(url) => config.api_base_url = url,
-            Err(_) => config.api_base_url = fallback.api_base_url,
-        }
+        let Ok(url) = normalize_api_base_url(&config.api_base_url) else {
+            // Una config inválida no debe dejar cloud + onboarding completo:
+            // el fallback es el default seguro completo, no solo la URL.
+            return fallback;
+        };
+        config.api_base_url = url;
         config
     }
 
@@ -95,6 +92,11 @@ fn normalize_api_base_url(value: &str) -> Result<String, String> {
         .or_else(|| trimmed.strip_prefix("https://"))
         .ok_or_else(|| "la URL de la API debe empezar con http:// o https://".to_string())?;
     if rest.is_empty() || rest.chars().any(char::is_whitespace) {
+        return Err("la URL de la API no es válida".to_string());
+    }
+    // Autoridad con host: rechaza `http://:8787` y `http:///path`.
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() || authority.starts_with(':') {
         return Err("la URL de la API no es válida".to_string());
     }
     if trimmed.contains(['?', '#']) {
@@ -177,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_api_base_url_falls_back_to_the_relay_default() {
+    fn invalid_api_base_url_falls_back_to_local_and_pending_onboarding() {
         let dir = TempDir::new("invalid");
         fs::write(
             StorageConfig::path(&dir.0),
@@ -185,8 +187,21 @@ mod tests {
         )
         .unwrap();
         let config = StorageConfig::load(&dir.0, default_url());
-        assert_eq!(config.mode, StorageMode::Cloud);
-        assert_eq!(config.api_base_url, default_url());
+        assert_eq!(config, StorageConfig::local(default_url()));
+    }
+
+    #[test]
+    fn missing_version_is_treated_as_malformed() {
+        let dir = TempDir::new("version");
+        fs::write(
+            StorageConfig::path(&dir.0),
+            r#"{"mode":"cloud","apiBaseUrl":"https://api.example.com","onboardingComplete":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            StorageConfig::load(&dir.0, default_url()),
+            StorageConfig::local(default_url())
+        );
     }
 
     #[test]
@@ -204,6 +219,10 @@ mod tests {
         config.api_base_url = "ftp://api.example.com".into();
         assert!(config.validate().is_err());
         config.api_base_url = "http://".into();
+        assert!(config.validate().is_err());
+        config.api_base_url = "http://:8787".into();
+        assert!(config.validate().is_err());
+        config.api_base_url = "http:///path".into();
         assert!(config.validate().is_err());
         config.api_base_url = "http://api.example.com?token=1".into();
         assert!(config.validate().is_err());

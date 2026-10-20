@@ -13,6 +13,9 @@
 //   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
 //   savedSnapshot         último payload de snapshot_save (versión 1 estampada por el mock)
 //   storageConfig         modo/base URL vigentes (storage_config_get/set)
+//   signIn()/signOut()    simula el deep link de login / logout (emite auth-changed)
+//   setSnapshot(snap)     precarga el snapshot que devuelve snapshot_load
+//   snapshotLoads         cantidad de snapshot_load ejecutados
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
@@ -22,13 +25,16 @@ export function installTauriMock() {
   const closed = [];
   const branches = {};
   let saved = null; // snapshot de workspaces (snapshot_save / snapshot_load)
-  // Configuración de almacenamiento: completa por defecto para no cambiar los
-  // escenarios existentes; `?mockFirstRun=1` simula la primera corrida.
+  const params = new URLSearchParams(location.search);
+  // ?mockFirstRun=1 simula la primera corrida; ?mockCloud=1 arranca en cloud
+  // con la configuración completa pero sin sesión en memoria (reinicio real).
+  let signedIn = false;
+  let snapshotLoads = 0;
   let storageConfig = {
     version: 1,
-    mode: "local",
+    mode: params.get("mockCloud") === "1" ? "cloud" : "local",
     apiBaseUrl: "http://127.0.0.1:8787",
-    onboardingComplete: new URLSearchParams(location.search).get("mockFirstRun") !== "1",
+    onboardingComplete: params.get("mockFirstRun") !== "1",
   };
   const encoder = new TextEncoder();
 
@@ -62,7 +68,38 @@ export function installTauriMock() {
       },
     });
 
-  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches, get savedSnapshot() { return saved; }, get storageConfig() { return storageConfig; } };
+  const user = { id: "u1", username: "tester", email: null, displayName: "Tester" };
+  const signIn = () => {
+    signedIn = true;
+    emit("auth-changed", { user });
+  };
+  const signOut = () => {
+    signedIn = false;
+    emit("auth-changed", { user: null });
+  };
+  window.__mock = {
+    emit,
+    agentState,
+    prompt,
+    writes,
+    opened,
+    closed,
+    branches,
+    signIn,
+    signOut,
+    setSnapshot(snapshot) {
+      saved = snapshot;
+    },
+    get savedSnapshot() {
+      return saved;
+    },
+    get storageConfig() {
+      return storageConfig;
+    },
+    get snapshotLoads() {
+      return snapshotLoads;
+    },
+  };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -105,6 +142,10 @@ export function installTauriMock() {
           // Fallo de carga inyectado por el escenario de regresión (?mockSnapshotLoadError=1).
           if (new URLSearchParams(location.search).get("mockSnapshotLoadError") === "1")
             throw new Error("snapshot_load failed (e2e)");
+          snapshotLoads += 1;
+          // Cloud sin tokens en memoria: el núcleo real responde sin sesión.
+          if (storageConfig.mode === "cloud" && !signedIn)
+            throw new Error("no hay sesión iniciada");
           // Sin snapshot guardado: primera corrida / arranque limpio.
           return saved ? JSON.parse(JSON.stringify(saved)) : null;
         case "snapshot_save":
@@ -128,11 +169,13 @@ export function installTauriMock() {
           // Como el núcleo: guarda el verifier y abre la web (acá solo devuelve la URL).
           return `http://localhost:1421/login?client=desktop&code_challenge=${args.challenge}`;
         case "auth_finish":
-          return { id: "u1", username: "tester", email: null, displayName: "Tester" };
+          signedIn = true;
+          return user;
         case "auth_status":
           // Sin sesión: anónimo (los E2E emiten `auth-changed` para simular el login).
-          return null;
+          return signedIn ? user : null;
         case "auth_logout":
+          signOut();
           return null;
         case "git_branch":
           return branches[args.path] ?? null;

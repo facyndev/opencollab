@@ -22,6 +22,7 @@ import authSignin from "./scenarios/auth-signin.mjs";
 import snapshotLoadError from "./scenarios/snapshot-load-error.mjs";
 import onboarding from "./scenarios/onboarding.mjs";
 import settingsStorage from "./scenarios/settings-storage.mjs";
+import cloudBootSession from "./scenarios/cloud-boot-session.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
@@ -35,6 +36,7 @@ const scenarios = {
   "fallo de carga no pisa el snapshot": snapshotLoadError,
   "primera corrida elige almacenamiento": onboarding,
   "ajustes de almacenamiento": settingsStorage,
+  "reinicio cloud sin sesión": cloudBootSession,
 };
 
 function chromePath() {

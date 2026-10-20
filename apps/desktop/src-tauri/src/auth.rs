@@ -701,4 +701,73 @@ mod tests {
         );
         assert!(store.has_session());
     }
+
+    #[test]
+    fn dos_401_concurrentes_comparten_un_solo_refresh() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let addr = listener.local_addr().expect("addr").to_string();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_server = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                hits_server.fetch_add(1, Ordering::SeqCst);
+                let body =
+                    r#"{"accessToken":"access-2","refreshToken":"refresh-2","expiresIn":600}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        let store = Arc::new(AuthStore {
+            api_addr: addr,
+            web_origin: DEFAULT_WEB_ORIGIN.to_string(),
+            inner: Mutex::new(Inner {
+                verifier: None,
+                session: Some(Session {
+                    access_token: "access-1".to_string(),
+                    refresh_token: "refresh-1".to_string(),
+                    expires_at: Instant::now() + Duration::from_secs(600),
+                    user: UserView {
+                        id: "u1".to_string(),
+                        username: "ana".to_string(),
+                        email: None,
+                        display_name: "Ana".to_string(),
+                    },
+                }),
+            }),
+            refresh_lock: Mutex::new(()),
+        });
+
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.refreshed_access_token_for_request("access-1")
+                })
+            })
+            .collect();
+        for handle in handles {
+            assert_eq!(handle.join().expect("hilo"), Ok("access-2".to_string()));
+        }
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "un solo refresh para dos 401"
+        );
+    }
 }

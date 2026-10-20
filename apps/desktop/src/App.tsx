@@ -20,6 +20,7 @@ import {
   type Session,
   type Workspace,
 } from "@opencollab/ui";
+import { CloudGate } from "./components/CloudGate";
 import { TerminalPane } from "./components/TerminalPane";
 import { Onboarding } from "./components/Onboarding";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -72,6 +73,14 @@ export function App() {
   // Descarta una carga que quedó en vuelo cuando ya empezó otra (cambio de
   // modo durante el arranque): su resultado pertenece a otro store.
   const hydrationGeneration = useRef(0);
+  // La grilla cloud no se muestra hasta que el snapshot cloud terminó de
+  // cargar: un default visible con persistencia apagada perdería mutaciones.
+  const [hydrationReady, setHydrationReady] = useState(false);
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
+  const hydratingRef = useRef(false);
+  // `applyStorage` hidrata el store nuevo directamente; este flag evita que el
+  // efecto de boot lance una segunda carga para el mismo cambio.
+  const skipHydrationEffect = useRef(false);
 
   /// Reemplaza la estructura y, si el workspace activo no existe en el store
   /// nuevo, reapunta la selección al primero (cambio local ↔ cloud).
@@ -93,21 +102,30 @@ export function App() {
   const hydrate = useCallback(
     async (resetWhenMissing = false) => {
       const generation = ++hydrationGeneration.current;
+      hydratingRef.current = true;
       hydratedRef.current = false;
+      setHydrationReady(false);
+      setHydrationError(null);
       try {
         const loaded = await loadSnapshot();
-        if (generation !== hydrationGeneration.current) return;
+        if (generation !== hydrationGeneration.current) return false;
         if (loaded && loaded.length > 0) adoptWorkspaces(loaded);
         else if (resetWhenMissing) adoptWorkspaces(initialWorkspaces());
         else setWorkspaces((current: Workspace[]) => [...current]);
         hydratedRef.current = true;
+        setHydrationReady(true);
+        return true;
       } catch (error) {
-        if (generation !== hydrationGeneration.current) return;
+        if (generation !== hydrationGeneration.current) return false;
         // Error inesperado del núcleo al cargar: la persistencia queda apagada
         // para no pisar un snapshot que todavía puede ser válido. La cuarentena
         // de un archivo corrupto la resuelve el núcleo y llega como `null`, no
         // como rechazo, así que este camino nunca habilita el guardado.
         console.error("no se pudo cargar el snapshot de workspaces:", error);
+        setHydrationError(error instanceof Error ? error.message : String(error));
+        return false;
+      } finally {
+        if (generation === hydrationGeneration.current) hydratingRef.current = false;
       }
     },
     [adoptWorkspaces],
@@ -120,20 +138,39 @@ export function App() {
     let cancelled = false;
     void loadStorageConfig()
       .then((config) => {
-        if (cancelled) return;
-        setStorage(config);
-        if (config.onboardingComplete) void hydrate();
+        if (!cancelled) setStorage(config);
       })
       .catch((error) => {
         console.error("no se pudo cargar la configuración de almacenamiento:", error);
-        if (cancelled) return;
-        setStorage({ ...DEFAULT_STORAGE_CONFIG, onboardingComplete: true });
-        void hydrate();
+        if (!cancelled) setStorage({ ...DEFAULT_STORAGE_CONFIG, onboardingComplete: true });
       });
     return () => {
       cancelled = true;
     };
-  }, [hydrate]);
+  }, []);
+
+  // El snapshot cloud solo se carga con sesión. Al perder la sesión se apaga
+  // la persistencia y se vuelve al gate de login; al recuperarla se recarga el
+  // store cloud. Para local, una única carga alcanza.
+  useEffect(() => {
+    if (!storage?.onboardingComplete) return;
+    if (storage.mode === "cloud" && auth.state.status !== "authenticated") {
+      // Cancela una carga en vuelo: su resultado pertenece a una sesión que ya
+      // no existe y no debe volver a habilitar el guardado.
+      hydrationGeneration.current += 1;
+      hydratingRef.current = false;
+      hydratedRef.current = false;
+      skipHydrationEffect.current = false;
+      setHydrationReady(false);
+      return;
+    }
+    if (skipHydrationEffect.current) {
+      skipHydrationEffect.current = false;
+      return;
+    }
+    if (hydrationReady || hydratingRef.current || hydrationError) return;
+    void hydrate();
+  }, [storage, auth.state.status, hydrate, hydrationReady, hydrationError]);
 
   /// Guarda el modo/base URL y recarga el store nuevo. `true` si el núcleo
   /// aceptó el cambio (cloud exige sesión y URL válida).
@@ -142,24 +179,44 @@ export function App() {
       setStorageBusy(true);
       setStorageError(null);
       const wasHydrated = hydratedRef.current;
+      const wasReady = hydrationReady;
       // Nada nuevo se guarda mientras se cambia de store; lo ya encolado
       // termina en el store viejo antes de que el núcleo lo reemplace.
       hydratedRef.current = false;
+      setHydrationReady(false);
+      setHydrationError(null);
       try {
         await flushSnapshotSaves();
         const next = await saveStorageConfig(mode, apiBaseUrl);
+        // El efecto de boot no debe lanzar una segunda carga: la de acá abajo
+        // es la que corresponde a este cambio de store.
+        skipHydrationEffect.current = true;
         setStorage(next);
+        if (!(await hydrate(true))) {
+          setStorageError("No se pudo cargar el almacenamiento seleccionado.");
+          return;
+        }
         setSettingsOpen(false);
-        await hydrate(true);
       } catch (error) {
         hydratedRef.current = wasHydrated;
+        setHydrationReady(wasReady);
         setStorageError(error instanceof Error ? error.message : String(error));
       } finally {
         setStorageBusy(false);
       }
     },
-    [hydrate],
+    [hydrate, hydrationReady],
   );
+
+  const retryHydration = useCallback(() => {
+    setHydrationError(null);
+    void hydrate();
+  }, [hydrate]);
+
+  const useLocalStorage = useCallback(() => {
+    if (!storage) return;
+    void applyStorage("local", storage.apiBaseUrl);
+  }, [applyStorage, storage]);
 
   // Persistencia en cada mutación de la estructura; la cola del servicio
   // (`saveSnapshot`) garantiza que dos guardados nunca se cruzan.
@@ -346,6 +403,51 @@ export function App() {
         onCancelLogin={auth.cancelLogin}
       />
     );
+  }
+
+  // Cloud sin sesión no monta la grilla: sin tokens, cada mutación se
+  // descartaría en silencio. El login rearma el store y recién ahí se hidrata.
+  if (storage.mode === "cloud") {
+    if (auth.state.status === "unknown") {
+      return <div className="boot">Loading…</div>;
+    }
+    if (auth.state.status !== "authenticated") {
+      return (
+        <CloudGate
+          auth={auth.state}
+          authBusy={auth.busy}
+          authError={auth.error}
+          loginUrl={auth.loginUrl}
+          busy={storageBusy}
+          error={hydrationError}
+          onSignIn={() => void auth.beginLogin()}
+          onCancelLogin={auth.cancelLogin}
+          onSignOut={() => void auth.logout()}
+          onRetry={retryHydration}
+          onUseLocal={useLocalStorage}
+        />
+      );
+    }
+    if (!hydrationReady) {
+      if (!hydrationError) {
+        return <div className="boot">Loading your cloud workspace…</div>;
+      }
+      return (
+        <CloudGate
+          auth={auth.state}
+          authBusy={auth.busy}
+          authError={auth.error}
+          loginUrl={auth.loginUrl}
+          busy={storageBusy}
+          error={hydrationError}
+          onSignIn={() => void auth.beginLogin()}
+          onCancelLogin={auth.cancelLogin}
+          onSignOut={() => void auth.logout()}
+          onRetry={retryHydration}
+          onUseLocal={useLocalStorage}
+        />
+      );
+    }
   }
 
   return (
