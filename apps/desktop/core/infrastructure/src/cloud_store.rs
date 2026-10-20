@@ -380,33 +380,34 @@ impl SnapshotStore for CloudSnapshotStore {
             // sucede en modo local sin archivo.
             return Ok(None);
         }
-        let workspaces = current
-            .into_iter()
-            .map(|workspace| StoredWorkspace {
+        let mut seq = 0u64;
+        let mut workspaces = Vec::new();
+        for workspace in current {
+            let mut sessions = Vec::new();
+            for session in workspace.sessions {
+                let mut panes = Vec::new();
+                for terminal in session.terminals {
+                    panes.push(StoredPane {
+                        id: terminal.id,
+                        seq,
+                        minimized: terminal.minimized,
+                        initial_cwd: terminal.cwd,
+                        agent: terminal.agent,
+                    });
+                    seq += 1;
+                }
+                sessions.push(StoredSession {
+                    id: session.id,
+                    name: session.name,
+                    panes,
+                });
+            }
+            workspaces.push(StoredWorkspace {
                 id: workspace.id,
                 name: workspace.name,
-                sessions: workspace
-                    .sessions
-                    .into_iter()
-                    .map(|session| StoredSession {
-                        id: session.id,
-                        name: session.name,
-                        panes: session
-                            .terminals
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, terminal)| StoredPane {
-                                id: terminal.id,
-                                seq: index as u64,
-                                minimized: terminal.minimized,
-                                initial_cwd: terminal.cwd,
-                                agent: terminal.agent,
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-            })
-            .collect();
+                sessions,
+            });
+        }
         Ok(Some(WorkspaceSnapshot::new(workspaces)))
     }
 
@@ -915,6 +916,45 @@ mod tests {
         let cloud = store(&server);
         assert_eq!(cloud.load_snapshot().unwrap(), None);
         assert_eq!(server.count(), 1, "con la lista vacía no se pide más");
+    }
+
+    #[test]
+    fn load_no_reutiliza_seq_entre_sesiones() {
+        let (wid, s1, s2) = (
+            local_id_to_server_uuid("ws-1"),
+            local_id_to_server_uuid("s-1"),
+            local_id_to_server_uuid("s-2"),
+        );
+        let (t1, t2) = (
+            local_id_to_server_uuid("p-1"),
+            local_id_to_server_uuid("p-2"),
+        );
+        let pane = |id: &str| {
+            json!({
+                "id": id,
+                "name": "PowerShell",
+                "command": "powershell.exe",
+                "args": [],
+                "cwd": null,
+                "agent": null,
+                "minimized": false,
+            })
+        };
+        let server = MockServer::start(vec![
+            ok_reply(json!([workspace_entry(&wid, "Cloud")])),
+            ok_reply(json!([
+                server_session(&s1, "S1", vec![pane(&t1)]),
+                server_session(&s2, "S2", vec![pane(&t2)]),
+            ])),
+        ]);
+
+        let loaded = store(&server).load_snapshot().unwrap().unwrap();
+        let seqs: Vec<u64> = loaded.workspaces[0]
+            .sessions
+            .iter()
+            .flat_map(|session| session.panes.iter().map(|pane| pane.seq))
+            .collect();
+        assert_eq!(seqs, vec![0, 1], "Pane.seq es único global");
     }
 
     #[test]
