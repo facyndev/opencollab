@@ -95,3 +95,103 @@ pub trait SnapshotStore: Send + Sync {
     fn load_snapshot(&self) -> Result<Option<WorkspaceSnapshot>, PortError>;
     fn save_snapshot(&self, snapshot: &WorkspaceSnapshot) -> Result<(), PortError>;
 }
+
+/// Token de acceso para la API remota (modo nube). Se consulta por pedido
+/// HTTP: si el access ya venció o está por vencer, el proveedor lo refresca
+/// antes de devolverlo.
+pub trait AccessTokenProvider: Send + Sync {
+    /// Token vigente, refrescándolo si la sesión lo pide (igual que hace la web).
+    fn access_token(&self) -> Result<String, PortError>;
+    /// Token apenas refrescado a la fuerza: la API rechazó el anterior con 401.
+    /// Aunque el access parezca vigente, en este caso hay que refrescar sí o sí.
+    fn refreshed_access_token(&self) -> Result<String, PortError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    /// Fake del puerto: una lista de tokens donde el corriente es el primero.
+    /// `access_token` devuelve el corriente sin tocar la lista (un pedido no
+    /// debe refrescar); `refreshed_access_token` descarta el corriente y pasa
+    /// al siguiente, como haría un refresh real.
+    struct FakeTokens {
+        tokens: Mutex<Vec<String>>,
+    }
+
+    impl FakeTokens {
+        fn new(tokens: &[&str]) -> Self {
+            Self {
+                tokens: Mutex::new(tokens.iter().map(|t| t.to_string()).collect()),
+            }
+        }
+    }
+
+    impl AccessTokenProvider for FakeTokens {
+        fn access_token(&self) -> Result<String, PortError> {
+            let tokens = self.tokens.lock().expect("fake");
+            tokens
+                .first()
+                .cloned()
+                .ok_or_else(|| PortError::new("sin token: no hay sesión iniciada"))
+        }
+
+        fn refreshed_access_token(&self) -> Result<String, PortError> {
+            let mut tokens = self.tokens.lock().expect("fake");
+            if tokens.is_empty() {
+                return Err(PortError::new("sin token: no hay sesión iniciada"));
+            }
+            if tokens.len() > 1 {
+                tokens.remove(0);
+            }
+            Ok(tokens[0].clone())
+        }
+    }
+
+    #[test]
+    fn cada_pedido_consulta_el_token_vigente() {
+        let tokens = FakeTokens::new(&["tok-1", "tok-2"]);
+        // Dos pedidos seguidos reciben el mismo token y no lo consumen.
+        assert_eq!(tokens.access_token().unwrap(), "tok-1");
+        assert_eq!(tokens.access_token().unwrap(), "tok-1");
+    }
+
+    #[test]
+    fn el_refresh_forzado_avanza_al_token_siguiente() {
+        let tokens = FakeTokens::new(&["tok-1", "tok-2"]);
+        assert_eq!(tokens.access_token().unwrap(), "tok-1");
+        assert_eq!(tokens.refreshed_access_token().unwrap(), "tok-2");
+        // Y el nuevo pasa a ser el corriente.
+        assert_eq!(tokens.access_token().unwrap(), "tok-2");
+        // Un último token se reutiliza: sin sesión a quién refrescar no existe.
+        assert_eq!(tokens.refreshed_access_token().unwrap(), "tok-2");
+    }
+
+    #[test]
+    fn sin_token_todos_los_caminos_fallan_con_port_error() {
+        let tokens = FakeTokens::new(&[]);
+        assert_eq!(
+            tokens.access_token(),
+            Err(PortError::new("sin token: no hay sesión iniciada"))
+        );
+        assert_eq!(
+            tokens.refreshed_access_token(),
+            Err(PortError::new("sin token: no hay sesión iniciada"))
+        );
+    }
+
+    /// Helper que compila solo si el puerto es un trait-objeto `Send + Sync`:
+    /// el modo nube lo inyecta por `Arc<dyn AccessTokenProvider`.
+    #[allow(dead_code)]
+    fn port_is_shared_by_reference(provider: Arc<dyn AccessTokenProvider>) -> String {
+        provider.access_token().unwrap()
+    }
+
+    #[test]
+    fn el_puerto_se_comparte_como_trait_objeto() {
+        let provider: Arc<dyn AccessTokenProvider> = Arc::new(FakeTokens::new(&["tok"]));
+        assert_eq!(port_is_shared_by_reference(provider), "tok");
+    }
+}

@@ -16,6 +16,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use application::ports::{AccessTokenProvider, PortError};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -79,6 +80,23 @@ struct Inner {
     session: Option<Session>,
 }
 
+/// Resultado de consultar/renovar la sesión. `Fresh` no toca la red; `Refreshed`
+/// ya actualizó el par de tokens; `Rejected` cerró la sesión (el relay rechazó
+/// el refresh); `Malformed` conserva la sesión (respuesta ilegible).
+enum RefreshOutcome {
+    Fresh {
+        user: UserView,
+        access_token: String,
+    },
+    Refreshed {
+        user: UserView,
+        access_token: String,
+    },
+    NoSession,
+    Rejected,
+    Malformed,
+}
+
 /// Sesión del desktop: dirección del relay, origen de la web y estado mutable
 /// (verifier pendiente + tokens). Todo queda en memoria del proceso.
 pub struct AuthStore {
@@ -106,6 +124,88 @@ impl AuthStore {
             "{}/login?client=desktop&code_challenge={challenge}",
             self.web_origin
         )
+    }
+
+    /// Token para un pedido a la API: si el access venció o está por vencer,
+    /// renueva el par antes de devolverlo. Sin sesión (o refresh rechazado) es
+    /// un error: el modo nube nunca manda un pedido sin credencial.
+    pub fn access_token_for_request(&self) -> Result<String, String> {
+        match self.refresh_now(false) {
+            RefreshOutcome::Fresh { access_token, .. }
+            | RefreshOutcome::Refreshed { access_token, .. } => Ok(access_token),
+            RefreshOutcome::NoSession | RefreshOutcome::Rejected => {
+                Err("no hay sesión iniciada".to_string())
+            }
+            RefreshOutcome::Malformed => Err("respuesta del relay inválida".to_string()),
+        }
+    }
+
+    /// Igual que `access_token_for_request`, pero fuerza el refresh aunque el
+    /// access parezca vigente: la API acaba de rechazarlo con 401.
+    pub fn refreshed_access_token_for_request(&self) -> Result<String, String> {
+        match self.refresh_now(true) {
+            RefreshOutcome::Fresh { access_token, .. }
+            | RefreshOutcome::Refreshed { access_token, .. } => Ok(access_token),
+            RefreshOutcome::NoSession | RefreshOutcome::Rejected => {
+                Err("no hay sesión iniciada".to_string())
+            }
+            RefreshOutcome::Malformed => Err("respuesta del relay inválida".to_string()),
+        }
+    }
+
+    /// Estado de la sesión y, si corresponde, refresh contra el relay. Es la
+    /// única implementación del refresh: la comparten `auth_status` y el
+    /// proveedor de tokens del modo nube.
+    fn refresh_now(&self, force: bool) -> RefreshOutcome {
+        let refresh_token = {
+            let inner = self.inner.lock().expect("auth");
+            let Some(session) = inner.session.as_ref() else {
+                return RefreshOutcome::NoSession;
+            };
+            if !force
+                && session.expires_at.saturating_duration_since(Instant::now()) > REFRESH_MARGIN
+            {
+                return RefreshOutcome::Fresh {
+                    user: session.user.clone(),
+                    access_token: session.access_token.clone(),
+                };
+            }
+            session.refresh_token.clone()
+        };
+        let body = format!("{{\"refreshToken\":\"{}\"}}", json_escape(&refresh_token));
+        match post_json(self, "/auth/refresh", &body) {
+            Ok((200, raw)) => match serde_json::from_slice::<TokenPairBody>(&raw) {
+                Ok(pair) => {
+                    let mut inner = self.inner.lock().expect("auth");
+                    let Some(session) = inner.session.as_mut() else {
+                        return RefreshOutcome::NoSession;
+                    };
+                    session.access_token = pair.access_token;
+                    session.refresh_token = pair.refresh_token;
+                    session.expires_at = Instant::now() + Duration::from_secs(pair.expires_in);
+                    RefreshOutcome::Refreshed {
+                        user: session.user.clone(),
+                        access_token: session.access_token.clone(),
+                    }
+                }
+                Err(_) => RefreshOutcome::Malformed,
+            },
+            _ => {
+                self.inner.lock().expect("auth").session = None;
+                RefreshOutcome::Rejected
+            }
+        }
+    }
+}
+
+impl AccessTokenProvider for AuthStore {
+    fn access_token(&self) -> Result<String, PortError> {
+        self.access_token_for_request().map_err(PortError::new)
+    }
+
+    fn refreshed_access_token(&self) -> Result<String, PortError> {
+        self.refreshed_access_token_for_request()
+            .map_err(PortError::new)
     }
 }
 
@@ -349,49 +449,25 @@ pub fn auth_finish(
 /// lo renueva una vez (igual que la web); si el refresh falla, cierra la sesión.
 #[tauri::command(async)]
 pub fn auth_status(app: AppHandle, state: State<'_, AppState>) -> Result<Option<UserView>, String> {
-    if let Some(user) = fresh_user(&state.auth) {
-        return Ok(Some(user));
-    }
-    let Some(refresh_token) = refresh_due(&state.auth) else {
-        return Ok(state
+    match state.auth.refresh_now(false) {
+        RefreshOutcome::Fresh { user, .. } => Ok(Some(user)),
+        RefreshOutcome::Refreshed { user, .. } => {
+            emit_changed(&app, Some(user.clone()));
+            Ok(Some(user))
+        }
+        RefreshOutcome::NoSession => Ok(None),
+        RefreshOutcome::Rejected => {
+            emit_changed(&app, None);
+            Ok(None)
+        }
+        RefreshOutcome::Malformed => Ok(state
             .auth
             .inner
             .lock()
             .expect("auth")
             .session
             .as_ref()
-            .map(|s| s.user.clone()));
-    };
-    let body = format!("{{\"refreshToken\":\"{}\"}}", json_escape(&refresh_token));
-    match post_json(&state.auth, "/auth/refresh", &body) {
-        Ok((200, raw)) => match serde_json::from_slice::<TokenPairBody>(&raw) {
-            Ok(pair) => {
-                let mut inner = state.auth.inner.lock().expect("auth");
-                if let Some(session) = inner.session.as_mut() {
-                    session.access_token = pair.access_token;
-                    session.refresh_token = pair.refresh_token;
-                    session.expires_at = Instant::now() + Duration::from_secs(pair.expires_in);
-                    let user = session.user.clone();
-                    drop(inner);
-                    emit_changed(&app, Some(user.clone()));
-                    return Ok(Some(user));
-                }
-                Ok(None)
-            }
-            Err(_) => Ok(state
-                .auth
-                .inner
-                .lock()
-                .expect("auth")
-                .session
-                .as_ref()
-                .map(|s| s.user.clone())),
-        },
-        _ => {
-            state.auth.inner.lock().expect("auth").session = None;
-            emit_changed(&app, None);
-            Ok(None)
-        }
+            .map(|s| s.user.clone())),
     }
 }
 
@@ -412,29 +488,6 @@ pub fn auth_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
     }
     emit_changed(&app, None);
     Ok(())
-}
-
-fn fresh_user(store: &AuthStore) -> Option<UserView> {
-    let inner = store.inner.lock().expect("auth");
-    inner.session.as_ref().and_then(|session| {
-        if session.expires_at.saturating_duration_since(Instant::now()) > REFRESH_MARGIN {
-            Some(session.user.clone())
-        } else {
-            None
-        }
-    })
-}
-
-/// Refresh token si la sesión existe y el access está vencido o por vencer.
-fn refresh_due(store: &AuthStore) -> Option<String> {
-    let inner = store.inner.lock().expect("auth");
-    inner.session.as_ref().and_then(|session| {
-        if session.expires_at.saturating_duration_since(Instant::now()) <= REFRESH_MARGIN {
-            Some(session.refresh_token.clone())
-        } else {
-            None
-        }
-    })
 }
 
 #[cfg(test)]
@@ -557,5 +610,56 @@ mod tests {
             _ => Err(std::env::VarError::NotPresent),
         });
         assert_eq!(origin, "http://localhost:1421");
+    }
+
+    fn store_with_session(access_token: &str, refresh_token: &str) -> AuthStore {
+        AuthStore {
+            api_addr: "127.0.0.1:1".to_string(),
+            web_origin: DEFAULT_WEB_ORIGIN.to_string(),
+            inner: Mutex::new(Inner {
+                verifier: None,
+                session: Some(Session {
+                    access_token: access_token.to_string(),
+                    refresh_token: refresh_token.to_string(),
+                    expires_at: Instant::now() + Duration::from_secs(600),
+                    user: UserView {
+                        id: "u1".to_string(),
+                        username: "ana".to_string(),
+                        email: None,
+                        display_name: "Ana".to_string(),
+                    },
+                }),
+            }),
+        }
+    }
+
+    #[test]
+    fn fresh_session_token_comes_from_memory_without_the_relay() {
+        // El relay apunta a un puerto cerrado a propósito: un token vigente no
+        // debe intentar red, ni por el método propio ni por el puerto.
+        let store = store_with_session("access-1", "refresh-1");
+        assert_eq!(store.access_token_for_request().unwrap(), "access-1");
+        assert_eq!(
+            AccessTokenProvider::access_token(&store).unwrap(),
+            "access-1"
+        );
+    }
+
+    #[test]
+    fn no_session_cannot_produce_a_token() {
+        let store = AuthStore {
+            api_addr: "127.0.0.1:1".to_string(),
+            web_origin: DEFAULT_WEB_ORIGIN.to_string(),
+            inner: Mutex::new(Inner {
+                verifier: None,
+                session: None,
+            }),
+        };
+        assert_eq!(
+            store.access_token_for_request(),
+            Err("no hay sesión iniciada".to_string())
+        );
+        assert!(AccessTokenProvider::access_token(&store).is_err());
+        assert!(store.refreshed_access_token_for_request().is_err());
     }
 }

@@ -3,6 +3,7 @@
 mod agent_launch;
 mod claude_adapter;
 mod claude_hooks;
+mod cloud_store;
 mod directory_browser;
 mod hook_receiver;
 mod local_store;
@@ -18,6 +19,7 @@ mod sse;
 
 pub use agent_launch::{agent_shell_profile, command_exists};
 pub use claude_adapter::ClaudeCodeAdapter;
+pub use cloud_store::{local_id_to_server_uuid, CloudSnapshotStore};
 pub use directory_browser::FsDirectoryBrowser;
 pub use hook_receiver::HookReceiver;
 pub use local_store::FsSnapshotStore;
