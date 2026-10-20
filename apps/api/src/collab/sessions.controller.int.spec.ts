@@ -44,6 +44,8 @@ async function call(method: string, path: string, body?: unknown, token?: string
 
 const get = (path: string, token?: string) => call('GET', path, undefined, token);
 const post = (path: string, body?: unknown, token?: string) => call('POST', path, body ?? {}, token);
+const del = (path: string, token?: string) => call('DELETE', path, undefined, token);
+const patch = (path: string, body?: unknown, token?: string) => call('PATCH', path, body ?? {}, token);
 
 let counter = 0;
 async function registerUser(prefix = 'user'): Promise<{ id: string; token: string }> {
@@ -232,5 +234,146 @@ describe('GET /sessions/:id', () => {
   it('returns 404 for an unknown session', async () => {
     const owner = await registerUser();
     expect((await get('/sessions/00000000-0000-0000-0000-000000000000', owner.token)).status).toBe(404);
+  });
+});
+
+// S7: explicit session ids power the desktop's idempotent cloud round-trip.
+describe('POST /workspaces/:workspaceId/sessions with explicit id', () => {
+  it('creates the session with the caller-provided id (201)', async () => {
+    const owner = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    const id = '20000000-0000-4000-8000-000000000001';
+
+    const res = await post(`/workspaces/${ws.id}/sessions`, { name: 'Con id', id }, owner.token);
+    expect(res.status).toBe(201);
+    const body = res.body as { id: string; name: string };
+    expect(body.id).toBe(id);
+    expect(body.name).toBe('Con id');
+  });
+
+  it('returns 200 with the current view for a same-owner retry (idempotent)', async () => {
+    const owner = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    const id = '20000000-0000-4000-8000-000000000002';
+    await post(`/workspaces/${ws.id}/sessions`, { name: 'Original', id }, owner.token);
+
+    const res = await post(`/workspaces/${ws.id}/sessions`, { name: 'Original', id }, owner.token);
+    expect(res.status).toBe(200);
+    const body = res.body as { id: string; name: string };
+    expect(body.id).toBe(id);
+    expect(body.name).toBe('Original');
+
+    const list = (await get(`/workspaces/${ws.id}/sessions`, owner.token)).body as { id: string }[];
+    expect(list.filter((s) => s.id === id)).toHaveLength(1);
+  });
+
+  it('returns 409 for a session id owned by another workspace owner', async () => {
+    const owner = await registerUser();
+    const other = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    const foreign = await createWorkspace(other.token, 'extranjero');
+    const taken = (
+      await post(`/workspaces/${foreign.id}/sessions`, { name: 'suyo' }, other.token)
+    ).body as { id: string };
+
+    const res = await post(`/workspaces/${ws.id}/sessions`, { name: 'mío', id: taken.id }, owner.token);
+    expect(res.status).toBe(409);
+  });
+
+  it('rejects a non-uuid id with 400', async () => {
+    const owner = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    expect(
+      (await post(`/workspaces/${ws.id}/sessions`, { name: 'x', id: 'not-a-uuid' }, owner.token)).status,
+    ).toBe(400);
+  });
+});
+
+// S7: session rename and delete complete the desktop's snapshot reconciliation.
+describe('PATCH /sessions/:id', () => {
+  it('renames for the owner (200 with the current session view)', async () => {
+    const owner = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    const session = (
+      await post(`/workspaces/${ws.id}/sessions`, { name: 'antes' }, owner.token)
+    ).body as SessionBody;
+
+    const res = await patch(`/sessions/${session.id}`, { name: 'Renombrada' }, owner.token);
+    expect(res.status).toBe(200);
+    const body = res.body as SessionBody;
+    expect(body.id).toBe(session.id);
+    expect(body.name).toBe('Renombrada');
+    expect(body.terminals).toEqual([]);
+
+    const persisted = await sessions.find(session.id as SessionId);
+    expect(persisted?.name).toBe('Renombrada');
+  });
+
+  it('returns 403 for a member and a stranger, 404 for unknown, 401 unauthenticated', async () => {
+    const owner = await registerUser();
+    const member = await registerUser();
+    const stranger = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    await seedMember(ws.id as WorkspaceId, owner.id as UserId, member.id as UserId);
+    const session = (
+      await post(`/workspaces/${ws.id}/sessions`, { name: 'compartida' }, owner.token)
+    ).body as SessionBody;
+    const other = await registerUser();
+    const otherWs = await createWorkspace(other.token, 'otro');
+
+    expect((await patch(`/sessions/${session.id}`, { name: 'x' }, member.token)).status).toBe(403);
+    expect((await patch(`/sessions/${session.id}`, { name: 'x' }, stranger.token)).status).toBe(403);
+    expect((await patch('/sessions/00000000-0000-0000-0000-000000000000', { name: 'x' }, owner.token)).status).toBe(404);
+    // A workspace id is not a session id: an unknown session answers 404.
+    expect((await patch(`/sessions/${otherWs.id}`, { name: 'x' }, owner.token)).status).toBe(404);
+    expect((await patch(`/sessions/${session.id}`, { name: 'x' })).status).toBe(401);
+  });
+
+  it('rejects a blank name with 400', async () => {
+    const owner = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    const session = (
+      await post(`/workspaces/${ws.id}/sessions`, { name: 's' }, owner.token)
+    ).body as SessionBody;
+    expect((await patch(`/sessions/${session.id}`, { name: '' }, owner.token)).status).toBe(400);
+    expect((await patch(`/sessions/${session.id}`, { name: '   ' }, owner.token)).status).toBe(400);
+    expect((await patch(`/sessions/${session.id}`, { extra: true }, owner.token)).status).toBe(400);
+  });
+});
+
+describe('DELETE /sessions/:id', () => {
+  it('deletes for the owner (204) and removes its terminals', async () => {
+    const owner = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    const session = (
+      await post(`/workspaces/${ws.id}/sessions`, { name: 'borrar' }, owner.token)
+    ).body as SessionBody;
+    await post(`/sessions/${session.id}/terminals`, { name: 't', command: 'sh' }, owner.token);
+    expect(await t.prisma.terminal.count()).toBe(1);
+
+    const res = await del(`/sessions/${session.id}`, owner.token);
+    expect(res.status).toBe(204);
+
+    expect(await t.prisma.terminal.count()).toBe(0);
+    expect((await get(`/sessions/${session.id}`, owner.token)).status).toBe(404);
+    // The workspace and the parent grouping survive the session delete.
+    expect(await t.prisma.workspace.count()).toBe(1);
+    expect((await get(`/workspaces/${ws.id}/sessions`, owner.token)).body).toEqual([]);
+  });
+
+  it('returns 403 for a member and a stranger, 404 for unknown, 401 unauthenticated', async () => {
+    const owner = await registerUser("owner");
+    const member = await registerUser();
+    const stranger = await registerUser();
+    const ws = await createWorkspace(owner.token);
+    await seedMember(ws.id as WorkspaceId, owner.id as UserId, member.id as UserId);
+    const session = (
+      await post(`/workspaces/${ws.id}/sessions`, { name: 'protegida' }, owner.token)
+    ).body as SessionBody;
+
+    expect((await del(`/sessions/${session.id}`, member.token)).status).toBe(403);
+    expect((await del(`/sessions/${session.id}`, stranger.token)).status).toBe(403);
+    expect((await del('/sessions/00000000-0000-0000-0000-000000000000', owner.token)).status).toBe(404);
+    expect((await del(`/sessions/${session.id}`)).status).toBe(401);
   });
 });

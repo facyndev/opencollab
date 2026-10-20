@@ -42,6 +42,8 @@ async function call(method: string, path: string, body?: unknown, token?: string
 
 const get = (path: string, token?: string) => call('GET', path, undefined, token);
 const post = (path: string, body?: unknown, token?: string) => call('POST', path, body ?? {}, token);
+const del = (path: string, token?: string) => call('DELETE', path, undefined, token);
+const patch = (path: string, body?: unknown, token?: string) => call('PATCH', path, body ?? {}, token);
 
 let counter = 0;
 async function registerUser(prefix = 'user'): Promise<{ id: string; token: string }> {
@@ -149,5 +151,125 @@ describe('GET /workspaces/:id', () => {
 
     expect((await get('/workspaces/00000000-0000-0000-0000-000000000000', owner.token)).status).toBe(404);
     expect((await get(`/workspaces/${ws.id}`, stranger.token)).status).toBe(403);
+  });
+});
+
+// S7: explicit ids let the desktop create idempotently (cloud round-trip).
+describe('POST /workspaces with explicit id', () => {
+  it('creates the workspace with the caller-provided id (201)', async () => {
+    const owner = await registerUser();
+    const id = '10000000-0000-4000-8000-000000000001';
+    const res = await post('/workspaces', { name: 'Con id', id }, owner.token);
+    expect(res.status).toBe(201);
+    const body = res.body as { id: string; name: string; owner: string };
+    expect(body.id).toBe(id);
+    expect(body.name).toBe('Con id');
+    expect(body.owner).toBe(owner.id);
+  });
+
+  it('returns 200 with the current view for a same-owner retry (idempotent)', async () => {
+    const owner = await registerUser();
+    const id = '10000000-0000-4000-8000-000000000002';
+    await post('/workspaces', { name: 'Original', id }, owner.token);
+
+    const res = await post('/workspaces', { name: 'Original', id }, owner.token);
+    expect(res.status).toBe(200);
+    const body = res.body as { id: string; name: string; owner: string };
+    expect(body.id).toBe(id);
+    expect(body.name).toBe('Original');
+    // The retry created nothing extra.
+    const list = (await get('/workspaces', owner.token)).body as { id: string }[];
+    expect(list.filter((w) => w.id === id)).toHaveLength(1);
+  });
+
+  it('returns 409 for another owner\'s id', async () => {
+    const first = await registerUser();
+    const second = await registerUser();
+    const taken = (await post('/workspaces', { name: 'mine' }, first.token)).body as { id: string };
+
+    const res = await post('/workspaces', { name: 'other', id: taken.id }, second.token);
+    expect(res.status).toBe(409);
+  });
+
+  it('rejects a non-uuid id with 400', async () => {
+    const owner = await registerUser();
+    const res = await post('/workspaces', { name: 'x', id: 'not-a-uuid' }, owner.token);
+    expect(res.status).toBe(400);
+  });
+});
+
+// S7: rename is an owner action behind the same classification as GET detail.
+describe('PATCH /workspaces/:id', () => {
+  it('renames for the owner (200 with the current detail view)', async () => {
+    const owner = await registerUser();
+    const wsId = await seedWorkspaceWithMember(owner.id as UserId, (await registerUser()).id as UserId, 'antes');
+
+    const res = await patch(`/workspaces/${wsId}`, { name: 'Renombrado' }, owner.token);
+    expect(res.status).toBe(200);
+    const body = res.body as { id: string; name: string; owner: string; members: unknown[] };
+    expect(body.id).toBe(wsId);
+    expect(body.name).toBe('Renombrado');
+    expect(body.owner).toBe(owner.id);
+    expect(body.members).toHaveLength(1);
+
+    const persisted = await workspaces.find(wsId);
+    expect(persisted?.name).toBe('Renombrado');
+  });
+
+  it('returns 403 for a member and a stranger, 404 for unknown, 401 unauthenticated', async () => {
+    const owner = await registerUser();
+    const member = await registerUser();
+    const stranger = await registerUser();
+    const wsId = await seedWorkspaceWithMember(owner.id as UserId, member.id as UserId, 'privado');
+    const ws = (await post('/workspaces', { name: 'hidden' }, owner.token)).body as { id: string };
+
+    expect((await patch(`/workspaces/${wsId}`, { name: 'x' }, member.token)).status).toBe(403);
+    expect((await patch(`/workspaces/${wsId}`, { name: 'x' }, stranger.token)).status).toBe(403);
+    // A member only got read access; the name they can see cannot be changed by them.
+    const memberRead = await get(`/workspaces/${wsId}`, member.token);
+    expect(memberRead.status).toBe(200);
+    expect((await patch(`/workspaces/${ws.id}`, { name: 'y' }, stranger.token)).status).toBe(403);
+    expect((await patch('/workspaces/00000000-0000-0000-0000-000000000000', { name: 'y' }, owner.token)).status).toBe(404);
+    expect((await patch(`/workspaces/${wsId}`, { name: 'y' })).status).toBe(401);
+  });
+
+  it('rejects a blank name with 400', async () => {
+    const owner = await registerUser();
+    const ws = (await post('/workspaces', { name: 'x' }, owner.token)).body as { id: string };
+    expect((await patch(`/workspaces/${ws.id}`, { name: '' }, owner.token)).status).toBe(400);
+    expect((await patch(`/workspaces/${ws.id}`, { name: '   ' }, owner.token)).status).toBe(400);
+    expect((await patch(`/workspaces/${ws.id}`, { extra: true }, owner.token)).status).toBe(400);
+  });
+});
+
+describe('DELETE /workspaces/:id', () => {
+  it('deletes for the owner (204) and cascades sessions and terminals', async () => {
+    const owner = await registerUser();
+    const wsId = (await post('/workspaces', { name: 'borrar' }, owner.token)).body as { id: string };
+    const session = (
+      await post(`/workspaces/${wsId.id}/sessions`, { name: 's' }, owner.token)
+    ).body as { id: string };
+    await post(`/sessions/${session.id}/terminals`, { name: 't', command: 'sh' }, owner.token);
+    expect(await t.prisma.terminal.count()).toBe(1);
+
+    const res = await del(`/workspaces/${wsId.id}`, owner.token);
+    expect(res.status).toBe(204);
+
+    expect(await t.prisma.workspace.count()).toBe(0);
+    expect(await t.prisma.session.count()).toBe(0);
+    expect(await t.prisma.terminal.count()).toBe(0);
+    expect((await get(`/workspaces/${wsId.id}`, owner.token)).status).toBe(404);
+  });
+
+  it('returns 403 for a member and a stranger, 404 for unknown, 401 unauthenticated', async () => {
+    const owner = await registerUser();
+    const member = await registerUser();
+    const stranger = await registerUser();
+    const wsId = await seedWorkspaceWithMember(owner.id as UserId, member.id as UserId, 'protegido');
+
+    expect((await del(`/workspaces/${wsId}`, member.token)).status).toBe(403);
+    expect((await del(`/workspaces/${wsId}`, stranger.token)).status).toBe(403);
+    expect((await del('/workspaces/00000000-0000-0000-0000-000000000000', owner.token)).status).toBe(404);
+    expect((await del(`/workspaces/${wsId}`)).status).toBe(401);
   });
 });

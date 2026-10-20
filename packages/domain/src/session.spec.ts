@@ -300,4 +300,136 @@ describe('Session', () => {
     guests.push({ userId: newUserId(), access: 'view' });
     expect(session.guests).toEqual([{ userId: guests[0].userId, access: 'view' }]);
   });
+
+  it('create honors an explicit id', () => {
+    const f = fixture();
+    const id = newSessionId();
+    const session = Session.create(f.workspace, f.owner, 'con id', id);
+    expect(session.id).toBe(id);
+  });
+
+  it('addTerminal honors an explicit id and metadata', () => {
+    const f = fixture();
+    const id = newTerminalId();
+    f.session.addTerminal(f.workspace, f.owner, newAgentProfile('claude', 'claude'), {
+      id,
+      agent: 'claude',
+      minimized: true,
+    });
+    expect(f.session.terminal(id)).toEqual({
+      id,
+      profile: { name: 'claude', command: 'claude', args: [], env: [] },
+      agent: 'claude',
+      minimized: true,
+    });
+  });
+
+  it('addTerminal without options keeps the legacy shape with default metadata', () => {
+    const f = fixture();
+    const id = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('shell', 'sh'));
+    expect(f.session.terminal(id)).toEqual({
+      id,
+      profile: { name: 'shell', command: 'sh', args: [], env: [] },
+      agent: null,
+      minimized: false,
+    });
+  });
+
+  it('updateTerminal applies a partial patch and keeps untouched fields', () => {
+    const f = fixture();
+    const id = f.session.addTerminal(
+      f.workspace,
+      f.owner,
+      newAgentProfile('shell', 'sh', { args: ['-l'], cwd: '/tmp' }),
+    );
+    f.session.updateTerminal(f.workspace, f.owner, id, { name: 'renamed', minimized: true });
+    expect(f.session.terminal(id)).toEqual({
+      id,
+      profile: { name: 'renamed', command: 'sh', args: ['-l'], env: [], cwd: '/tmp' },
+      agent: null,
+      minimized: true,
+    });
+  });
+
+  it('updateTerminal replaces args, cwd and agent', () => {
+    const f = fixture();
+    const id = f.session.addTerminal(
+      f.workspace,
+      f.owner,
+      newAgentProfile('claude', 'claude', { cwd: '/old' }),
+      { agent: 'claude', minimized: true },
+    );
+    f.session.updateTerminal(f.workspace, f.owner, id, {
+      args: ['--new'],
+      cwd: null,
+      agent: null,
+      minimized: false,
+    });
+    expect(f.session.terminal(id)).toEqual({
+      id,
+      profile: { name: 'claude', command: 'claude', args: ['--new'], env: [] },
+      agent: null,
+      minimized: false,
+    });
+  });
+
+  it('updateTerminal rejects a blank command like creation does', () => {
+    const f = fixture();
+    const id = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('shell', 'sh'));
+    expectDomainError(() => f.session.updateTerminal(f.workspace, f.owner, id, { command: '   ' }), {
+      code: 'EmptyCommand',
+    });
+  });
+
+  it('updateTerminal keeps owner-only rules and rejects unknown terminals', () => {
+    const f = fixture();
+    const id = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('shell', 'sh'));
+    expectDomainError(
+      () => f.session.updateTerminal(f.workspace, f.member, id, { name: 'x' }),
+      { code: 'NotOwner' },
+    );
+    const unknown = newTerminalId();
+    expectDomainError(
+      () => f.session.updateTerminal(f.workspace, f.owner, unknown, { name: 'x' }),
+      { code: 'TerminalNotInSession', terminal: unknown },
+    );
+    // A forbidden patch never leaks: the terminal stays untouched.
+    expect(f.session.terminal(id)?.profile.name).toBe('shell');
+  });
+
+  it('reorderTerminals reorders the terminals by the given ids', () => {
+    const f = fixture();
+    const a = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('a', 'sh'));
+    const b = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('b', 'sh'));
+    const c = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('c', 'sh'));
+    f.session.reorderTerminals(f.workspace, f.owner, [c, a, b]);
+    expect(f.session.terminals.map((t) => t.id)).toEqual([c, a, b]);
+    // Reordering twice with the same list is stable (idempotent).
+    f.session.reorderTerminals(f.workspace, f.owner, [b, c, a]);
+    expect(f.session.terminals.map((t) => t.id)).toEqual([b, c, a]);
+  });
+
+  it('reorderTerminals keeps owner-only rules and rejects unknown terminals', () => {
+    const f = fixture();
+    const a = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('a', 'sh'));
+    const b = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('b', 'sh'));
+    expectDomainError(
+      () => f.session.reorderTerminals(f.workspace, f.member, [b, a]),
+      { code: 'NotOwner' },
+    );
+    const unknown = newTerminalId();
+    expectDomainError(
+      () => f.session.reorderTerminals(f.workspace, f.owner, [a, unknown]),
+      { code: 'TerminalNotInSession', terminal: unknown },
+    );
+    // A rejected reorder never mutates the stored order.
+    expect(f.session.terminals.map((t) => t.id)).toEqual([a, b]);
+  });
+
+  it('rename changes the session name in place, owner-only', () => {
+    const f = fixture();
+    expectDomainError(() => f.session.rename(f.workspace, f.member, 'no'), { code: 'NotOwner' });
+    f.session.rename(f.workspace, f.owner, 'renombrada');
+    expect(f.session.name).toBe('renombrada');
+  });
 });

@@ -1,5 +1,6 @@
 import {
   Session,
+  newTerminal,
   type SessionGuest,
   type SessionId,
   type Terminal,
@@ -21,7 +22,15 @@ interface SessionRow {
   id: string;
   workspaceId: string;
   name: string;
-  terminals: { id: string; name: string; command: string; args: string[]; cwd: string | null }[];
+  terminals: {
+    id: string;
+    name: string;
+    command: string;
+    args: string[];
+    cwd: string | null;
+    agent: string | null;
+    minimized: boolean;
+  }[];
   overrides: { userId: string; access: DbAccessLevel }[];
   guests: { userId: string; access: DbAccessLevel }[];
 }
@@ -50,6 +59,46 @@ export class SessionRepository {
     return rows.map(restore);
   }
 
+  // Removes the aggregate row; terminals, overrides, guests and invitations
+  // follow the schema's onDelete cascade.
+  async delete(id: SessionId): Promise<void> {
+    // deleteMany over delete: an id raced away between the controller's
+    // existence check and here must not turn into a P2025 500.
+    await this.prisma.session.deleteMany({ where: { id } });
+  }
+
+  // Ownership projection for idempotent terminal creates (S7): the terminal
+  // and the owner of the workspace its session belongs to. Undefined when the
+  // id is free (globally unique primary key).
+  async terminalWithOwner(id: TerminalId): Promise<{ terminal: Terminal; ownerId: UserId } | undefined> {
+    const row = await this.prisma.terminal.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        command: true,
+        args: true,
+        cwd: true,
+        agent: true,
+        minimized: true,
+        session: { select: { workspace: { select: { ownerId: true } } } },
+      },
+    });
+    if (!row) return undefined;
+    const terminal = newTerminal(
+      row.id as TerminalId,
+      {
+        name: row.name,
+        command: row.command,
+        args: row.args,
+        env: [],
+        ...(row.cwd === null ? {} : { cwd: row.cwd }),
+      },
+      { agent: row.agent, minimized: row.minimized },
+    );
+    return { terminal, ownerId: row.session.workspace.ownerId as UserId };
+  }
+
   // Upserts the session and replaces its terminals (position = index),
   // overrides and guests, all in one transaction.
   async save(session: Session): Promise<void> {
@@ -69,6 +118,9 @@ export class SessionRepository {
           command: t.profile.command,
           args: t.profile.args,
           cwd: t.profile.cwd ?? null,
+          // Snapshot metadata (S7); a missing key means the domain default.
+          agent: t.agent ?? null,
+          minimized: t.minimized ?? false,
           env: [],
         })),
       }),
@@ -93,16 +145,20 @@ export class SessionRepository {
 }
 
 function restore(row: SessionRow): Session {
-  const terminals: Terminal[] = row.terminals.map((t) => ({
-    id: t.id as TerminalId,
-    profile: {
-      name: t.name,
-      command: t.command,
-      args: t.args,
-      env: [],
-      ...(t.cwd === null ? {} : { cwd: t.cwd }),
-    },
-  }));
+  // Terminal.env is NOT persisted (secrets): rehydrated as [], always.
+  const terminals: Terminal[] = row.terminals.map((t) =>
+    newTerminal(
+      t.id as TerminalId,
+      {
+        name: t.name,
+        command: t.command,
+        args: t.args,
+        env: [],
+        ...(t.cwd === null ? {} : { cwd: t.cwd }),
+      },
+      { agent: t.agent, minimized: t.minimized },
+    ),
+  );
   const guests: SessionGuest[] = row.guests.map((g) => ({
     userId: g.userId as UserId,
     access: accessFromDb(g.access),

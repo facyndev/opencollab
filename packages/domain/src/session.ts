@@ -17,7 +17,14 @@ import {
   withWrite,
   type AccessLevel,
 } from './permission';
-import type { AgentProfile, Terminal } from './terminal';
+import {
+  newAgentProfile,
+  newTerminal,
+  type AgentProfile,
+  type Terminal,
+  type TerminalCreateOptions,
+  type TerminalPatch,
+} from './terminal';
 import type { Workspace } from './workspace';
 
 // Temporary guest: access to this session only, never the rest of the workspace.
@@ -45,12 +52,14 @@ export class Session {
   private constructor(
     readonly id: SessionId,
     readonly workspaceId: WorkspaceId,
-    readonly name: string,
+    private _name: string,
   ) {}
 
-  static create(workspace: Workspace, actor: UserId, name: string): Session {
+  static create(workspace: Workspace, actor: UserId, name: string, id?: SessionId): Session {
     workspace.ensureOwner(actor);
-    return new Session(newSessionId(), workspace.id, name);
+    // An explicit id (S7) lets a client retry its create without duplicating
+    // the aggregate; the caller still runs the ownership/idempotency checks.
+    return new Session(id ?? newSessionId(), workspace.id, name);
   }
 
   // Rebuilds an aggregate from persisted state: no creation-time checks.
@@ -73,6 +82,10 @@ export class Session {
   // Explicit overrides, for persistence. Effective access is never derived from this.
   get overrides(): [UserId, AccessLevel][] {
     return [...this.memberOverrides];
+  }
+
+  get name(): string {
+    return this._name;
   }
 
   get terminals(): readonly Terminal[] {
@@ -206,12 +219,55 @@ export class Session {
     this._guests.push({ userId: invitation.invitee, access: DEFAULT_ACCESS });
   }
 
-  addTerminal(workspace: Workspace, actor: UserId, profile: AgentProfile): TerminalId {
+  addTerminal(
+    workspace: Workspace,
+    actor: UserId,
+    profile: AgentProfile,
+    opts: TerminalCreateOptions = {},
+  ): TerminalId {
     this.ensureBelongsTo(workspace);
     workspace.ensureOwner(actor);
-    const id = newTerminalId();
-    this._terminals.push({ id, profile });
-    return id;
+    const terminal = newTerminal(opts.id ?? newTerminalId(), profile, opts);
+    this._terminals.push(terminal);
+    return terminal.id;
+  }
+
+  // Owner-only partial update (S7): absent patch keys keep the current value,
+  // explicit nulls clear `cwd`/`agent`. The profile is rebuilt through the
+  // factory so a blank command stays impossible.
+  updateTerminal(workspace: Workspace, actor: UserId, id: TerminalId, patch: TerminalPatch): void {
+    this.ensureBelongsTo(workspace);
+    workspace.ensureOwner(actor);
+    const terminal = this.terminal(id);
+    if (!terminal) throw new DomainError({ code: 'TerminalNotInSession', terminal: id });
+    const p = terminal.profile;
+    const cwd = patch.cwd === undefined ? (p.cwd ?? null) : patch.cwd;
+    this._terminals[this._terminals.indexOf(terminal)] = newTerminal(
+      id,
+      newAgentProfile(patch.name ?? p.name, patch.command ?? p.command, {
+        args: patch.args ?? p.args,
+        ...(cwd === null ? {} : { cwd }),
+      }),
+      {
+        agent: patch.agent === undefined ? (terminal.agent ?? null) : patch.agent,
+        minimized: patch.minimized === undefined ? (terminal.minimized ?? false) : patch.minimized,
+      },
+    );
+  }
+
+  // Owner-only reorder (S7): `ids` is the exact new order. The caller must pass
+  // the session's terminals exactly (the REST layer turns a mismatch into 400);
+  // the domain still refuses to reorder around unknown or duplicated ids.
+  reorderTerminals(workspace: Workspace, actor: UserId, ids: readonly TerminalId[]): void {
+    this.ensureBelongsTo(workspace);
+    workspace.ensureOwner(actor);
+    for (const id of ids) this.ensureHasTerminal(id);
+    if (new Set(ids).size !== ids.length || ids.length !== this._terminals.length) {
+      throw new Error('reorderTerminals requires exactly the session terminals, without duplicates');
+    }
+    const byId = new Map(this._terminals.map((t) => [t.id, t] as const));
+    this._terminals.length = 0;
+    for (const id of ids) this._terminals.push(byId.get(id)!);
   }
 
   // Like adding them, removing terminals is owner-only.
@@ -221,6 +277,13 @@ export class Session {
     this.ensureHasTerminal(id);
     const index = this._terminals.findIndex((t) => t.id === id);
     this._terminals.splice(index, 1);
+  }
+
+  // Owner-only rename (S7); persistence re-saves the aggregate afterwards.
+  rename(workspace: Workspace, actor: UserId, name: string): void {
+    this.ensureBelongsTo(workspace);
+    workspace.ensureOwner(actor);
+    this._name = name;
   }
 
   ensureHasTerminal(id: TerminalId): void {

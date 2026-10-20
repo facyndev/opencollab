@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { Session, Workspace, newAgentProfile, newSessionId } from '@opencollab/domain';
+import { Session, Workspace, newAgentProfile, newSessionId, newTerminalId } from '@opencollab/domain';
 import type { PrismaClient } from '../generated/prisma/client';
 import { SessionRepository } from './session.repository';
 import { openTestClient, truncateAll } from './test-db';
@@ -129,5 +129,48 @@ describe('SessionRepository', () => {
     await sessions.save(second);
     const listed = await sessions.listByWorkspace(f.workspace.id);
     expect(listed.map((s) => s.id).sort()).toEqual([f.session.id, second.id].sort());
+  });
+
+  // S7: agent and minimized round-trip through the cloud snapshot too.
+  it('round-trips terminal agent and minimized metadata', async () => {
+    const f = await fixture();
+    const withMeta = f.session.addTerminal(
+      f.workspace,
+      f.owner,
+      newAgentProfile('claude', 'claude'),
+      { agent: 'claude', minimized: true },
+    );
+    const bare = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('shell', 'sh'));
+    await sessions.save(f.session);
+
+    const rows = await prisma.terminal.findMany({ orderBy: { position: 'asc' } });
+    expect(rows[0]).toMatchObject({ id: withMeta, agent: 'claude', minimized: true });
+    expect(rows[1]).toMatchObject({ id: bare, agent: null, minimized: false });
+
+    const loaded = await sessions.find(f.session.id);
+    expect(loaded?.terminals.find((tm) => tm.id === withMeta)).toEqual({
+      id: withMeta,
+      profile: { name: 'claude', command: 'claude', args: [], env: [] },
+      agent: 'claude',
+      minimized: true,
+    });
+    expect(loaded?.terminals.find((tm) => tm.id === bare)).toEqual({
+      id: bare,
+      profile: { name: 'shell', command: 'sh', args: [], env: [] },
+      agent: null,
+      minimized: false,
+    });
+  });
+
+  it('resolves the owning workspace owner of a terminal id (idempotent-create check)', async () => {
+    const f = await fixture();
+    const id = f.session.addTerminal(f.workspace, f.owner, newAgentProfile('a', 'sh'));
+    await sessions.save(f.session);
+    const owned = await sessions.terminalWithOwner(id);
+    expect(owned).toEqual({
+      ownerId: f.workspace.owner,
+      terminal: expect.objectContaining({ id }),
+    });
+    expect(await sessions.terminalWithOwner(newTerminalId())).toBeUndefined();
   });
 });

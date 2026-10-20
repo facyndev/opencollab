@@ -12,7 +12,7 @@ export class Workspace {
 
   constructor(
     readonly owner: UserId,
-    readonly name: string,
+    private _name: string,
     readonly id: WorkspaceId = newWorkspaceId(),
   ) {}
 
@@ -26,6 +26,16 @@ export class Workspace {
     const ws = new Workspace(state.owner, state.name, state.id);
     ws._members.push(...state.members.map((userId) => ({ userId })));
     return ws;
+  }
+
+  get name(): string {
+    return this._name;
+  }
+
+  // Owner-only rename (S7); persistence re-saves the aggregate afterwards.
+  rename(actor: UserId, name: string): void {
+    this.ensureOwner(actor);
+    this._name = name;
   }
 
   get members(): readonly WorkspaceMember[] {
