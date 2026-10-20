@@ -1,6 +1,6 @@
-import { LayoutColumns, LayoutGrid, LayoutSingle, Plus, UserPlus } from "../icons";
+import { LayoutColumns, LayoutGrid, LayoutSingle, Plus, Sliders, UserPlus } from "../icons";
 import { localUser, type Layout } from "../model";
-import { Button } from "./Button";
+import { Button, IconButton } from "./Button";
 
 type Props = {
   workspaceName: string;
@@ -8,6 +8,7 @@ type Props = {
   layout: Layout;
   onLayout: (layout: Layout) => void;
   onNewTerminal: () => void;
+  onOpenSettings: () => void;
 };
 
 const layouts: { id: Layout; label: string; icon: () => React.JSX.Element }[] = [
@@ -32,6 +33,7 @@ export function TopBar(props: Props) {
         <Button icon={<UserPlus />} disabled title="Requiere el relay: todavía no está conectado">
           Invite
         </Button>
+        <IconButton icon={<Sliders />} title="Settings" onClick={props.onOpenSettings} />
         <div className="segmented" role="group" aria-label="Layout">
           {layouts.map(({ id, label, icon: LayoutIcon }) => (
             <button

@@ -16,6 +16,7 @@ use application::{exit_event, ActivityTracker, AgentAdapters, AgentStates, Known
 use crate::agent_events::TauriAgentEvents;
 use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
+use crate::storage_config::{StorageConfig, StorageMode};
 
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal-output";
 pub const TERMINAL_EXIT_EVENT: &str = "terminal-exit";
@@ -258,21 +259,48 @@ pub fn resize_terminal(
 #[tauri::command(async)]
 pub fn snapshot_load(state: State<'_, AppState>) -> Result<Option<WorkspaceSnapshot>, String> {
     state
-        .snapshot_store
+        .snapshot_store()
         .load_snapshot()
         .map_err(|e| e.to_string())
 }
 
 /// Guarda la estructura completa. La versión del formato la maneja el núcleo
-/// (`WorkspaceSnapshot::new` estampa `SNAPSHOT_VERSION`).
+/// (`WorkspaceSnapshot::new` estampa `SNAPSHOT_VERSION`). Un snapshot vacío se
+/// rechaza: un estado sin hidratar no debe borrar la nube.
 #[tauri::command(async)]
 pub fn snapshot_save(
     state: State<'_, AppState>,
     workspaces: Vec<StoredWorkspace>,
 ) -> Result<(), String> {
+    if workspaces.is_empty() {
+        return Err("se rechazó guardar un snapshot vacío".to_string());
+    }
     let snapshot = WorkspaceSnapshot::new(workspaces);
     state
-        .snapshot_store
+        .snapshot_store()
         .save_snapshot(&snapshot)
         .map_err(|e| e.to_string())
+}
+
+/// Configuración vigente de almacenamiento (modo, base URL, onboarding).
+#[tauri::command]
+pub fn storage_config_get(state: State<'_, AppState>) -> StorageConfig {
+    state.storage_config()
+}
+
+/// Cambia el modo de almacenamiento y persiste la configuración. Cloud exige
+/// una sesión iniciada; el store se reemplaza antes de devolver el resultado.
+#[tauri::command(async)]
+pub fn storage_config_set(
+    state: State<'_, AppState>,
+    mode: StorageMode,
+    api_base_url: String,
+) -> Result<StorageConfig, String> {
+    let current = state.storage_config();
+    state.set_storage_config(StorageConfig {
+        version: current.version,
+        mode,
+        api_base_url,
+        onboarding_complete: current.onboarding_complete,
+    })
 }

@@ -193,7 +193,7 @@ impl CloudSnapshotStore {
         match self.attempt(method, &url, &token, body) {
             Attempt::Ok(text) => Ok(text),
             Attempt::Status(401) => {
-                let token = self.tokens.refreshed_access_token()?;
+                let token = self.tokens.refreshed_access_token(&token)?;
                 match self.attempt(method, &url, &token, body) {
                     Attempt::Ok(text) => Ok(text),
                     Attempt::Status(status) => Err(PortError::new(format!(
@@ -724,7 +724,7 @@ mod tests {
             Ok("tok-1".to_string())
         }
 
-        fn refreshed_access_token(&self) -> Result<String, PortError> {
+        fn refreshed_access_token(&self, _rejected: &str) -> Result<String, PortError> {
             self.refreshes.fetch_add(1, Ordering::SeqCst);
             Ok("tok-2".to_string())
         }
@@ -1448,7 +1448,7 @@ mod tests {
                 ))
             }
 
-            fn refreshed_access_token(&self) -> Result<String, PortError> {
+            fn refreshed_access_token(&self, _rejected: &str) -> Result<String, PortError> {
                 Err(PortError::new(
                     "no hay sesión iniciada: el modo nube necesita login",
                 ))

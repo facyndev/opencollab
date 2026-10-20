@@ -115,6 +115,12 @@ export async function loadSnapshot(): Promise<Workspace[] | null> {
 // dos writes concurrentes sobre el mismo archivo no deben cruzarse jamás.
 let saveQueue: Promise<unknown> = Promise.resolve();
 
+/// Espera los guardados ya encolados antes de cambiar de store: un write
+/// pendiente del modo viejo nunca debe aterrizar en el store nuevo.
+export function flushSnapshotSaves(): Promise<void> {
+  return saveQueue.then(() => undefined);
+}
+
 /// Guarda el estado persistente de los workspaces. Nunca rechaza: un error del
 /// disco no debe tumbar la app (el próximo guardado lo reintenta igual).
 export async function saveSnapshot(workspaces: Workspace[]): Promise<void> {

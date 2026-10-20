@@ -103,6 +103,9 @@ pub struct AuthStore {
     api_addr: String,
     web_origin: String,
     inner: Mutex<Inner>,
+    /// Serializa los refresh: si dos pedidos reciben 401 a la vez, el segundo
+    /// espera y reutiliza el token que renovó el primero.
+    refresh_lock: Mutex<()>,
 }
 
 impl AuthStore {
@@ -115,7 +118,14 @@ impl AuthStore {
                 verifier: None,
                 session: None,
             }),
+            refresh_lock: Mutex::new(()),
         }
+    }
+
+    /// Hay una sesión en memoria (puede estar vencida: el refresh lo decide
+    /// el pedido). El modo nube exige al menos esto para configurarse.
+    pub fn has_session(&self) -> bool {
+        self.inner.lock().expect("auth").session.is_some()
     }
 
     /// URL de la web donde el usuario hace el login para esta máquina.
@@ -130,7 +140,7 @@ impl AuthStore {
     /// renueva el par antes de devolverlo. Sin sesión (o refresh rechazado) es
     /// un error: el modo nube nunca manda un pedido sin credencial.
     pub fn access_token_for_request(&self) -> Result<String, String> {
-        match self.refresh_now(false) {
+        match self.refresh_now(false, None) {
             RefreshOutcome::Fresh { access_token, .. }
             | RefreshOutcome::Refreshed { access_token, .. } => Ok(access_token),
             RefreshOutcome::NoSession | RefreshOutcome::Rejected => {
@@ -140,10 +150,11 @@ impl AuthStore {
         }
     }
 
-    /// Igual que `access_token_for_request`, pero fuerza el refresh aunque el
-    /// access parezca vigente: la API acaba de rechazarlo con 401.
-    pub fn refreshed_access_token_for_request(&self) -> Result<String, String> {
-        match self.refresh_now(true) {
+    /// Igual que `access_token_for_request`, pero fuerza el refresh si el
+    /// token rechazado sigue siendo el vigente. Si otro pedido ya renovó
+    /// (`rejected` quedó viejo), devuelve el token nuevo sin otra red.
+    pub fn refreshed_access_token_for_request(&self, rejected: &str) -> Result<String, String> {
+        match self.refresh_now(true, Some(rejected)) {
             RefreshOutcome::Fresh { access_token, .. }
             | RefreshOutcome::Refreshed { access_token, .. } => Ok(access_token),
             RefreshOutcome::NoSession | RefreshOutcome::Rejected => {
@@ -156,12 +167,21 @@ impl AuthStore {
     /// Estado de la sesión y, si corresponde, refresh contra el relay. Es la
     /// única implementación del refresh: la comparten `auth_status` y el
     /// proveedor de tokens del modo nube.
-    fn refresh_now(&self, force: bool) -> RefreshOutcome {
+    fn refresh_now(&self, force: bool, rejected: Option<&str>) -> RefreshOutcome {
+        let _refresh = self.refresh_lock.lock().expect("refresh lock");
         let refresh_token = {
             let inner = self.inner.lock().expect("auth");
             let Some(session) = inner.session.as_ref() else {
                 return RefreshOutcome::NoSession;
             };
+            if let Some(rejected) = rejected {
+                if session.access_token != rejected {
+                    return RefreshOutcome::Fresh {
+                        user: session.user.clone(),
+                        access_token: session.access_token.clone(),
+                    };
+                }
+            }
             if !force
                 && session.expires_at.saturating_duration_since(Instant::now()) > REFRESH_MARGIN
             {
@@ -203,8 +223,8 @@ impl AccessTokenProvider for AuthStore {
         self.access_token_for_request().map_err(PortError::new)
     }
 
-    fn refreshed_access_token(&self) -> Result<String, PortError> {
-        self.refreshed_access_token_for_request()
+    fn refreshed_access_token(&self, rejected: &str) -> Result<String, PortError> {
+        self.refreshed_access_token_for_request(rejected)
             .map_err(PortError::new)
     }
 }
@@ -449,7 +469,7 @@ pub fn auth_finish(
 /// lo renueva una vez (igual que la web); si el refresh falla, cierra la sesión.
 #[tauri::command(async)]
 pub fn auth_status(app: AppHandle, state: State<'_, AppState>) -> Result<Option<UserView>, String> {
-    match state.auth.refresh_now(false) {
+    match state.auth.refresh_now(false, None) {
         RefreshOutcome::Fresh { user, .. } => Ok(Some(user)),
         RefreshOutcome::Refreshed { user, .. } => {
             emit_changed(&app, Some(user.clone()));
@@ -512,6 +532,7 @@ mod tests {
                 verifier: None,
                 session: None,
             }),
+            refresh_lock: Mutex::new(()),
         };
         assert_eq!(
             store.login_url(&"a".repeat(43)),
@@ -630,6 +651,7 @@ mod tests {
                     },
                 }),
             }),
+            refresh_lock: Mutex::new(()),
         }
     }
 
@@ -654,12 +676,29 @@ mod tests {
                 verifier: None,
                 session: None,
             }),
+            refresh_lock: Mutex::new(()),
         };
         assert_eq!(
             store.access_token_for_request(),
             Err("no hay sesión iniciada".to_string())
         );
         assert!(AccessTokenProvider::access_token(&store).is_err());
-        assert!(store.refreshed_access_token_for_request().is_err());
+        assert!(store.refreshed_access_token_for_request("stale").is_err());
+        assert!(!store.has_session());
+    }
+
+    #[test]
+    fn a_stale_rejected_token_reuses_the_concurrent_refresh_without_network() {
+        // El relay apunta a un puerto cerrado: si el short-circuit no ocurre,
+        // este test falla por timeout de red en vez de devolver el token nuevo.
+        let store = store_with_session("access-2", "refresh-2");
+        // El 401 llegó con "access-1", pero otro pedido ya renovó a "access-2".
+        assert_eq!(
+            store
+                .refreshed_access_token_for_request("access-1")
+                .unwrap(),
+            "access-2"
+        );
+        assert!(store.has_session());
     }
 }

@@ -20,6 +20,8 @@ import newTerminalHere from "./scenarios/new-terminal-here.mjs";
 import launchAgent from "./scenarios/launch-agent.mjs";
 import authSignin from "./scenarios/auth-signin.mjs";
 import snapshotLoadError from "./scenarios/snapshot-load-error.mjs";
+import onboarding from "./scenarios/onboarding.mjs";
+import settingsStorage from "./scenarios/settings-storage.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
@@ -31,6 +33,8 @@ const scenarios = {
   "status bar con estado real": statusBarLive,
   "login vía la web": authSignin,
   "fallo de carga no pisa el snapshot": snapshotLoadError,
+  "primera corrida elige almacenamiento": onboarding,
+  "ajustes de almacenamiento": settingsStorage,
 };
 
 function chromePath() {

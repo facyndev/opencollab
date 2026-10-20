@@ -21,8 +21,17 @@ import {
   type Workspace,
 } from "@opencollab/ui";
 import { TerminalPane } from "./components/TerminalPane";
+import { Onboarding } from "./components/Onboarding";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { useAuth, useCollabStatus, usePaneDrag } from "./hooks";
-import { loadSnapshot, saveSnapshot } from "./services/snapshot";
+import { loadSnapshot, saveSnapshot, flushSnapshotSaves } from "./services/snapshot";
+import {
+  DEFAULT_STORAGE_CONFIG,
+  loadStorageConfig,
+  saveStorageConfig,
+  type StorageConfig,
+  type StorageMode,
+} from "./services/storage";
 
 function initialWorkspaces(): Workspace[] {
   const ws = newWorkspace("OpenCollab");
@@ -47,32 +56,110 @@ export function App() {
   const [statuses, setStatuses] = useState<Record<string, PaneStatus>>({});
   const [meta, setMeta] = useState<Record<string, PaneMeta>>({});
   const searchRef = useRef<HTMLInputElement>(null);
+  const [storage, setStorage] = useState<StorageConfig | null>(null);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  useEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId;
+  }, [activeWorkspaceId]);
 
   // La estructura arranca con el default y a los valores reemplaza el snapshot
   // guardado del núcleo (S5 del feature desktop-dual-storage): mientras carga,
   // todo lo que asume `workspaces[0]` sigue funcionando.
   const hydratedRef = useRef(false);
-  useEffect(() => {
-    let cancelled = false;
-    void loadSnapshot()
-      .then((loaded) => {
-        if (cancelled) return;
+  // Descarta una carga que quedó en vuelo cuando ya empezó otra (cambio de
+  // modo durante el arranque): su resultado pertenece a otro store.
+  const hydrationGeneration = useRef(0);
+
+  /// Reemplaza la estructura y, si el workspace activo no existe en el store
+  /// nuevo, reapunta la selección al primero (cambio local ↔ cloud).
+  const adoptWorkspaces = useCallback((next: Workspace[]) => {
+    setWorkspaces(next);
+    if (next.length === 0) return;
+    if (next.some((w) => w.id === activeWorkspaceIdRef.current)) return;
+    const first = next[0];
+    const firstSession = first.sessions[0];
+    setActiveWorkspaceId(first.id);
+    setActiveSessionByWs({ [first.id]: firstSession.id });
+    setFocusedPaneId(firstSession.panes[0]?.id ?? null);
+    setMaximizedPaneId(null);
+  }, []);
+
+  /// Carga el snapshot del store que el núcleo ya tiene seleccionado. En un
+  /// cambio de modo, `resetWhenMissing` evita reenviar la estructura local al
+  /// store vacío: T6 es quien migra, no un efecto implícito de T4.
+  const hydrate = useCallback(
+    async (resetWhenMissing = false) => {
+      const generation = ++hydrationGeneration.current;
+      hydratedRef.current = false;
+      try {
+        const loaded = await loadSnapshot();
+        if (generation !== hydrationGeneration.current) return;
+        if (loaded && loaded.length > 0) adoptWorkspaces(loaded);
+        else if (resetWhenMissing) adoptWorkspaces(initialWorkspaces());
+        else setWorkspaces((current: Workspace[]) => [...current]);
         hydratedRef.current = true;
-        // Sin datos guardados queda el default, pero se reemite el estado para
-        // activar el guardado y fijar el baseline del primer arranque.
-        setWorkspaces(loaded ?? ((current: Workspace[]) => [...current]));
-      })
-      .catch((error) => {
+      } catch (error) {
+        if (generation !== hydrationGeneration.current) return;
         // Error inesperado del núcleo al cargar: la persistencia queda apagada
         // para no pisar un snapshot que todavía puede ser válido. La cuarentena
         // de un archivo corrupto la resuelve el núcleo y llega como `null`, no
         // como rechazo, así que este camino nunca habilita el guardado.
         console.error("no se pudo cargar el snapshot de workspaces:", error);
+      }
+    },
+    [adoptWorkspaces],
+  );
+
+  // Primero la configuración: el snapshot se carga recién cuando el núcleo ya
+  // apunta al store elegido. Sin configuración (navegador/E2E viejo) entra en
+  // local completo para no bloquear la app.
+  useEffect(() => {
+    let cancelled = false;
+    void loadStorageConfig()
+      .then((config) => {
+        if (cancelled) return;
+        setStorage(config);
+        if (config.onboardingComplete) void hydrate();
+      })
+      .catch((error) => {
+        console.error("no se pudo cargar la configuración de almacenamiento:", error);
+        if (cancelled) return;
+        setStorage({ ...DEFAULT_STORAGE_CONFIG, onboardingComplete: true });
+        void hydrate();
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hydrate]);
+
+  /// Guarda el modo/base URL y recarga el store nuevo. `true` si el núcleo
+  /// aceptó el cambio (cloud exige sesión y URL válida).
+  const applyStorage = useCallback(
+    async (mode: StorageMode, apiBaseUrl: string) => {
+      setStorageBusy(true);
+      setStorageError(null);
+      const wasHydrated = hydratedRef.current;
+      // Nada nuevo se guarda mientras se cambia de store; lo ya encolado
+      // termina en el store viejo antes de que el núcleo lo reemplace.
+      hydratedRef.current = false;
+      try {
+        await flushSnapshotSaves();
+        const next = await saveStorageConfig(mode, apiBaseUrl);
+        setStorage(next);
+        setSettingsOpen(false);
+        await hydrate(true);
+      } catch (error) {
+        hydratedRef.current = wasHydrated;
+        setStorageError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setStorageBusy(false);
+      }
+    },
+    [hydrate],
+  );
 
   // Persistencia en cada mutación de la estructura; la cola del servicio
   // (`saveSnapshot`) garantiza que dos guardados nunca se cruzan.
@@ -241,6 +328,26 @@ export function App() {
     return { terminals: panes.length, live };
   }, [activeSession.panes, statuses]);
 
+  if (!storage) {
+    return <div className="boot">Loading…</div>;
+  }
+
+  if (!storage.onboardingComplete) {
+    return (
+      <Onboarding
+        auth={auth.state}
+        authBusy={auth.busy}
+        authError={auth.error}
+        loginUrl={auth.loginUrl}
+        busy={storageBusy}
+        error={storageError}
+        onChoose={(mode) => void applyStorage(mode, storage.apiBaseUrl)}
+        onSignIn={() => void auth.beginLogin()}
+        onCancelLogin={auth.cancelLogin}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -278,6 +385,10 @@ export function App() {
             setMaximizedPaneId(null);
           }}
           onNewTerminal={() => addTerminal()}
+          onOpenSettings={() => {
+            setStorageError(null);
+            setSettingsOpen(true);
+          }}
         />
 
         <main
@@ -340,6 +451,22 @@ export function App() {
 
         <StatusBar connected={collab.connected} syncMs={collab.syncMs} collaborators={collab.collaborators} />
       </div>
+
+      {settingsOpen && (
+        <SettingsDialog
+          storage={storage}
+          auth={auth.state}
+          authBusy={auth.busy}
+          authError={auth.error}
+          loginUrl={auth.loginUrl}
+          busy={storageBusy}
+          error={storageError}
+          onClose={() => setSettingsOpen(false)}
+          onSave={(mode, apiBaseUrl) => void applyStorage(mode, apiBaseUrl)}
+          onSignIn={() => void auth.beginLogin()}
+          onCancelLogin={auth.cancelLogin}
+        />
+      )}
     </div>
   );
 }

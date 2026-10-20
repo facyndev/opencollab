@@ -8,6 +8,7 @@ mod collab_status;
 mod commands;
 mod env;
 mod state;
+mod storage_config;
 
 use tauri::Manager;
 
@@ -51,6 +52,8 @@ fn main() {
             commands::close_terminal,
             commands::snapshot_load,
             commands::snapshot_save,
+            commands::storage_config_get,
+            commands::storage_config_set,
             commands::list_subdirectories,
             commands::git_branch,
             commands::collab_status,

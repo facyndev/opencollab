@@ -12,6 +12,7 @@
 //   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
 //   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
 //   savedSnapshot         último payload de snapshot_save (versión 1 estampada por el mock)
+//   storageConfig         modo/base URL vigentes (storage_config_get/set)
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
@@ -21,6 +22,14 @@ export function installTauriMock() {
   const closed = [];
   const branches = {};
   let saved = null; // snapshot de workspaces (snapshot_save / snapshot_load)
+  // Configuración de almacenamiento: completa por defecto para no cambiar los
+  // escenarios existentes; `?mockFirstRun=1` simula la primera corrida.
+  let storageConfig = {
+    version: 1,
+    mode: "local",
+    apiBaseUrl: "http://127.0.0.1:8787",
+    onboardingComplete: new URLSearchParams(location.search).get("mockFirstRun") !== "1",
+  };
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -53,7 +62,7 @@ export function installTauriMock() {
       },
     });
 
-  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches, get savedSnapshot() { return saved; } };
+  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches, get savedSnapshot() { return saved; }, get storageConfig() { return storageConfig; } };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -102,6 +111,16 @@ export function installTauriMock() {
           // Guardado en memoria: los escenarios lo inspeccionan en __mock.savedSnapshot.
           saved = { version: 1, workspaces: args.workspaces };
           return null;
+        case "storage_config_get":
+          return { ...storageConfig };
+        case "storage_config_set":
+          storageConfig = {
+            version: 1,
+            mode: args.mode,
+            apiBaseUrl: args.apiBaseUrl,
+            onboardingComplete: true,
+          };
+          return { ...storageConfig };
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
           return { connected: false, syncMs: null, collaborators: 1 };

@@ -102,9 +102,9 @@ pub trait SnapshotStore: Send + Sync {
 pub trait AccessTokenProvider: Send + Sync {
     /// Token vigente, refrescándolo si la sesión lo pide (igual que hace la web).
     fn access_token(&self) -> Result<String, PortError>;
-    /// Token apenas refrescado a la fuerza: la API rechazó el anterior con 401.
-    /// Aunque el access parezca vigente, en este caso hay que refrescar sí o sí.
-    fn refreshed_access_token(&self) -> Result<String, PortError>;
+    /// Token apenas refrescado a la fuerza: la API rechazó `rejected` con 401.
+    /// Si el token corriente ya cambió, otro pedido refrescó y se reutiliza.
+    fn refreshed_access_token(&self, rejected: &str) -> Result<String, PortError>;
 }
 
 #[cfg(test)]
@@ -138,10 +138,13 @@ mod tests {
                 .ok_or_else(|| PortError::new("sin token: no hay sesión iniciada"))
         }
 
-        fn refreshed_access_token(&self) -> Result<String, PortError> {
+        fn refreshed_access_token(&self, rejected: &str) -> Result<String, PortError> {
             let mut tokens = self.tokens.lock().expect("fake");
-            if tokens.is_empty() {
+            let Some(current) = tokens.first() else {
                 return Err(PortError::new("sin token: no hay sesión iniciada"));
+            };
+            if current != rejected {
+                return Ok(current.clone());
             }
             if tokens.len() > 1 {
                 tokens.remove(0);
@@ -162,11 +165,19 @@ mod tests {
     fn el_refresh_forzado_avanza_al_token_siguiente() {
         let tokens = FakeTokens::new(&["tok-1", "tok-2"]);
         assert_eq!(tokens.access_token().unwrap(), "tok-1");
-        assert_eq!(tokens.refreshed_access_token().unwrap(), "tok-2");
+        assert_eq!(tokens.refreshed_access_token("tok-1").unwrap(), "tok-2");
         // Y el nuevo pasa a ser el corriente.
         assert_eq!(tokens.access_token().unwrap(), "tok-2");
         // Un último token se reutiliza: sin sesión a quién refrescar no existe.
-        assert_eq!(tokens.refreshed_access_token().unwrap(), "tok-2");
+        assert_eq!(tokens.refreshed_access_token("tok-2").unwrap(), "tok-2");
+    }
+
+    #[test]
+    fn un_401_viejo_reutiliza_el_token_que_ya_refresco_otro_pedido() {
+        let tokens = FakeTokens::new(&["tok-2", "tok-3"]);
+        // El 401 llegó con tok-1, pero otro pedido ya dejó tok-2 vigente.
+        assert_eq!(tokens.refreshed_access_token("tok-1").unwrap(), "tok-2");
+        assert_eq!(tokens.access_token().unwrap(), "tok-2");
     }
 
     #[test]
@@ -177,7 +188,7 @@ mod tests {
             Err(PortError::new("sin token: no hay sesión iniciada"))
         );
         assert_eq!(
-            tokens.refreshed_access_token(),
+            tokens.refreshed_access_token("tok-1"),
             Err(PortError::new("sin token: no hay sesión iniciada"))
         );
     }

@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { newPane, newSession, newWorkspace } from "@opencollab/ui";
 
-import { fromSavedSnapshot, saveSnapshot, toSavedWorkspaces, type SavedSnapshot } from "./snapshot";
+import {
+  flushSnapshotSaves,
+  fromSavedSnapshot,
+  saveSnapshot,
+  toSavedWorkspaces,
+  type SavedSnapshot,
+} from "./snapshot";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const mockedInvoke = vi.mocked(invoke);
@@ -199,5 +205,25 @@ describe("loadSnapshot/saveSnapshot", () => {
     await expect(first).resolves.toBeUndefined();
     await expect(second).resolves.toBeUndefined();
     expect(mockedInvoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("flush espera el guardado en vuelo antes de cambiar de store", async () => {
+    let release: (() => void) | undefined;
+    mockedInvoke.mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          release = () => res(null);
+        }),
+    );
+    const pending = saveSnapshot([uiWorkspaceWithSavedPanes()]);
+    let flushed = false;
+    const flush = flushSnapshotSaves().then(() => {
+      flushed = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(flushed).toBe(false);
+    release!();
+    await Promise.all([pending, flush]);
+    expect(flushed).toBe(true);
   });
 });

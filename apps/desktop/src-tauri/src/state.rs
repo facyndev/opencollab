@@ -1,7 +1,10 @@
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use application::ports::{ProcessInspector, PtyPort, RelayProbe, SessionRepository, SnapshotStore};
+use application::ports::{
+    AccessTokenProvider, ProcessInspector, PtyPort, RelayProbe, SessionRepository, SnapshotStore,
+};
 use application::{
     ActivityTracker, AgentAdapter, AgentAdapters, AgentStates, AppError, CheckRelay, CloseTerminal,
     DetectTerminalAgents, InspectBranch, LaunchTerminal, ListSubdirectories, ResizeTerminal,
@@ -9,16 +12,18 @@ use application::{
 };
 use domain::{Session, SessionId, UserId};
 use infrastructure::{
-    ClaudeCodeAdapter, FsDirectoryBrowser, FsRepositoryInspector, HookReceiver, HttpRelayProbe,
-    InMemorySessionRepository, OpenCodeAdapter, PortablePtyAdapter, SysinfoProcessInspector,
+    ClaudeCodeAdapter, CloudSnapshotStore, FsDirectoryBrowser, FsRepositoryInspector,
+    FsSnapshotStore, HookReceiver, HttpRelayProbe, InMemorySessionRepository, OpenCodeAdapter,
+    PortablePtyAdapter, SysinfoProcessInspector,
 };
 
 use crate::auth::AuthStore;
+use crate::storage_config::{StorageConfig, StorageMode};
 /// Silencio de un PTY a partir del cual se considera inactivo.
 const ACTIVITY_IDLE_AFTER: Duration = Duration::from_secs(3);
 
-/// Dependencias cableadas de la app. Mientras no haya cuentas ni persistencia,
-/// arranca con un usuario local dueño de una sesión.
+/// Dependencias cableadas de la app. El usuario local sigue siendo el dueño de
+/// la sesión de arranque; la persistencia la elige `storage_config`.
 pub struct AppState {
     pub local_user: UserId,
     pub session_id: SessionId,
@@ -39,11 +44,13 @@ pub struct AppState {
     pub check_relay: CheckRelay,
     pub session_collaborators: SessionCollaborators,
     /// Sesión del desktop (tokens solo en memoria) + verifier PKCE pendiente.
-    pub auth: AuthStore,
+    pub auth: Arc<AuthStore>,
     /// Persistencia de la estructura del escritorio (snapshot de workspaces,
-    /// sesiones y perfiles de arranque). El backend del modo lo decide la
-    /// configuración; en este momento es el archivo local en `data_dir`.
-    pub snapshot_store: Arc<dyn SnapshotStore>,
+    /// sesiones y perfiles de arranque). Se reemplaza al cambiar de modo.
+    pub snapshot_store: RwLock<Arc<dyn SnapshotStore>>,
+    /// Modo y base URL vigentes; se persisten en appdata.
+    pub storage_config: RwLock<StorageConfig>,
+    data_dir: PathBuf,
 }
 
 /// Adaptadores ricos disponibles. Si uno no puede arrancar (p. ej. no abre su
@@ -77,6 +84,11 @@ impl AppState {
         let session_id = session.id();
         repo.save_session(session)?;
 
+        let auth = Arc::new(AuthStore::new(relay_addr.clone()));
+        let default_api_base_url = format!("http://{relay_addr}");
+        let config = StorageConfig::load(&data_dir, &default_api_base_url);
+        let snapshot_store = build_snapshot_store(&config, &data_dir, auth.clone());
+
         Ok(Self {
             local_user,
             session_id,
@@ -93,9 +105,49 @@ impl AppState {
             adapters: Arc::new(AgentAdapters::new(agent_adapters())),
             check_relay: CheckRelay::new(relay_probe),
             session_collaborators: SessionCollaborators::new(repo),
-            auth: AuthStore::new(relay_addr),
-            snapshot_store: Arc::new(infrastructure::FsSnapshotStore::new(data_dir)),
+            auth,
+            snapshot_store: RwLock::new(snapshot_store),
+            storage_config: RwLock::new(config),
+            data_dir,
         })
+    }
+
+    /// Store vigente; se clona el `Arc` para no sostener el lock durante I/O.
+    pub fn snapshot_store(&self) -> Arc<dyn SnapshotStore> {
+        self.snapshot_store.read().expect("snapshot store").clone()
+    }
+
+    pub fn storage_config(&self) -> StorageConfig {
+        self.storage_config.read().expect("storage config").clone()
+    }
+
+    /// Persiste el modo/base URL, valida que cloud tenga sesión y cambia el
+    /// store antes de devolver la configuración ya completa.
+    pub fn set_storage_config(&self, mut config: StorageConfig) -> Result<StorageConfig, String> {
+        config.validate()?;
+        if config.mode == StorageMode::Cloud && !self.auth.has_session() {
+            return Err("iniciá sesión antes de usar el modo nube".to_string());
+        }
+        config.onboarding_complete = true;
+        config.save(&self.data_dir)?;
+        let store = build_snapshot_store(&config, &self.data_dir, self.auth.clone());
+        *self.snapshot_store.write().expect("snapshot store") = store;
+        *self.storage_config.write().expect("storage config") = config.clone();
+        Ok(config)
+    }
+}
+
+fn build_snapshot_store(
+    config: &StorageConfig,
+    data_dir: &Path,
+    auth: Arc<AuthStore>,
+) -> Arc<dyn SnapshotStore> {
+    match config.mode {
+        StorageMode::Local => Arc::new(FsSnapshotStore::new(data_dir.to_path_buf())),
+        StorageMode::Cloud => {
+            let tokens: Arc<dyn AccessTokenProvider> = auth;
+            Arc::new(CloudSnapshotStore::new(config.api_base_url.clone(), tokens))
+        }
     }
 }
 
