@@ -6,9 +6,12 @@ Guidance for AI coding agents working on OpenCollab.
 
 OpenCollab is a desktop application that centralizes terminal-based AI agents (Claude Code, OpenCode, Codex, Gemini CLI) in a flexible grid for parallel monitoring and real-time collaboration.
 
-- **Workspace:** top-level project container grouping sessions. Managed on the server.
+- **Workspace:** top-level project container grouping sessions. Persisted locally in appdata or on the server depending on the desktop storage mode (`local` vs `cloud`).
 - **Session:** live shared unit displaying multiple terminal panes in a grid.
 - **Terminal:** single PTY process running an agent profile or shell.
+- **Storage modes (desktop):**
+  - *Local (`appdata`):* workspaces, sessions, and terminal launch profiles (`workspaces.json`) are stored locally on disk via `FsSnapshotStore`. Collaboration controls remain visible in the UI with an inactive state (`data-collab-inactive="true"`), and relay polling is short-circuited.
+  - *Cloud (`API`):* workspaces, sessions, and terminal launch profiles synchronize with the authenticated NestJS REST API (`CloudSnapshotStore`). Chosen during first-run Onboarding or switched later in Settings (`storage.json`). Switching from Local to Cloud migrates existing local workspaces to the cloud account one workspace at a time while preserving local files on disk.
 - **Collaboration model:**
   - *Workspace member:* persistent team access across workspace sessions. View access enabled by default.
   - *Session guest:* temporary, session-scoped access.

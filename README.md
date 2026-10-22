@@ -17,6 +17,7 @@
 ### Key features
 
 - **Flexible terminal grid:** dynamic panes with accelerated rendering powered by [xterm.js](https://xtermjs.org/) and native PTYs managed in Rust.
+- **Dual storage modes (Local & Cloud):** choose during first-run onboarding or anytime in Settings whether to persist workspaces, sessions, and terminal profiles locally in OS appdata (`workspaces.json`) or synchronize them with the Cloud REST API, with automatic local-to-cloud migration when switching to Cloud.
 - **Intelligent agent detection:** periodic inspection of child processes and direct hooks to detect active agents and report their lifecycle (working, idle, awaiting approval, running tools).
 - **Real-time collaboration:**
   - **Workspaces and sessions:** project containers and shared rooms where multiple collaborators observe terminal streams.
