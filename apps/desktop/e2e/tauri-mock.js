@@ -161,6 +161,9 @@ export function installTauriMock() {
             apiBaseUrl: args.apiBaseUrl,
             onboardingComplete: true,
           };
+          if (args.mode === "local") {
+            emit("collab-status", { connected: false, syncMs: null, collaborators: 1 });
+          }
           return { ...storageConfig };
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.

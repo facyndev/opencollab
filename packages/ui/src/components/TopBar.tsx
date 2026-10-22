@@ -1,3 +1,4 @@
+import { describeCollabMode, type StorageMode } from "../collabStatus";
 import { LayoutColumns, LayoutGrid, LayoutSingle, Plus, Sliders, UserPlus } from "../icons";
 import { localUser, type Layout } from "../model";
 import { Button, IconButton } from "./Button";
@@ -6,6 +7,7 @@ type Props = {
   workspaceName: string;
   sessionName: string;
   layout: Layout;
+  storageMode?: StorageMode;
   onLayout: (layout: Layout) => void;
   onNewTerminal: () => void;
   onOpenSettings: () => void;
@@ -18,6 +20,7 @@ const layouts: { id: Layout; label: string; icon: () => React.JSX.Element }[] = 
 ];
 
 export function TopBar(props: Props) {
+  const collab = describeCollabMode(props.storageMode);
   return (
     <header className="topbar">
       <nav className="breadcrumb">
@@ -30,7 +33,12 @@ export function TopBar(props: Props) {
         <div className="avatars" title="Participantes conectados" hidden>
           <span className="avatar avatar--me">{localUser.initials}</span>
         </div>
-        <Button icon={<UserPlus />} disabled title="Requiere el relay: todavía no está conectado">
+        <Button
+          icon={<UserPlus />}
+          disabled
+          title={collab.inviteTitle}
+          data-collab-inactive={collab.inactive || undefined}
+        >
           Invite
         </Button>
         <IconButton icon={<Sliders />} title="Settings" onClick={props.onOpenSettings} />

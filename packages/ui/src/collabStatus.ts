@@ -9,6 +9,38 @@ export type CollabStatus = {
   collaborators: number;
 };
 
+export type StorageMode = "local" | "cloud";
+
+export type CollabModeCopy = {
+  inactive: boolean;
+  inviteTitle: string;
+  workspaceMetaTitle: string | undefined;
+  onlineLabel: string;
+  anonymousHint: string;
+  statusBarTitle: string | undefined;
+};
+
+export function describeCollabMode(mode: StorageMode = "cloud"): CollabModeCopy {
+  if (mode === "local") {
+    return {
+      inactive: true,
+      inviteTitle: "Modo local: cambiá a Cloud en Settings para invitar colaboradores",
+      workspaceMetaTitle: "Colaboración inactiva en modo local",
+      onlineLabel: "Local · colaboración inactiva",
+      anonymousHint: "Colaboración inactiva en modo local",
+      statusBarTitle: "Colaboración inactiva en modo local",
+    };
+  }
+  return {
+    inactive: false,
+    inviteTitle: "Requiere el relay: todavía no está conectado",
+    workspaceMetaTitle: undefined,
+    onlineLabel: "Online",
+    anonymousHint: "Sign in to collaborate",
+    statusBarTitle: undefined,
+  };
+}
+
 export const DEFAULT_COLLAB_STATUS: CollabStatus = { connected: false, syncMs: null, collaborators: 1 };
 
 /// Convierte el payload del núcleo (`collab_status` / evento `collab-status`) en un

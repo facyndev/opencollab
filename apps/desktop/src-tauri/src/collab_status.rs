@@ -9,6 +9,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::state::AppState;
+use crate::storage_config::StorageMode;
 
 pub const COLLAB_STATUS_EVENT: &str = "collab-status";
 const INTERVAL: Duration = Duration::from_secs(3);
@@ -47,15 +48,28 @@ impl CollabStatusPayload {
 /// colaboradores. No falla: si el conteo da error, el estado del relay se
 /// sigue reportando con el último conteo conocido (`last_collaborators`).
 pub fn snapshot(state: &AppState, last_collaborators: Option<usize>) -> CollabStatusPayload {
-    let collaborators = state.session_collaborators.execute(state.session_id);
+    snapshot_for_mode(
+        state.storage_config().mode,
+        || state.check_relay.execute(),
+        || state.session_collaborators.execute(state.session_id),
+        last_collaborators,
+    )
+}
+
+fn snapshot_for_mode(
+    mode: StorageMode,
+    probe_relay: impl FnOnce() -> RelayStatus,
+    count_collaborators: impl FnOnce() -> Result<usize, AppError>,
+    last_collaborators: Option<usize>,
+) -> CollabStatusPayload {
+    if mode == StorageMode::Local {
+        return CollabStatusPayload::new(RelayStatus::Disconnected, 1);
+    }
+    let collaborators = count_collaborators();
     if let Err(e) = &collaborators {
         eprintln!("estado de colaboración: {e}");
     }
-    compose(
-        state.check_relay.execute(),
-        collaborators,
-        last_collaborators,
-    )
+    compose(probe_relay(), collaborators, last_collaborators)
 }
 
 /// Arma el estado sin dejar que un error del conteo tape el del relay: usa el
@@ -183,5 +197,40 @@ mod tests {
         );
         let json = serde_json::to_value(disconnected(1)).unwrap();
         assert_eq!(json["syncMs"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn local_mode_keeps_collaboration_inactive_without_probing_the_relay() {
+        let mut probed = false;
+        let mut counted = false;
+        let payload = snapshot_for_mode(
+            StorageMode::Local,
+            || {
+                probed = true;
+                RelayStatus::Connected { latency_ms: 11 }
+            },
+            || {
+                counted = true;
+                Ok(4)
+            },
+            Some(3),
+        );
+        assert_eq!(payload, disconnected(1));
+        assert!(!probed, "el modo local no debe sondear el relay");
+        assert!(
+            !counted,
+            "el modo local no debe consultar colaboradores remotos"
+        );
+    }
+
+    #[test]
+    fn cloud_mode_probes_the_relay_and_counts_collaborators() {
+        let payload = snapshot_for_mode(
+            StorageMode::Cloud,
+            || RelayStatus::Connected { latency_ms: 18 },
+            || Ok(3),
+            Some(1),
+        );
+        assert_eq!(payload, connected(18, 3));
     }
 }

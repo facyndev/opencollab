@@ -228,6 +228,12 @@ kbd {
   color: var(--text-muted);
 }
 
+.ws-meta[data-collab-inactive="true"],
+.user--collab-inactive .user-status,
+.statusbar-item--inactive {
+  color: var(--text-faint);
+}
+
 .ws-menu {
   position: absolute;
   z-index: 10;

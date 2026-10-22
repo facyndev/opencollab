@@ -468,6 +468,7 @@ export function App() {
         onCreateWorkspace={createWorkspace}
         onSelectSession={selectSession}
         onCreateSession={createSession}
+        storageMode={storage.mode}
         auth={auth.state}
         authBusy={auth.busy}
         authError={auth.error}
@@ -482,6 +483,7 @@ export function App() {
           workspaceName={activeWorkspace.name}
           sessionName={activeSession.name}
           layout={layout}
+          storageMode={storage.mode}
           onLayout={(l) => {
             setLayout(l);
             setMaximizedPaneId(null);
@@ -551,7 +553,12 @@ export function App() {
           )}
         </main>
 
-        <StatusBar connected={collab.connected} syncMs={collab.syncMs} collaborators={collab.collaborators} />
+        <StatusBar
+          connected={collab.connected}
+          syncMs={collab.syncMs}
+          collaborators={collab.collaborators}
+          storageMode={storage.mode}
+        />
       </div>
 
       {settingsOpen && (

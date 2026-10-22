@@ -23,6 +23,7 @@ import snapshotLoadError from "./scenarios/snapshot-load-error.mjs";
 import onboarding from "./scenarios/onboarding.mjs";
 import settingsStorage from "./scenarios/settings-storage.mjs";
 import cloudBootSession from "./scenarios/cloud-boot-session.mjs";
+import localCollabInactive from "./scenarios/local-collab-inactive.mjs";
 
 const scenarios = {
   "drag & swap de terminales": dragSwap,
@@ -37,6 +38,7 @@ const scenarios = {
   "primera corrida elige almacenamiento": onboarding,
   "ajustes de almacenamiento": settingsStorage,
   "reinicio cloud sin sesión": cloudBootSession,
+  "colaboración visible pero inactiva en modo local": localCollabInactive,
 };
 
 function chromePath() {

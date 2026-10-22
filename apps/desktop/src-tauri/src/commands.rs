@@ -292,15 +292,21 @@ pub fn storage_config_get(state: State<'_, AppState>) -> StorageConfig {
 /// una sesión iniciada; el store se reemplaza antes de devolver el resultado.
 #[tauri::command(async)]
 pub fn storage_config_set(
+    app: AppHandle,
     state: State<'_, AppState>,
     mode: StorageMode,
     api_base_url: String,
 ) -> Result<StorageConfig, String> {
     let current = state.storage_config();
-    state.set_storage_config(StorageConfig {
+    let updated = state.set_storage_config(StorageConfig {
         version: current.version,
         mode,
         api_base_url,
         onboarding_complete: current.onboarding_complete,
-    })
+    })?;
+    let _ = app.emit(
+        collab_status::COLLAB_STATUS_EVENT,
+        collab_status::snapshot(&state, None),
+    );
+    Ok(updated)
 }
