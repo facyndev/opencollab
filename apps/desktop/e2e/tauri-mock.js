@@ -24,7 +24,8 @@ export function installTauriMock() {
   const opened = [];
   const closed = [];
   const branches = {};
-  let saved = null; // snapshot de workspaces (snapshot_save / snapshot_load)
+  let localSaved = null; // snapshot local (workspaces.json)
+  let cloudSaved = null; // snapshot cloud (API REST)
   const params = new URLSearchParams(location.search);
   // ?mockFirstRun=1 simula la primera corrida; ?mockCloud=1 arranca en cloud
   // con la configuración completa pero sin sesión en memoria (reinicio real).
@@ -88,10 +89,20 @@ export function installTauriMock() {
     signIn,
     signOut,
     setSnapshot(snapshot) {
-      saved = snapshot;
+      if (storageConfig.mode === "cloud") cloudSaved = snapshot;
+      else localSaved = snapshot;
+    },
+    setCloudSnapshot(snapshot) {
+      cloudSaved = snapshot;
     },
     get savedSnapshot() {
-      return saved;
+      return storageConfig.mode === "cloud" ? cloudSaved : localSaved;
+    },
+    get localSnapshot() {
+      return localSaved;
+    },
+    get cloudSnapshot() {
+      return cloudSaved;
     },
     get storageConfig() {
       return storageConfig;
@@ -147,14 +158,43 @@ export function installTauriMock() {
           if (storageConfig.mode === "cloud" && !signedIn)
             throw new Error("no hay sesión iniciada");
           // Sin snapshot guardado: primera corrida / arranque limpio.
-          return saved ? JSON.parse(JSON.stringify(saved)) : null;
+          {
+            const active = storageConfig.mode === "cloud" ? cloudSaved : localSaved;
+            return active ? JSON.parse(JSON.stringify(active)) : null;
+          }
         case "snapshot_save":
           // Guardado en memoria: los escenarios lo inspeccionan en __mock.savedSnapshot.
-          saved = { version: 1, workspaces: args.workspaces };
+          if (storageConfig.mode === "cloud") {
+            cloudSaved = { version: 1, workspaces: args.workspaces };
+          } else {
+            localSaved = { version: 1, workspaces: args.workspaces };
+          }
           return null;
         case "storage_config_get":
           return { ...storageConfig };
-        case "storage_config_set":
+        case "storage_config_set": {
+          // Migrar local → cloud (S4, A4): sube los workspaces locales uno por
+          // uno sin borrar los que ya tenía la nube y conserva `localSaved`.
+          if (
+            storageConfig.onboardingComplete &&
+            storageConfig.mode === "local" &&
+            args.mode === "cloud"
+          ) {
+            if (new URLSearchParams(location.search).get("mockMigrateError") === "1") {
+              throw new Error("falló la migración local a cloud (e2e)");
+            }
+            if (localSaved?.workspaces?.length) {
+              const existing = cloudSaved?.workspaces
+                ? JSON.parse(JSON.stringify(cloudSaved.workspaces))
+                : [];
+              for (const ws of JSON.parse(JSON.stringify(localSaved.workspaces))) {
+                const idx = existing.findIndex((item) => item.id === ws.id);
+                if (idx >= 0) existing[idx] = ws;
+                else existing.push(ws);
+              }
+              cloudSaved = { version: 1, workspaces: existing };
+            }
+          }
           storageConfig = {
             version: 1,
             mode: args.mode,
@@ -165,6 +205,7 @@ export function installTauriMock() {
             emit("collab-status", { connected: false, syncMs: null, collaborators: 1 });
           }
           return { ...storageConfig };
+        }
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
           return { connected: false, syncMs: null, collaborators: 1 };

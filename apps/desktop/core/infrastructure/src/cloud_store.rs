@@ -339,6 +339,85 @@ impl CloudSnapshotStore {
         )?;
         Ok(())
     }
+
+    /// Crea o actualiza un workspace y sus sesiones/terminales contra el estado
+    /// remoto actual (`current`), sin borrar sesiones ni otros workspaces.
+    fn upsert_workspace(
+        &self,
+        workspace: &StoredWorkspace,
+        current: &[ApiWorkspace],
+    ) -> Result<(), PortError> {
+        let wid = local_id_to_server_uuid(&workspace.id);
+        let born = current.iter().find(|w| w.id == wid).is_none();
+        if born {
+            self.call(
+                "POST",
+                "/workspaces",
+                Some(
+                    &serde_json::json!({
+                        "id": wid,
+                        "name": workspace.name,
+                    })
+                    .to_string(),
+                ),
+            )?;
+        } else {
+            let server_workspace = current
+                .iter()
+                .find(|w| w.id == wid)
+                .expect("existía en el fetch");
+            if server_workspace.name != workspace.name {
+                self.call(
+                    "PATCH",
+                    &format!("/workspaces/{wid}"),
+                    Some(&serde_json::json!({ "name": workspace.name }).to_string()),
+                )?;
+            }
+        }
+        for session in &workspace.sessions {
+            let sid = local_id_to_server_uuid(&session.id);
+            let server_session = if born {
+                None
+            } else {
+                let server_workspace = current
+                    .iter()
+                    .find(|w| w.id == wid)
+                    .expect("existía en el fetch");
+                server_workspace.sessions.iter().find(|s| s.id == sid)
+            };
+            match server_session {
+                None => self.create_session(&wid, &sid, &session.name)?,
+                Some(server_session) => {
+                    if server_session.name != session.name {
+                        self.call(
+                            "PATCH",
+                            &format!("/sessions/{sid}"),
+                            Some(&serde_json::json!({ "name": session.name }).to_string()),
+                        )?;
+                    }
+                }
+            }
+            let current_terminals: Vec<ApiTerminal> = match server_session {
+                Some(server_session) => server_session.terminals.clone(),
+                None => Vec::new(),
+            };
+            self.reconcile_terminals(&format!("/sessions/{sid}"), session, &current_terminals)?;
+        }
+        Ok(())
+    }
+
+    /// Migra los workspaces locales a la nube uno por uno (S4, A4), sin borrar
+    /// workspaces ni sesiones que la cuenta ya tuviera en el servidor.
+    pub fn migrate_snapshot(&self, snapshot: &WorkspaceSnapshot) -> Result<(), PortError> {
+        if snapshot.workspaces.is_empty() {
+            return Ok(());
+        }
+        let current = self.fetch_current()?;
+        for workspace in &snapshot.workspaces {
+            self.upsert_workspace(workspace, &current)?;
+        }
+        Ok(())
+    }
 }
 
 /// Diferencia entre la terminal del server y el panel deseado: solo los
@@ -422,62 +501,7 @@ impl SnapshotStore for CloudSnapshotStore {
         // Fase 1: crear/actualizar lo deseado, workspace por workspace. Si el
         // workspace no está en la nube, se crea con sus sesiones desde cero.
         for workspace in &snapshot.workspaces {
-            let wid = local_id_to_server_uuid(&workspace.id);
-            let born = current.iter().find(|w| w.id == wid).is_none();
-            if born {
-                self.call(
-                    "POST",
-                    "/workspaces",
-                    Some(
-                        &serde_json::json!({
-                            "id": wid,
-                            "name": workspace.name,
-                        })
-                        .to_string(),
-                    ),
-                )?;
-            } else {
-                let server_workspace = current
-                    .iter()
-                    .find(|w| w.id == wid)
-                    .expect("existía en el fetch");
-                if server_workspace.name != workspace.name {
-                    self.call(
-                        "PATCH",
-                        &format!("/workspaces/{wid}"),
-                        Some(&serde_json::json!({ "name": workspace.name }).to_string()),
-                    )?;
-                }
-            }
-            for session in &workspace.sessions {
-                let sid = local_id_to_server_uuid(&session.id);
-                let server_session = if born {
-                    None
-                } else {
-                    let server_workspace = current
-                        .iter()
-                        .find(|w| w.id == wid)
-                        .expect("existía en el fetch");
-                    server_workspace.sessions.iter().find(|s| s.id == sid)
-                };
-                match server_session {
-                    None => self.create_session(&wid, &sid, &session.name)?,
-                    Some(server_session) => {
-                        if server_session.name != session.name {
-                            self.call(
-                                "PATCH",
-                                &format!("/sessions/{sid}"),
-                                Some(&serde_json::json!({ "name": session.name }).to_string()),
-                            )?;
-                        }
-                    }
-                }
-                let current_terminals: Vec<ApiTerminal> = match server_session {
-                    Some(server_session) => server_session.terminals.clone(),
-                    None => Vec::new(),
-                };
-                self.reconcile_terminals(&format!("/sessions/{sid}"), session, &current_terminals)?;
-            }
+            self.upsert_workspace(workspace, &current)?;
         }
 
         // Fase 2: sesiones que sobraron en workspaces conservados. Las
@@ -1484,5 +1508,98 @@ mod tests {
             "{}",
             err.0
         );
+    }
+
+    #[test]
+    fn migrar_sube_workspaces_locales_uno_por_uno_sin_borrar_los_que_ya_tenia_la_nube() {
+        let existing_wid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let existing_sid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let local_w1 = local_id_to_server_uuid("w-local-1");
+        let local_s1 = local_id_to_server_uuid("s-local-1");
+        let local_p1 = local_id_to_server_uuid("p-local-1");
+        let local_w2 = local_id_to_server_uuid("w-local-2");
+        let local_s2 = local_id_to_server_uuid("s-local-2");
+
+        let server = MockServer::start(vec![
+            // fetch_current: la cuenta ya tiene un workspace previo en la nube.
+            ok_reply(json!([workspace_entry(existing_wid, "Ya en la nube")])),
+            ok_reply(json!([server_session(existing_sid, "Remota", vec![])])),
+            // Workspace local 1: POST workspace + POST session + POST terminal + PUT order.
+            ok_reply(json!({ "id": local_w1, "name": "Local 1" })),
+            ok_reply(json!({ "id": local_s1, "name": "Sesión 1", "terminals": [] })),
+            ok_reply(json!({ "id": local_p1 })),
+            ok_reply(json!({ "ids": [local_p1] })),
+            // Workspace local 2: POST workspace + POST session (sin terminales = sin PUT order).
+            ok_reply(json!({ "id": local_w2, "name": "Local 2" })),
+            ok_reply(json!({ "id": local_s2, "name": "Sesión 2", "terminals": [] })),
+        ]);
+
+        let snapshot = WorkspaceSnapshot::new(vec![
+            StoredWorkspace {
+                id: "w-local-1".into(),
+                name: "Local 1".into(),
+                sessions: vec![StoredSession {
+                    id: "s-local-1".into(),
+                    name: "Sesión 1".into(),
+                    panes: vec![StoredPane {
+                        id: "p-local-1".into(),
+                        seq: 0,
+                        minimized: false,
+                        initial_cwd: Some("C:\\repo".into()),
+                        agent: Some("codex".into()),
+                    }],
+                }],
+            },
+            StoredWorkspace {
+                id: "w-local-2".into(),
+                name: "Local 2".into(),
+                sessions: vec![StoredSession {
+                    id: "s-local-2".into(),
+                    name: "Sesión 2".into(),
+                    panes: vec![],
+                }],
+            },
+        ]);
+
+        let cloud = store(&server);
+        cloud.migrate_snapshot(&snapshot).unwrap();
+
+        let requests = server.requests();
+        assert!(
+            requests.iter().all(|r| r.method != "DELETE"),
+            "la migración nunca debe borrar workspaces o sesiones existentes en la nube: {requests:?}"
+        );
+        let paths: Vec<(&str, &str)> = requests
+            .iter()
+            .map(|r| (r.method.as_str(), r.path.as_str()))
+            .collect();
+        let s1_terminals = format!("/workspaces/{local_w1}/sessions");
+        let t1_path = format!("/sessions/{local_s1}/terminals");
+        let t1_order = format!("/sessions/{local_s1}/terminals/order");
+        let s2_sessions = format!("/workspaces/{local_w2}/sessions");
+        let existing_sessions = format!("/workspaces/{existing_wid}/sessions");
+        assert_eq!(
+            paths,
+            vec![
+                ("GET", "/workspaces"),
+                ("GET", existing_sessions.as_str()),
+                ("POST", "/workspaces"),
+                ("POST", s1_terminals.as_str()),
+                ("POST", t1_path.as_str()),
+                ("PUT", t1_order.as_str()),
+                ("POST", "/workspaces"),
+                ("POST", s2_sessions.as_str()),
+            ]
+        );
+    }
+
+    #[test]
+    fn migrar_snapshot_vacio_no_consulta_la_api() {
+        let server = MockServer::start(vec![]);
+        let cloud = store(&server);
+        cloud
+            .migrate_snapshot(&WorkspaceSnapshot::new(vec![]))
+            .unwrap();
+        assert_eq!(server.count(), 0);
     }
 }

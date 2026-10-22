@@ -111,7 +111,8 @@ export function SettingsDialog(props: Props) {
 
         {props.storage.mode === "local" && mode === "cloud" && (
           <p className="settings-hint">
-            Cloud starts from what your account already has. Local data is not uploaded yet.
+            Your local workspaces, sessions, and terminals will be migrated to your cloud account.
+            Local files are kept on this computer.
           </p>
         )}
 
