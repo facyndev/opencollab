@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { createPkcePair, initialsOf, isAuthCallback, type AuthUser } from "./auth";
 
 describe("isAuthCallback", () => {
-  it("acepta el callback del desktop", () => {
+  it("acepta el callback del desktop (producción y dev)", () => {
     expect(isAuthCallback("opencollab://auth/callback?code=abc123")).toBe(true);
+    expect(isAuthCallback("opencollab-dev://auth/callback?code=abc123")).toBe(true);
   });
 
   it("rechaza deep links ajenos", () => {

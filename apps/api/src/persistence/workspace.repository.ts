@@ -55,4 +55,12 @@ export class WorkspaceRepository {
       }),
     ]);
   }
+
+  // Removes the aggregate row; members, sessions, terminals and invitations
+  // follow the schema's onDelete cascade.
+  async delete(id: WorkspaceId): Promise<void> {
+    // deleteMany over delete: an id raced away between the controller's
+    // existence check and here must not turn into a P2025 500.
+    await this.prisma.workspace.deleteMany({ where: { id } });
+  }
 }

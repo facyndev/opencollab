@@ -31,6 +31,10 @@ export interface TerminalView {
   command: string;
   args: string[];
   cwd: string | null;
+  // Snapshot metadata (S7): which agent the pane launches, and its collapsed
+  // state. Always present over the wire; never `seq` or `env` (S7/A1).
+  agent: string | null;
+  minimized: boolean;
 }
 
 export interface SessionView {
@@ -48,6 +52,8 @@ export function toTerminalView(terminal: Terminal): TerminalView {
     command: terminal.profile.command,
     args: terminal.profile.args,
     cwd: terminal.profile.cwd ?? null,
+    agent: terminal.agent ?? null,
+    minimized: terminal.minimized ?? false,
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { desktopCodeSchema, startQuerySchema } from './dto';
 import { STATE_TTL_SECONDS, pkceVerifierFor, signState, verifyState, type OAuthState } from './state';
 
 const secret = 'test-secret-test-secret-test-secret-1234';
@@ -51,5 +52,16 @@ describe('pkceVerifierFor', () => {
     expect(v).not.toBe(pkceVerifierFor(secret, 'n-2'));
     expect(v).not.toBe(pkceVerifierFor(`${secret}!`, 'n-1'));
     expect(v).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+  });
+});
+
+describe('desktop client schemas', () => {
+  const challenge = 'A'.repeat(43);
+
+  it('accepts both desktop and desktop-dev in startQuerySchema and desktopCodeSchema', () => {
+    expect(startQuerySchema.parse({ client: 'desktop', code_challenge: challenge }).client).toBe('desktop');
+    expect(startQuerySchema.parse({ client: 'desktop-dev', code_challenge: challenge }).client).toBe('desktop-dev');
+    expect(desktopCodeSchema.parse({ code_challenge: challenge }).client).toBe('desktop');
+    expect(desktopCodeSchema.parse({ code_challenge: challenge, client: 'desktop-dev' }).client).toBe('desktop-dev');
   });
 });

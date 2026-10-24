@@ -32,6 +32,7 @@ import { pickAvailableUsername, sanitizeUsername } from './username';
 
 export const DESKTOP_CODE_TTL_MS = 60_000;
 export const DESKTOP_CALLBACK = 'opencollab://auth/callback';
+export const DESKTOP_DEV_CALLBACK = 'opencollab-dev://auth/callback';
 
 /** A provider authorization URL plus the Set-Cookie that binds the flow to this browser. */
 export interface FlowStart {
@@ -141,15 +142,16 @@ export class OAuthService {
     return { url, setCookie: setCookie(flow, bindingValue, this.secure) };
   }
 
-  start(name: string, client: 'web' | 'desktop', codeChallenge?: string): FlowStart {
+  start(name: string, client: 'web' | 'desktop' | 'desktop-dev', codeChallenge?: string): FlowStart {
     const provider = this.provider(name);
-    if (client === 'desktop' && !codeChallenge) {
+    const isDesktop = client === 'desktop' || client === 'desktop-dev';
+    if (isDesktop && !codeChallenge) {
       throw new BadRequestException('code_challenge is required for the desktop client');
     }
     return this.authorizationUrl(provider, {
       intent: 'login',
       client,
-      ...(client === 'desktop' ? { codeChallenge } : {}),
+      ...(isDesktop ? { codeChallenge } : {}),
     });
   }
 
@@ -201,8 +203,11 @@ export class OAuthService {
     if (state.intent === 'link') return this.link(provider, state, profile);
 
     const user = await this.resolveUser(provider, profile);
-    if (state.client === 'desktop') {
-      return { kind: 'desktop', redirectUrl: await this.issueDesktopCode(user.id, state.codeChallenge ?? '') };
+    if (state.client === 'desktop' || state.client === 'desktop-dev') {
+      return {
+        kind: 'desktop',
+        redirectUrl: await this.issueDesktopCode(user.id, state.codeChallenge ?? '', state.client),
+      };
     }
     return { kind: 'login', result: await this.authService.start(user, userAgent) };
   }
@@ -284,7 +289,11 @@ export class OAuthService {
    * the deep link that carries it. Shared by the OAuth desktop flow and by
    * `POST /auth/desktop/code` (an already authenticated web session).
    */
-  async issueDesktopCode(userId: UserId, codeChallenge: string): Promise<string> {
+  async issueDesktopCode(
+    userId: UserId,
+    codeChallenge: string,
+    client: 'desktop' | 'desktop-dev' = 'desktop',
+  ): Promise<string> {
     const code = generateToken();
     await this.auth.insertDesktopCode({
       codeHash: hashToken(code),
@@ -292,7 +301,8 @@ export class OAuthService {
       codeChallenge,
       expiresAt: new Date(this.clock.now().getTime() + DESKTOP_CODE_TTL_MS),
     });
-    return `${DESKTOP_CALLBACK}?code=${encodeURIComponent(code)}`;
+    const callback = client === 'desktop-dev' ? DESKTOP_DEV_CALLBACK : DESKTOP_CALLBACK;
+    return `${callback}?code=${encodeURIComponent(code)}`;
   }
 
   /** Any attempt burns the code first, so a wrong verifier cannot be retried. */

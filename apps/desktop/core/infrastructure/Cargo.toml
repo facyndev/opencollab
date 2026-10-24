@@ -9,7 +9,9 @@ publish.workspace = true
 [dependencies]
 domain.workspace = true
 application.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
 portable-pty.workspace = true
 sysinfo.workspace = true
-serde_json.workspace = true
 uuid.workspace = true

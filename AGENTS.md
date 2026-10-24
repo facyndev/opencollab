@@ -6,9 +6,12 @@ Guidance for AI coding agents working on OpenCollab.
 
 OpenCollab is a desktop application that centralizes terminal-based AI agents (Claude Code, OpenCode, Codex, Gemini CLI) in a flexible grid for parallel monitoring and real-time collaboration.
 
-- **Workspace:** top-level project container grouping sessions. Managed on the server.
+- **Workspace:** top-level project container grouping sessions. Persisted locally in appdata or on the server depending on the desktop storage mode (`local` vs `cloud`).
 - **Session:** live shared unit displaying multiple terminal panes in a grid.
 - **Terminal:** single PTY process running an agent profile or shell.
+- **Storage modes (desktop):**
+  - *Local (`appdata`):* workspaces, sessions, and terminal launch profiles (`workspaces.json`) are stored locally on disk via `FsSnapshotStore`. Collaboration controls remain visible in the UI with an inactive state (`data-collab-inactive="true"`), and relay polling is short-circuited.
+  - *Cloud (`API`):* workspaces, sessions, and terminal launch profiles synchronize with the authenticated NestJS REST API (`CloudSnapshotStore`). Chosen during first-run Onboarding or switched later in Settings (`storage.json`). Switching from Local to Cloud migrates existing local workspaces to the cloud account one workspace at a time while preserving local files on disk.
 - **Collaboration model:**
   - *Workspace member:* persistent team access across workspace sessions. View access enabled by default.
   - *Session guest:* temporary, session-scoped access.
@@ -46,7 +49,7 @@ packages/
 - **Transitive builds:** build internal dependencies automatically with `pnpm --filter <app>^... build`.
 - **Task runner:** Turborepo handles task orchestration (`turbo.json`).
 - **Prisma:** schema located at `apps/api/prisma/schema.prisma`. Running `pnpm install` automatically triggers `postinstall: prisma generate`.
-- **Desktop development:** run `pnpm desktop:dev` from the root (uses `tauri.dev.conf.json` with identifier `dev.opencollab.app.dev` to run alongside production instances without WebView2 lock contention).
+- **Development commands:** run `pnpm dev` from the root to start all apps in parallel (`api`, `web`, `desktop`), or run an individual app via `pnpm desktop:dev`, `pnpm api:dev`, or `pnpm web:dev` (every `apps/*` package also exposes `pnpm dev` locally). Desktop development uses `tauri.dev.conf.json` with identifier `com.opencollab.desktop.dev` and deep-link scheme `opencollab-dev://` registered at runtime to run alongside production instances without WebView2 lock or auth redirect contention.
 
 ### Verification commands
 
@@ -94,7 +97,7 @@ packages/
 ### Authentication and desktop handoff
 
 - **Web client:** routes `/login`, `/register`, `/auth/complete`, and `/account`. Stores access token in memory and refresh token in an `httpOnly` cookie (`oc_refresh`).
-- **Desktop handoff:** desktop generates PKCE S256 challenge, opens `<web>/login?client=desktop&code_challenge=...`, and web returns authorization code via `opencollab://auth/callback?code=...`. Desktop exchanges code for tokens and keeps credentials strictly in Rust memory.
+- **Desktop handoff:** desktop generates PKCE S256 challenge, opens `<web>/login?client=desktop&code_challenge=...`, and web returns authorization code via `opencollab://auth/callback?code=...` (or `opencollab-dev://` in dev). Desktop exchanges code for tokens, keeps the short-lived `access_token` strictly in Rust memory, and persists the rotating `refresh_token` + user profile in the OS credential store (`keyring`: Windows Credential Manager / macOS Keychain / Linux Secret Service, isolated between `opencollab` and `opencollab-dev`).
 
 ### UI rules and component guidelines
 

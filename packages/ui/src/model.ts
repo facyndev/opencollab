@@ -1,5 +1,7 @@
-// Estado de UI. Workspaces y sesiones viven acá hasta que el núcleo exponga
-// comandos para ellos; las terminales sí son PTYs reales del núcleo.
+// Estado de UI. La estructura (workspaces y sesiones) vive acá; su persistencia
+// ya pasa por el núcleo vía snapshot (`snapshot_load`/`snapshot_save` del
+// desktop), pero el estado en memoria sigue siendo de React. Las terminales
+// son PTYs reales del núcleo.
 
 import type { Activity } from "./activity";
 import type { AgentId } from "./agents";
@@ -66,6 +68,13 @@ export const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-$
 let paneSeq = 0;
 export function newPane(initialCwd: string | null = null, agent: AgentId | null = null): Pane {
   return { id: newId("pane"), seq: paneSeq++, minimized: false, initialCwd, agent };
+}
+
+/// Rebase del contador de seq cuando el arranque restaura paneles guardados
+/// (snapshot local): los seq que genere `newPane` a partir de ahora arrancan
+/// después del máximo restaurado, así nunca chocan con los viejos.
+export function adoptPaneSeq(seq: number) {
+  if (seq >= paneSeq) paneSeq = seq + 1;
 }
 
 /// Agrega `pane` justo después de `afterId` (o al final si no está).

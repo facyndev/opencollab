@@ -81,4 +81,19 @@ describe('Workspace', () => {
     ws.addMember(owner, invitee);
     expect(ws.isMember(invitee)).toBe(true);
   });
+
+  it('accepts an explicit id and keeps generating one by default', () => {
+    const owner = newUserId();
+    const id = newWorkspaceId();
+    expect(new Workspace(owner, 'con id', id).id).toBe(id);
+    expect(new Workspace(owner, 'generado').id).toBeTruthy();
+  });
+
+  it('rename changes the workspace name in place, owner-only', () => {
+    const owner = newUserId();
+    const ws = new Workspace(owner, 'antes');
+    expectDomainError(() => ws.rename(newUserId(), 'no'), { code: 'NotOwner' });
+    ws.rename(owner, 'después');
+    expect(ws.name).toBe('después');
+  });
 });

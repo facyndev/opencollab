@@ -172,6 +172,10 @@ model Terminal {
   command   String
   args      String[]
   cwd       String?
+  // Snapshot metadata (S7): which agent the pane launches (null = plain
+  // shell) and its collapsed state, so the cloud snapshot round-trips fully.
+  agent     String?
+  minimized Boolean  @default(false)
   // Always written as [] by the repository: env may hold secrets.
   env       Json     @default("[]")
 

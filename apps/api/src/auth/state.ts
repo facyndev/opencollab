@@ -8,7 +8,7 @@ import type { ProviderName } from './oauth-provider';
 export interface OAuthState {
   provider: ProviderName;
   intent: 'login' | 'link';
-  client: 'web' | 'desktop';
+  client: 'web' | 'desktop' | 'desktop-dev';
   /** Random per flow; also derives the provider-side PKCE verifier. */
   nonce: string;
   /** Random per flow; names the browser-binding cookie so parallel flows do not clash. */

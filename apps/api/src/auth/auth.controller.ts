@@ -273,6 +273,6 @@ export class AuthController {
     const presented = refreshCookie(cookies);
     const userId = presented ? await this.auth.sessionUser(presented) : undefined;
     if (!userId) throw new UnauthorizedException('Invalid session');
-    return { redirectUrl: await this.oauth.issueDesktopCode(userId, body.code_challenge) };
+    return { redirectUrl: await this.oauth.issueDesktopCode(userId, body.code_challenge, body.client) };
   }
 }

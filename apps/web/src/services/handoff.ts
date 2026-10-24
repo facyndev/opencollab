@@ -3,7 +3,10 @@
 // survives the OAuth round trip; tokens never touch storage.
 
 const KEY = "opencollab.handoff.challenge";
-const DEEP_LINK_PREFIX = "opencollab://";
+const CLIENT_KEY = "opencollab.handoff.client";
+const DEEP_LINK_PREFIXES = ["opencollab://", "opencollab-dev://"];
+
+export type DesktopHandoffClient = "desktop" | "desktop-dev";
 
 // S256 challenge: base64url of a 32-byte digest is always 43 chars.
 export const isValidCodeChallenge = (value: string): boolean => /^[A-Za-z0-9_-]{43}$/.test(value);
@@ -17,9 +20,18 @@ export function readPendingHandoff(): string | null {
   }
 }
 
+export function readPendingHandoffClient(): DesktopHandoffClient {
+  try {
+    return sessionStorage.getItem(CLIENT_KEY) === "desktop-dev" ? "desktop-dev" : "desktop";
+  } catch {
+    return "desktop";
+  }
+}
+
 export function clearPendingHandoff(): void {
   try {
     sessionStorage.removeItem(KEY);
+    sessionStorage.removeItem(CLIENT_KEY);
   } catch {
     // Storage unavailable: nothing was persisted.
   }
@@ -36,9 +48,14 @@ export function captureHandoff(search: string): boolean {
   const client = params.get("client");
   const challenge = params.get("code_challenge");
   if (client === null && challenge === null) return false;
-  if (client === "desktop" && challenge !== null && isValidCodeChallenge(challenge)) {
+  if ((client === "desktop" || client === "desktop-dev") && challenge !== null && isValidCodeChallenge(challenge)) {
     try {
       sessionStorage.setItem(KEY, challenge);
+      if (client === "desktop-dev") {
+        sessionStorage.setItem(CLIENT_KEY, "desktop-dev");
+      } else {
+        sessionStorage.removeItem(CLIENT_KEY);
+      }
     } catch {
       // Without storage the handoff only survives password login (no OAuth trip).
     }
@@ -50,13 +67,17 @@ export function captureHandoff(search: string): boolean {
 
 /** Exchanges the pending challenge for a deep link and navigates to it. Returns whether a handoff ran. */
 export async function runPendingHandoff(
-  api: { desktopCode(challenge: string): Promise<string> },
+  api: { desktopCode(challenge: string, client?: DesktopHandoffClient): Promise<string> },
   assign: (url: string) => void,
 ): Promise<boolean> {
   const challenge = readPendingHandoff();
   if (!challenge) return false;
-  const redirectUrl = await api.desktopCode(challenge);
-  if (!redirectUrl.startsWith(DEEP_LINK_PREFIX)) throw new Error("Unexpected redirect target");
+  const client = readPendingHandoffClient();
+  const redirectUrl =
+    client === "desktop-dev" ? await api.desktopCode(challenge, "desktop-dev") : await api.desktopCode(challenge);
+  if (!DEEP_LINK_PREFIXES.some((prefix) => redirectUrl.startsWith(prefix))) {
+    throw new Error("Unexpected redirect target");
+  }
   clearPendingHandoff();
   assign(redirectUrl);
   return true;

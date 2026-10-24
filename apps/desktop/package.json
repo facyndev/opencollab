@@ -4,7 +4,8 @@
   "version": "0.4.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "tauri dev -c src-tauri/tauri.dev.conf.json",
+    "dev:vite": "vite",
     "dev:desktop": "tauri dev -c src-tauri/tauri.dev.conf.json",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
