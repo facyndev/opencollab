@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { applyActivity, applyFocus, initialActivity, isWatching } from "./activity";
+import {
+  applyActivity,
+  applyFocus,
+  initialActivity,
+  isPaneActive,
+  isWatching,
+  shouldClearAttentionOnWatchChange,
+} from "./activity";
 
 describe("activity", () => {
   it("starts unknown and without attention", () => {
@@ -52,6 +59,28 @@ describe("activity", () => {
       ["window without focus", { windowFocused: false }],
     ])("is false when %s", (_name, patch) => {
       expect(isWatching({ ...all, ...patch })).toBe(false);
+    });
+  });
+
+  describe("shouldClearAttentionOnWatchChange", () => {
+    const base = { focused: true, hidden: false, minimized: false, windowFocused: true };
+
+    it("does NOT clear attention when only windowFocused flips false -> true on an already-active pane", () => {
+      const prev = { ...base, windowFocused: false };
+      const next = { ...base, windowFocused: true };
+      expect(isPaneActive(prev)).toBe(true);
+      expect(shouldClearAttentionOnWatchChange(prev, next)).toBe(false);
+    });
+
+    it("clears attention when switching focus from another pane while window is focused", () => {
+      const prev = { ...base, focused: false };
+      const next = { ...base, focused: true };
+      expect(shouldClearAttentionOnWatchChange(prev, next)).toBe(true);
+    });
+
+    it("clears attention when un-hiding a session or un-minimizing a pane while window is focused", () => {
+      expect(shouldClearAttentionOnWatchChange({ ...base, hidden: true }, base)).toBe(true);
+      expect(shouldClearAttentionOnWatchChange({ ...base, minimized: true }, base)).toBe(true);
     });
   });
 });

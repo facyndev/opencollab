@@ -53,6 +53,7 @@ export function App() {
   const [focusedPaneId, setFocusedPaneId] = useState<string | null>(
     () => workspaces[0].sessions[0].panes[0]?.id ?? null,
   );
+  const [focusAckSeq, setFocusAckSeq] = useState(0);
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, PaneStatus>>({});
   const [meta, setMeta] = useState<Record<string, PaneMeta>>({});
@@ -285,6 +286,7 @@ export function App() {
   const selectTerminal = (sessionId: string, paneId: string) => {
     setActiveSessionByWs((m) => ({ ...m, [activeWorkspace.id]: sessionId }));
     setFocusedPaneId(paneId);
+    setFocusAckSeq((n) => n + 1);
     // Si había un panel maximizado, pasar a mostrar este.
     if (maximizedPaneId) setMaximizedPaneId(paneId);
     updateSession(sessionId, (s) => ({
@@ -517,6 +519,7 @@ export function App() {
                 initialAgent={pane.agent}
                 order={index}
                 focused={focusedPaneId === pane.id}
+                focusAckSeq={focusedPaneId === pane.id ? focusAckSeq : 0}
                 minimized={pane.minimized && soloPaneId !== pane.id}
                 maximized={soloPaneId === pane.id}
                 hidden={!inActiveSession || (soloPaneId !== null && soloPaneId !== pane.id)}

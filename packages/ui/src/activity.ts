@@ -26,13 +26,28 @@ export function applyFocus(state: ActivityState): ActivityState {
   return state.attention ? { ...state, attention: false } : state;
 }
 
-/// El usuario está mirando el panel: enfocado, visible (no oculto ni minimizado) y con
-/// la ventana de la app en primer plano. Solo entonces un cambio de actividad cuenta como visto.
-export function isWatching(v: {
+export type WatchInputs = {
   focused: boolean;
   hidden: boolean;
   minimized: boolean;
   windowFocused: boolean;
-}): boolean {
-  return v.focused && !v.hidden && !v.minimized && v.windowFocused;
+};
+
+/// El panel está activo dentro de la grilla (enfocado, visible y no minimizado).
+export function isPaneActive(v: Pick<WatchInputs, "focused" | "hidden" | "minimized">): boolean {
+  return v.focused && !v.hidden && !v.minimized;
+}
+
+/// El usuario está mirando el panel: enfocado, visible (no oculto ni minimizado) y con
+/// la ventana de la app en primer plano. Solo entonces un cambio de actividad cuenta como visto.
+export function isWatching(v: WatchInputs): boolean {
+  return isPaneActive(v) && v.windowFocused;
+}
+
+/// Solo limpia `attention` automáticamente cuando el panel en sí pasa a estar activo
+/// mientras la ventana tiene foco (cambiar de panel, de sesión o desminimizar).
+/// Si el panel ya estaba activo y solo volvió el foco de la ventana (`windowFocused: false -> true`),
+/// no se limpia hasta que el usuario interactúe con el panel o lo seleccione explícitamente.
+export function shouldClearAttentionOnWatchChange(prev: WatchInputs, next: WatchInputs): boolean {
+  return !isPaneActive(prev) && isWatching(next);
 }
