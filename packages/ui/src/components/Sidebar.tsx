@@ -5,6 +5,7 @@ import { VscTerminal } from "react-icons/vsc";
 import { agentInfo } from "../agents";
 import { opencollabLogoRounded } from "../brand";
 import { initialsOf, type AuthState } from "../authTypes";
+import { describeCollabMode, type CollabModeCopy, type StorageMode } from "../collabStatus";
 import { Check, ChevronDown, Plus, Search, SignOut } from "../icons";
 import {
   sessionSummary,
@@ -32,6 +33,7 @@ type Props = {
   onSelectSession: (id: string) => void;
   onSelectTerminal: (sessionId: string, paneId: string) => void;
   onCreateSession: () => void;
+  storageMode?: StorageMode;
   auth: AuthState;
   authBusy: boolean;
   authError: string | null;
@@ -43,6 +45,7 @@ type Props = {
 
 export function Sidebar(props: Props) {
   const { workspaces, activeWorkspace, activeSessionId, statuses, meta } = props;
+  const collab = describeCollabMode(props.storageMode);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [query, setQuery] = useState("");
   const switcherRef = useRef<HTMLDivElement>(null);
@@ -74,7 +77,11 @@ export function Sidebar(props: Props) {
           </span>
           <span className="ws-text">
             <span className="ws-name">{activeWorkspace.name}</span>
-            <span className="ws-meta">
+            <span
+              className="ws-meta"
+              title={collab.workspaceMetaTitle}
+              data-collab-inactive={collab.inactive || undefined}
+            >
               Workspace · {activeWorkspace.members} member{activeWorkspace.members === 1 ? "" : "s"}
             </span>
           </span>
@@ -233,6 +240,7 @@ export function Sidebar(props: Props) {
       {/* Cuenta del desktop: anónima ofrece el login vía la web; autenticada
           muestra el usuario real (antes era la cuenta local fija, oculta). */}
       <AuthCard
+        collab={collab}
         auth={props.auth}
         busy={props.authBusy}
         error={props.authError}
@@ -246,6 +254,7 @@ export function Sidebar(props: Props) {
 }
 
 function AuthCard(props: {
+  collab: CollabModeCopy;
   auth: AuthState;
   busy: boolean;
   error: string | null;
@@ -254,15 +263,18 @@ function AuthCard(props: {
   onCancelLogin: () => void;
   onSignOut: () => void;
 }) {
-  const { auth, busy } = props;
+  const { auth, busy, collab } = props;
   if (auth.status === "authenticated") {
     return (
-      <div className="user">
+      <div
+        className={`user ${collab.inactive ? "user--collab-inactive" : ""}`.trim()}
+        data-collab-inactive={collab.inactive || undefined}
+      >
         <span className="avatar avatar--me">{initialsOf(auth.user)}</span>
         <span className="user-text">
           <span className="user-name">{auth.user.displayName || auth.user.username}</span>
           <span className="user-status">
-            <span className="dot dot--done" /> Online
+            <span className={`dot ${collab.inactive ? "dot--idle" : "dot--done"}`} /> {collab.onlineLabel}
           </span>
         </span>
         <IconButton icon={<SignOut />} title="Sign out" onClick={props.onSignOut} />
@@ -270,7 +282,10 @@ function AuthCard(props: {
     );
   }
   return (
-    <div className="user user--auth">
+    <div
+      className={`user user--auth ${collab.inactive ? "user--collab-inactive" : ""}`.trim()}
+      data-collab-inactive={collab.inactive || undefined}
+    >
       <span className="user-text">
         <span className="user-name">
           {auth.status === "unknown" ? "Loading…" : busy ? "Waiting for browser…" : "Not signed in"}
@@ -281,7 +296,7 @@ function AuthCard(props: {
           </span>
         ) : (
           <span className="user-status">
-            {busy ? "Finish sign-in in your browser" : "Sign in to collaborate"}
+            {busy ? "Finish sign-in in your browser" : collab.anonymousHint}
           </span>
         )}
       </span>

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use application::ports::{TerminalOutputSink, TerminalSize};
+use application::storage::{StoredWorkspace, WorkspaceSnapshot};
 use domain::TerminalId;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -15,6 +16,7 @@ use application::{exit_event, ActivityTracker, AgentAdapters, AgentStates, Known
 use crate::agent_events::TauriAgentEvents;
 use crate::collab_status::{self, CollabStatusPayload};
 use crate::state::AppState;
+use crate::storage_config::{StorageConfig, StorageMode};
 
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal-output";
 pub const TERMINAL_EXIT_EVENT: &str = "terminal-exit";
@@ -246,4 +248,65 @@ pub fn resize_terminal(
             TerminalSize { cols, rows },
         )
         .map_err(|e| e.to_string())
+}
+
+// Snapshot de la estructura del escritorio (S5 del feature desktop-dual-storage).
+// Disco: `async` para no frenar la UI; las escrituras las encola el frontend
+// (una cola de promesas), así que acá no hace falta serializarlas más.
+
+/// El snapshot guardado; `None` si no hay nada (primera corrida, arranque
+/// limpio o cuarentena del archivo corrupto anterior).
+#[tauri::command(async)]
+pub fn snapshot_load(state: State<'_, AppState>) -> Result<Option<WorkspaceSnapshot>, String> {
+    state
+        .snapshot_store()
+        .load_snapshot()
+        .map_err(|e| e.to_string())
+}
+
+/// Guarda la estructura completa. La versión del formato la maneja el núcleo
+/// (`WorkspaceSnapshot::new` estampa `SNAPSHOT_VERSION`). Un snapshot vacío se
+/// rechaza: un estado sin hidratar no debe borrar la nube.
+#[tauri::command(async)]
+pub fn snapshot_save(
+    state: State<'_, AppState>,
+    workspaces: Vec<StoredWorkspace>,
+) -> Result<(), String> {
+    if workspaces.is_empty() {
+        return Err("se rechazó guardar un snapshot vacío".to_string());
+    }
+    let snapshot = WorkspaceSnapshot::new(workspaces);
+    state
+        .snapshot_store()
+        .save_snapshot(&snapshot)
+        .map_err(|e| e.to_string())
+}
+
+/// Configuración vigente de almacenamiento (modo, base URL, onboarding).
+#[tauri::command]
+pub fn storage_config_get(state: State<'_, AppState>) -> StorageConfig {
+    state.storage_config()
+}
+
+/// Cambia el modo de almacenamiento y persiste la configuración. Cloud exige
+/// una sesión iniciada; el store se reemplaza antes de devolver el resultado.
+#[tauri::command(async)]
+pub fn storage_config_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: StorageMode,
+    api_base_url: String,
+) -> Result<StorageConfig, String> {
+    let current = state.storage_config();
+    let updated = state.set_storage_config(StorageConfig {
+        version: current.version,
+        mode,
+        api_base_url,
+        onboarding_complete: current.onboarding_complete,
+    })?;
+    let _ = app.emit(
+        collab_status::COLLAB_STATUS_EVENT,
+        collab_status::snapshot(&state, None),
+    );
+    Ok(updated)
 }

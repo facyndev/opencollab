@@ -67,6 +67,33 @@ describe('WorkspaceRepository', () => {
     expect((await workspaces.find(ws.id))?.members).toHaveLength(1);
   });
 
+  it('listForUser returns workspaces where the user is owner or member, and not others', async () => {
+    const owner = await seedUser(users);
+    const member = await seedUser(users);
+    const stranger = await seedUser(users);
+    const otherOwner = await seedUser(users);
+
+    const mine = new Workspace(owner, 'mine');
+    mine.addMember(owner, member);
+    await workspaces.save(mine);
+
+    const shared = new Workspace(member, 'shared');
+    await workspaces.save(shared);
+
+    const foreign = new Workspace(otherOwner, 'foreign');
+    await workspaces.save(foreign);
+
+    // `mine` is owned by owner with member added; `shared` is owned by member only.
+    const forOwner = await workspaces.listForUser(owner);
+    expect(forOwner.map((w) => w.id)).toEqual([mine.id]);
+
+    const forMember = await workspaces.listForUser(member);
+    expect(forMember.map((w) => w.id).sort()).toEqual([mine.id, shared.id].sort());
+
+    const forStranger = await workspaces.listForUser(stranger);
+    expect(forStranger).toEqual([]);
+  });
+
   it('deleting a workspace cascades to members, sessions and their children', async () => {
     const owner = await seedUser(users);
     const member = await seedUser(users);

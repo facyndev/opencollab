@@ -1,5 +1,6 @@
 export * from "./components/Button";
 export * from "./components/Panel";
+export * from "./components/PopoverMenu";
 export * from "./components/StatusBar";
 export * from "./components/TopBar";
 export * from "./components/Sidebar";

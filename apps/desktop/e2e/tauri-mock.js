@@ -11,6 +11,11 @@
 //   agentState(id, patch) emite terminal-agent-state con el estado completo (patch sobre el vacío)
 //   branches              carpeta -> { name, detached } devuelto por git_branch (sin entrada = no es un repo)
 //   prompt(id, path)      como la shell integration: OSC 7 + prompt (cambia la carpeta de la terminal)
+//   savedSnapshot         último payload de snapshot_save (versión 1 estampada por el mock)
+//   storageConfig         modo/base URL vigentes (storage_config_get/set)
+//   signIn()/signOut()    simula el deep link de login / logout (emite auth-changed)
+//   setSnapshot(snap)     precarga el snapshot que devuelve snapshot_load
+//   snapshotLoads         cantidad de snapshot_load ejecutados
 export function installTauriMock() {
   const listeners = {}; // evento -> [id de callback]
   let callbacks = 0;
@@ -19,6 +24,19 @@ export function installTauriMock() {
   const opened = [];
   const closed = [];
   const branches = {};
+  let localSaved = null; // snapshot local (workspaces.json)
+  let cloudSaved = null; // snapshot cloud (API REST)
+  const params = new URLSearchParams(location.search);
+  // ?mockFirstRun=1 simula la primera corrida; ?mockCloud=1 arranca en cloud
+  // con la configuración completa pero sin sesión en memoria (reinicio real).
+  let signedIn = false;
+  let snapshotLoads = 0;
+  let storageConfig = {
+    version: 1,
+    mode: params.get("mockCloud") === "1" ? "cloud" : "local",
+    apiBaseUrl: "http://127.0.0.1:8787",
+    onboardingComplete: params.get("mockFirstRun") !== "1",
+  };
   const encoder = new TextEncoder();
 
   const emit = (event, payload) =>
@@ -51,7 +69,48 @@ export function installTauriMock() {
       },
     });
 
-  window.__mock = { emit, agentState, prompt, writes, opened, closed, branches };
+  const user = { id: "u1", username: "tester", email: null, displayName: "Tester" };
+  const signIn = () => {
+    signedIn = true;
+    emit("auth-changed", { user });
+  };
+  const signOut = () => {
+    signedIn = false;
+    emit("auth-changed", { user: null });
+  };
+  window.__mock = {
+    emit,
+    agentState,
+    prompt,
+    writes,
+    opened,
+    closed,
+    branches,
+    signIn,
+    signOut,
+    setSnapshot(snapshot) {
+      if (storageConfig.mode === "cloud") cloudSaved = snapshot;
+      else localSaved = snapshot;
+    },
+    setCloudSnapshot(snapshot) {
+      cloudSaved = snapshot;
+    },
+    get savedSnapshot() {
+      return storageConfig.mode === "cloud" ? cloudSaved : localSaved;
+    },
+    get localSnapshot() {
+      return localSaved;
+    },
+    get cloudSnapshot() {
+      return cloudSaved;
+    },
+    get storageConfig() {
+      return storageConfig;
+    },
+    get snapshotLoads() {
+      return snapshotLoads;
+    },
+  };
   window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: {
@@ -90,6 +149,63 @@ export function installTauriMock() {
           closed.push(args.terminalId);
           setTimeout(() => emit("terminal-exit", { terminalId: args.terminalId }), 20);
           return null;
+        case "snapshot_load":
+          // Fallo de carga inyectado por el escenario de regresión (?mockSnapshotLoadError=1).
+          if (new URLSearchParams(location.search).get("mockSnapshotLoadError") === "1")
+            throw new Error("snapshot_load failed (e2e)");
+          snapshotLoads += 1;
+          // Cloud sin tokens en memoria: el núcleo real responde sin sesión.
+          if (storageConfig.mode === "cloud" && !signedIn)
+            throw new Error("no hay sesión iniciada");
+          // Sin snapshot guardado: primera corrida / arranque limpio.
+          {
+            const active = storageConfig.mode === "cloud" ? cloudSaved : localSaved;
+            return active ? JSON.parse(JSON.stringify(active)) : null;
+          }
+        case "snapshot_save":
+          // Guardado en memoria: los escenarios lo inspeccionan en __mock.savedSnapshot.
+          if (storageConfig.mode === "cloud") {
+            cloudSaved = { version: 1, workspaces: args.workspaces };
+          } else {
+            localSaved = { version: 1, workspaces: args.workspaces };
+          }
+          return null;
+        case "storage_config_get":
+          return { ...storageConfig };
+        case "storage_config_set": {
+          // Migrar local → cloud (S4, A4): sube los workspaces locales uno por
+          // uno sin borrar los que ya tenía la nube y conserva `localSaved`.
+          if (
+            storageConfig.onboardingComplete &&
+            storageConfig.mode === "local" &&
+            args.mode === "cloud"
+          ) {
+            if (new URLSearchParams(location.search).get("mockMigrateError") === "1") {
+              throw new Error("falló la migración local a cloud (e2e)");
+            }
+            if (localSaved?.workspaces?.length) {
+              const existing = cloudSaved?.workspaces
+                ? JSON.parse(JSON.stringify(cloudSaved.workspaces))
+                : [];
+              for (const ws of JSON.parse(JSON.stringify(localSaved.workspaces))) {
+                const idx = existing.findIndex((item) => item.id === ws.id);
+                if (idx >= 0) existing[idx] = ws;
+                else existing.push(ws);
+              }
+              cloudSaved = { version: 1, workspaces: existing };
+            }
+          }
+          storageConfig = {
+            version: 1,
+            mode: args.mode,
+            apiBaseUrl: args.apiBaseUrl,
+            onboardingComplete: true,
+          };
+          if (args.mode === "local") {
+            emit("collab-status", { connected: false, syncMs: null, collaborators: 1 });
+          }
+          return { ...storageConfig };
+        }
         case "collab_status":
           // Como el núcleo sin relay: desconectado, sin latencia, solo el usuario local.
           return { connected: false, syncMs: null, collaborators: 1 };
@@ -97,11 +213,13 @@ export function installTauriMock() {
           // Como el núcleo: guarda el verifier y abre la web (acá solo devuelve la URL).
           return `http://localhost:1421/login?client=desktop&code_challenge=${args.challenge}`;
         case "auth_finish":
-          return { id: "u1", username: "tester", email: null, displayName: "Tester" };
+          signedIn = true;
+          return user;
         case "auth_status":
           // Sin sesión: anónimo (los E2E emiten `auth-changed` para simular el login).
-          return null;
+          return signedIn ? user : null;
         case "auth_logout":
+          signOut();
           return null;
         case "git_branch":
           return branches[args.path] ?? null;

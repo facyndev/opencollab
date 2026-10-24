@@ -27,12 +27,15 @@ export const refreshSchema = z.object({ refreshToken: opaque }).strict();
 export const desktopTokenSchema = z.object({ code: opaque, codeVerifier: opaque }).strict();
 
 export const desktopCodeSchema = z
-  .object({ code_challenge: z.string().refine(isValidCodeChallenge, 'invalid code_challenge') })
+  .object({
+    code_challenge: z.string().refine(isValidCodeChallenge, 'invalid code_challenge'),
+    client: z.enum(['desktop', 'desktop-dev']).default('desktop'),
+  })
   .strict();
 
 // Query strings are not strict: providers append their own parameters.
 export const startQuerySchema = z.object({
-  client: z.enum(['web', 'desktop']).default('web'),
+  client: z.enum(['web', 'desktop', 'desktop-dev']).default('web'),
   code_challenge: z.string().refine(isValidCodeChallenge, 'invalid code_challenge').optional(),
 });
 

@@ -81,6 +81,17 @@ describe("runPendingHandoff", () => {
     expect(readPendingHandoff()).toBeNull();
   });
 
+  it("supports client=desktop-dev and redirects to opencollab-dev://", async () => {
+    expect(captureHandoff(`?client=desktop-dev&code_challenge=${challenge}`)).toBe(true);
+    expect(readPendingHandoff()).toBe(challenge);
+    const desktopCode = vi.fn(async () => "opencollab-dev://auth/callback?code=xyz");
+    const assign = vi.fn();
+    expect(await runPendingHandoff({ desktopCode }, assign)).toBe(true);
+    expect(desktopCode).toHaveBeenCalledWith(challenge, "desktop-dev");
+    expect(assign).toHaveBeenCalledWith("opencollab-dev://auth/callback?code=xyz");
+    expect(readPendingHandoff()).toBeNull();
+  });
+
   it("refuses to navigate to anything but the opencollab deep link", async () => {
     captureHandoff(`?client=desktop&code_challenge=${challenge}`);
     const assign = vi.fn();

@@ -9,6 +9,7 @@ mod collab_status;
 mod error;
 pub mod git;
 pub mod ports;
+pub mod storage;
 mod use_cases;
 
 pub use activity::{Activity, ActivityTracker};
@@ -22,6 +23,9 @@ pub use agent_state::AgentState;
 pub use collab_status::{CheckRelay, RelayStatus, SessionCollaborators};
 pub use error::AppError;
 pub use git::Branch;
+pub use storage::{
+    StoredPane, StoredSession, StoredWorkspace, WorkspaceSnapshot, SNAPSHOT_VERSION,
+};
 pub use use_cases::{
     ApplyAccessLevel, CloseTerminal, DetectTerminalAgents, InspectBranch, LaunchTerminal,
     ListSubdirectories, ResizeTerminal, SendTerminalInput,

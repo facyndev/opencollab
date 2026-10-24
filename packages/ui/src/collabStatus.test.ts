@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_COLLAB_STATUS, parseCollabStatus } from "./collabStatus";
+import { DEFAULT_COLLAB_STATUS, describeCollabMode, parseCollabStatus } from "./collabStatus";
 
 describe("DEFAULT_COLLAB_STATUS", () => {
   it("es honesto: desconectado, sin latencia y solo el usuario local", () => {
@@ -28,5 +28,27 @@ describe("parseCollabStatus", () => {
   it("un payload malformado cae a los valores honestos", () => {
     expect(parseCollabStatus(null)).toEqual(DEFAULT_COLLAB_STATUS);
     expect(parseCollabStatus({ connected: "sí", collaborators: -3 })).toEqual(DEFAULT_COLLAB_STATUS);
+  });
+});
+
+describe("describeCollabMode", () => {
+  it("en modo local marca la colaboración como inactiva con textos explícitos", () => {
+    const local = describeCollabMode("local");
+    expect(local.inactive).toBe(true);
+    expect(local.inviteTitle).toContain("Modo local");
+    expect(local.workspaceMetaTitle).toBe("Colaboración inactiva en modo local");
+    expect(local.onlineLabel).toBe("Local · colaboración inactiva");
+    expect(local.anonymousHint).toBe("Colaboración inactiva en modo local");
+    expect(local.statusBarTitle).toBe("Colaboración inactiva en modo local");
+  });
+
+  it("en modo cloud mantiene la colaboración activa", () => {
+    const cloud = describeCollabMode("cloud");
+    expect(cloud.inactive).toBe(false);
+    expect(cloud.inviteTitle).toBe("Requiere el relay: todavía no está conectado");
+    expect(cloud.workspaceMetaTitle).toBeUndefined();
+    expect(cloud.onlineLabel).toBe("Online");
+    expect(cloud.anonymousHint).toBe("Sign in to collaborate");
+    expect(cloud.statusBarTitle).toBeUndefined();
   });
 });
