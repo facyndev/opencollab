@@ -21,12 +21,14 @@ import {
   localUser,
   modKey,
   parseOsc7,
+  shouldClearAttentionOnWatchChange,
   statusLabel,
   type ActivityState,
   type AgentId,
   type AgentState,
   type PaneMeta,
   type PaneStatus,
+  type WatchInputs,
 } from "@opencollab/ui";
 import { useGitBranch } from "../hooks/useGitBranch";
 import { useWindowFocus } from "../hooks/useWindowFocus";
@@ -52,6 +54,8 @@ type Props = {
   /// Agente a ejecutar dentro de la shell al abrir (`null` = solo la shell).
   initialAgent: AgentId | null;
   focused: boolean;
+  /// Secuencia que incrementa cuando el usuario selecciona explícitamente el panel en el sidebar.
+  focusAckSeq?: number;
   minimized: boolean;
   maximized: boolean;
   /// Oculto (otra sesión activa u otro panel en foco): sigue montado para no perder el PTY.
@@ -87,7 +91,8 @@ export function TerminalPane(props: Props) {
   const [info, setInfo] = useState<{ name: string; cwd: string | null } | null>(null);
   /// El primero es el agente principal de la terminal; los siguientes son los que
   /// ese agente tiene anidados.
-  const [agents, setAgents] = useState<AgentId[]>([]);
+  const [agents, setAgents] = useState<AgentId[]>(() => (initialAgent ? [initialAgent] : []));
+  const agentsRef = useRef<AgentId[]>(initialAgent ? [initialAgent] : []);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
@@ -95,14 +100,16 @@ export function TerminalPane(props: Props) {
   const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
   const windowFocused = useWindowFocus();
-  /// "Mirando" = enfocado, visible y con la ventana en primer plano; no basta con ser el
-  /// último panel clickeado.
-  const watching = isWatching({
+  const watchInputs: WatchInputs = {
     focused: props.focused,
     hidden: props.hidden,
     minimized: props.minimized,
     windowFocused,
-  });
+  };
+  /// "Mirando" = enfocado, visible y con la ventana en primer plano; no basta con ser el
+  /// último panel clickeado.
+  const watching = isWatching(watchInputs);
+  const prevWatchRef = useRef<WatchInputs>(watchInputs);
   /// El handler de actividad se registra una vez: lee si se está mirando desde acá.
   const focusedRef = useRef(watching);
   focusedRef.current = watching;
@@ -131,11 +138,28 @@ export function TerminalPane(props: Props) {
       }),
     [paneId, info?.name, agents, cwd, startedAt, branch, agentState, activityState, onMeta],
   );
-  // Mirar el panel (enfocarlo, volver a la ventana, a su sesión o restaurarlo): lo que
-  // pedía atención ya se vio.
+  // Solo limpia `attention` automáticamente cuando el panel en sí pasa a estar activo
+  // (cambio de panel, sesión o desminimizar), no cuando solo vuelve el foco de la ventana.
   useEffect(() => {
-    if (watching) setActivityState(applyFocus);
-  }, [watching]);
+    const prev = prevWatchRef.current;
+    const next: WatchInputs = {
+      focused: props.focused,
+      hidden: props.hidden,
+      minimized: props.minimized,
+      windowFocused,
+    };
+    prevWatchRef.current = next;
+    if (shouldClearAttentionOnWatchChange(prev, next)) {
+      setActivityState(applyFocus);
+    }
+  }, [props.focused, props.hidden, props.minimized, windowFocused]);
+
+  useEffect(() => {
+    if (props.focusAckSeq && props.focusAckSeq > 0) {
+      setActivityState(applyFocus);
+      if (props.focused && !props.hidden && !props.minimized) termRef.current?.focus();
+    }
+  }, [props.focusAckSeq, props.focused, props.hidden, props.minimized]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -157,7 +181,11 @@ export function TerminalPane(props: Props) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
-    term.attachCustomKeyEventHandler(createTerminalKeyEventHandler(term));
+    const keyClipboardHandler = createTerminalKeyEventHandler(term);
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === "keydown") setActivityState(applyFocus);
+      return keyClipboardHandler(e);
+    });
 
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
@@ -209,6 +237,7 @@ export function TerminalPane(props: Props) {
           // La shell terminó sola (p. ej. `exit`): se cierra igual que con el ✕.
           onExit: () => {
             setStatus("done");
+            agentsRef.current = [];
             setAgents([]);
             setStartedAt(null);
             setActivityState(initialActivity);
@@ -216,10 +245,16 @@ export function TerminalPane(props: Props) {
             void closeRef.current();
           },
           onAgent: (newAgents, newStartedAt) => {
+            agentsRef.current = newAgents;
             setAgents(newAgents);
             setStartedAt(newStartedAt);
+            if (newAgents.length === 0) {
+              setActivityState(initialActivity);
+              setAgentState(null);
+            }
           },
           onAgentState: (next) => {
+            if (agentsRef.current.length === 0) return;
             setAgentState(next);
             // La "atención" es de UI: depende del foco del panel en este momento.
             const status = next.status;
@@ -342,7 +377,10 @@ export function TerminalPane(props: Props) {
         hidden={props.hidden}
         style={{ order: props.order }}
         // pointerdown y no mousedown: el arrastre cancela los eventos de mouse del header.
-        onPointerDown={props.onFocus}
+        onPointerDown={() => {
+          setActivityState(applyFocus);
+          props.onFocus();
+        }}
         header={header}
         bodyRef={containerRef}
         bodyClassName="pane-body"

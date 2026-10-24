@@ -36,10 +36,6 @@ pub fn spawn(app: AppHandle) {
         loop {
             thread::sleep(INTERVAL);
             let state = app.state::<AppState>();
-            // Adaptador genérico: la actividad del PTY como `status_changed`.
-            for (terminal, activity) in state.activity.tick(Instant::now()) {
-                events.emit_generic(terminal, activity_event(activity));
-            }
             let detected = match state.detect_agents.execute(state.session_id) {
                 Ok(detected) => detected,
                 Err(e) => {
@@ -59,6 +55,15 @@ pub fn spawn(app: AppHandle) {
                     .map(|a| a.id())
                     .collect();
                 let value = (agents, started_at);
+                if value.0.is_empty() {
+                    state.activity.forget(terminal);
+                    if last
+                        .get(&terminal)
+                        .is_some_and(|(prev_agents, _)| !prev_agents.is_empty())
+                    {
+                        state.agent_states.forget(terminal);
+                    }
+                }
                 if last.get(&terminal) != Some(&value) {
                     let _ = app.emit(
                         TERMINAL_AGENT_EVENT,
@@ -70,6 +75,17 @@ pub fn spawn(app: AppHandle) {
                     );
                 }
                 current.insert(terminal, value);
+            }
+
+            // Adaptador genérico: la actividad del PTY como `status_changed`, solo en
+            // terminales donde efectivamente corre un agente.
+            for (terminal, activity) in state.activity.tick(Instant::now()) {
+                if current
+                    .get(&terminal)
+                    .is_some_and(|(agents, _)| !agents.is_empty())
+                {
+                    events.emit_generic(terminal, activity_event(activity));
+                }
             }
             // Las terminales cerradas desaparecen solas del mapa.
             last = current;
