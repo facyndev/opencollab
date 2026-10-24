@@ -131,25 +131,27 @@ docker compose up -d --build
 
 ### 4. Run applications in development mode
 
-Run services individually depending on the area you are working on:
+Start the entire stack in parallel (API + Web + Desktop Tauri) from the repository root:
+
+```bash
+pnpm dev
+```
+
+Or run each application individually using the `<app>:dev` convention (or `pnpm dev` inside each app directory):
 
 #### Desktop (Tauri)
 ```bash
-# Frontend in the browser (Vite)
-pnpm dev
-
-# Native desktop app with an isolated dev profile
 pnpm desktop:dev
 ```
 
 #### Relay server / API (NestJS)
 ```bash
-pnpm --filter @opencollab/server start:dev
+pnpm api:dev
 ```
 
 #### Web portal (Vite)
 ```bash
-pnpm --filter @opencollab/web dev
+pnpm web:dev
 ```
 
 ---
