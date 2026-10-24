@@ -11,7 +11,7 @@ export function isAuthCallback(url: string): boolean {
   try {
     const parsed = new URL(url);
     return (
-      parsed.protocol === "opencollab:" &&
+      (parsed.protocol === "opencollab:" || parsed.protocol === "opencollab-dev:") &&
       parsed.host === "auth" &&
       parsed.pathname === "/callback" &&
       parsed.searchParams.get("code") !== null

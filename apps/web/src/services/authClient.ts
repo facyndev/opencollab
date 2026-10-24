@@ -231,8 +231,10 @@ export function createAuthClient(overrides: Partial<AuthClientDeps> = {}) {
       if (state.status === "authenticated") set({ ...state, user });
       return user;
     },
-    async desktopCode(codeChallenge: string): Promise<string> {
-      const response = await webPost("desktop-code", { code_challenge: codeChallenge });
+    async desktopCode(codeChallenge: string, client?: "desktop" | "desktop-dev"): Promise<string> {
+      const body =
+        client && client !== "desktop" ? { code_challenge: codeChallenge, client } : { code_challenge: codeChallenge };
+      const response = await webPost("desktop-code", body);
       if (!response.ok) throw await errorOf(response);
       return ((await response.json()) as { redirectUrl: string }).redirectUrl;
     },

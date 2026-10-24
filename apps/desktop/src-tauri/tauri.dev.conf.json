@@ -1,12 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "OpenCollab Dev",
-  "identifier": "dev.opencollab.app.dev",
+  "identifier": "com.opencollab.desktop.dev",
   "app": {
     "windows": [
       {
         "title": "OpenCollab (Dev)"
       }
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["opencollab-dev"]
+      }
+    }
   }
 }

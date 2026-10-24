@@ -17,5 +17,6 @@ protocol.workspace = true
 tauri.workspace = true
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+keyring.workspace = true
 serde.workspace = true
 serde_json.workspace = true

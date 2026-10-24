@@ -7,13 +7,16 @@
 //! app. El frontend extrae el `code` y llama `auth_finish`, que lo canjea en
 //! `POST /auth/desktop/token`.
 //!
-//! Los tokens viven **solo en la memoria del núcleo**; el frontend recibe el
+//! El `access_token` de corta vida vive **solo en la memoria del núcleo** y el
+//! `refresh_token` junto al usuario se persisten en el llavero seguro del
+//! sistema operativo (`keyring`: Windows Credential Manager / macOS Keychain /
+//! Linux Secret Service) siguiendo RFC 8252. El frontend recibe únicamente el
 //! usuario y el evento `auth-changed`. El HTTP va con `std::net`, sin runtime
 //! async (como `HttpRelayProbe`): el relay escucha en HTTP local sin TLS.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use application::ports::{AccessTokenProvider, PortError};
@@ -75,6 +78,75 @@ struct Session {
     user: UserView,
 }
 
+/// Datos de la sesión que se persisten en el llavero del sistema operativo
+/// (RFC 8252: el `access_token` de corta vida nunca sale de la memoria RAM).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedSession {
+    pub refresh_token: String,
+    pub user: UserView,
+}
+
+/// Puerto de almacenamiento seguro para la sesión de larga vida (`refresh_token` + usuario).
+pub trait SessionVault: Send + Sync {
+    fn load(&self) -> Option<PersistedSession>;
+    fn save(&self, session: &PersistedSession);
+    fn clear(&self);
+}
+
+struct NoopVault;
+
+impl SessionVault for NoopVault {
+    fn load(&self) -> Option<PersistedSession> {
+        None
+    }
+    fn save(&self, _session: &PersistedSession) {}
+    fn clear(&self) {}
+}
+
+const KEYRING_USER: &str = "session";
+
+/// Implementación de `SessionVault` sobre el almacén nativo de credenciales del SO.
+struct KeyringVault {
+    service: &'static str,
+}
+
+impl KeyringVault {
+    fn new(service: &'static str) -> Self {
+        Self { service }
+    }
+
+    fn entry(&self) -> Result<keyring::Entry, keyring::Error> {
+        keyring::Entry::new(self.service, KEYRING_USER)
+    }
+}
+
+impl SessionVault for KeyringVault {
+    fn load(&self) -> Option<PersistedSession> {
+        let raw = self.entry().ok()?.get_password().ok()?;
+        let persisted: PersistedSession = serde_json::from_str(&raw).ok()?;
+        if persisted.refresh_token.is_empty() || persisted.user.id.is_empty() {
+            return None;
+        }
+        Some(persisted)
+    }
+
+    fn save(&self, session: &PersistedSession) {
+        let Ok(raw) = serde_json::to_string(session) else {
+            return;
+        };
+        if let Ok(entry) = self.entry() {
+            let _ = entry.set_password(&raw);
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(entry) = self.entry() {
+            let _ = entry.delete_credential();
+        }
+    }
+}
+
 struct Inner {
     verifier: Option<String>,
     session: Option<Session>,
@@ -82,7 +154,7 @@ struct Inner {
 
 /// Resultado de consultar/renovar la sesión. `Fresh` no toca la red; `Refreshed`
 /// ya actualizó el par de tokens; `Rejected` cerró la sesión (el relay rechazó
-/// el refresh); `Malformed` conserva la sesión (respuesta ilegible).
+/// el refresh); `Malformed` conserva la sesión (respuesta ilegible o fallo transitorio).
 enum RefreshOutcome {
     Fresh {
         user: UserView,
@@ -97,11 +169,13 @@ enum RefreshOutcome {
     Malformed,
 }
 
-/// Sesión del desktop: dirección del relay, origen de la web y estado mutable
-/// (verifier pendiente + tokens). Todo queda en memoria del proceso.
+/// Sesión del desktop: dirección del relay, origen de la web, llavero y estado
+/// mutable (`access_token` y verifier PKCE solo en memoria; `refresh_token` en el llavero).
 pub struct AuthStore {
     api_addr: String,
     web_origin: String,
+    client: &'static str,
+    vault: Arc<dyn SessionVault>,
     inner: Mutex<Inner>,
     /// Serializa los refresh: si dos pedidos reciben 401 a la vez, el segundo
     /// espera y reutiliza el token que renovó el primero.
@@ -114,12 +188,71 @@ impl AuthStore {
         Self {
             api_addr,
             web_origin,
+            client: "desktop",
+            vault: Arc::new(NoopVault),
             inner: Mutex::new(Inner {
                 verifier: None,
                 session: None,
             }),
             refresh_lock: Mutex::new(()),
         }
+    }
+
+    /// Selecciona el identificador de cliente enviado a `/login` (`desktop-dev`
+    /// cuando la app corre bajo el perfil `com.opencollab.desktop.dev`, para que la
+    /// web devuelva el esquema aislado `opencollab-dev://`).
+    pub fn with_dev_client(mut self, is_dev: bool) -> Self {
+        self.client = if is_dev { "desktop-dev" } else { "desktop" };
+        self
+    }
+
+    /// Nombre del servicio en el llavero del SO (`opencollab` en producción y
+    /// `opencollab-dev` en desarrollo, igual que el esquema del deep link),
+    /// aislado para que sus rotaciones de `refresh_token` no se pisen mutuamente.
+    pub fn keyring_service(&self) -> &'static str {
+        if self.client == "desktop-dev" {
+            "opencollab-dev"
+        } else {
+            "opencollab"
+        }
+    }
+
+    /// Conecta el llavero nativo del sistema operativo e hidrata la sesión si existe.
+    pub fn with_os_keyring(self) -> Self {
+        let service = self.keyring_service();
+        self.with_vault(Arc::new(KeyringVault::new(service)))
+    }
+
+    /// Conecta un `SessionVault` (llavero real o doble de pruebas) e hidrata la
+    /// sesión guardada con `access_token` vacío y vencimiento inmediato para que
+    /// el primer pedido o `auth_status` rote el `refresh_token` contra el relay.
+    pub fn with_vault(mut self, vault: Arc<dyn SessionVault>) -> Self {
+        if let Some(persisted) = vault.load() {
+            if !persisted.refresh_token.is_empty() {
+                self.inner.lock().expect("auth").session = Some(Session {
+                    access_token: String::new(),
+                    refresh_token: persisted.refresh_token,
+                    expires_at: Instant::now(),
+                    user: persisted.user,
+                });
+            }
+        }
+        self.vault = vault;
+        self
+    }
+
+    /// Elimina la sesión de la memoria y del llavero, devolviendo el `refresh_token`
+    /// vigente para avisar al relay en `/auth/logout`.
+    pub fn clear_session(&self) -> Option<String> {
+        let refresh_token = self
+            .inner
+            .lock()
+            .expect("auth")
+            .session
+            .take()
+            .map(|session| session.refresh_token);
+        self.vault.clear();
+        refresh_token
     }
 
     /// Hay una sesión en memoria (puede estar vencida: el refresh lo decide
@@ -131,8 +264,8 @@ impl AuthStore {
     /// URL de la web donde el usuario hace el login para esta máquina.
     pub fn login_url(&self, challenge: &str) -> String {
         format!(
-            "{}/login?client=desktop&code_challenge={challenge}",
-            self.web_origin
+            "{}/login?client={}&code_challenge={challenge}",
+            self.web_origin, self.client
         )
     }
 
@@ -175,7 +308,7 @@ impl AuthStore {
                 return RefreshOutcome::NoSession;
             };
             if let Some(rejected) = rejected {
-                if session.access_token != rejected {
+                if !session.access_token.is_empty() && session.access_token != rejected {
                     return RefreshOutcome::Fresh {
                         user: session.user.clone(),
                         access_token: session.access_token.clone(),
@@ -183,6 +316,7 @@ impl AuthStore {
                 }
             }
             if !force
+                && !session.access_token.is_empty()
                 && session.expires_at.saturating_duration_since(Instant::now()) > REFRESH_MARGIN
             {
                 return RefreshOutcome::Fresh {
@@ -196,24 +330,54 @@ impl AuthStore {
         match post_json(self, "/auth/refresh", &body) {
             Ok((200, raw)) => match serde_json::from_slice::<TokenPairBody>(&raw) {
                 Ok(pair) => {
-                    let mut inner = self.inner.lock().expect("auth");
-                    let Some(session) = inner.session.as_mut() else {
-                        return RefreshOutcome::NoSession;
+                    let (outcome, persisted) = {
+                        let mut inner = self.inner.lock().expect("auth");
+                        let Some(session) = inner.session.as_mut() else {
+                            return RefreshOutcome::NoSession;
+                        };
+                        session.access_token = pair.access_token;
+                        session.refresh_token = pair.refresh_token;
+                        session.expires_at = Instant::now() + Duration::from_secs(pair.expires_in);
+                        let persisted = PersistedSession {
+                            refresh_token: session.refresh_token.clone(),
+                            user: session.user.clone(),
+                        };
+                        (
+                            RefreshOutcome::Refreshed {
+                                user: session.user.clone(),
+                                access_token: session.access_token.clone(),
+                            },
+                            persisted,
+                        )
                     };
-                    session.access_token = pair.access_token;
-                    session.refresh_token = pair.refresh_token;
-                    session.expires_at = Instant::now() + Duration::from_secs(pair.expires_in);
-                    RefreshOutcome::Refreshed {
-                        user: session.user.clone(),
-                        access_token: session.access_token.clone(),
-                    }
+                    self.vault.save(&persisted);
+                    outcome
                 }
                 Err(_) => RefreshOutcome::Malformed,
             },
-            _ => {
-                self.inner.lock().expect("auth").session = None;
+            Ok((400 | 401 | 403, _)) => {
+                let should_clear = {
+                    let mut inner = self.inner.lock().expect("auth");
+                    if inner
+                        .session
+                        .as_ref()
+                        .is_some_and(|s| s.refresh_token == refresh_token)
+                    {
+                        inner.session = None;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if should_clear {
+                    self.vault.clear();
+                }
                 RefreshOutcome::Rejected
             }
+            // Fallos de red (`Err`) o errores transitorios del servidor (`5xx`, `429`):
+            // se preserva la sesión en memoria y en el llavero para no desloguear al
+            // usuario cuando el relay local todavía está arrancando o hay microcortes.
+            _ => RefreshOutcome::Malformed,
         }
     }
 }
@@ -279,10 +443,13 @@ fn is_valid_code(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// `code` del deep link `opencollab://auth/callback?code=…`; `None` si la URL no
-/// es un callback de login (nunca confiar en un deep link con otra forma).
+/// `code` del deep link `opencollab://auth/callback?code=…` (o
+/// `opencollab-dev://auth/callback?code=…` en dev); `None` si la URL no es un
+/// callback de login (nunca confiar en un deep link con otra forma).
 pub fn parse_callback_code(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("opencollab://")?;
+    let rest = url
+        .strip_prefix("opencollab://")
+        .or_else(|| url.strip_prefix("opencollab-dev://"))?;
     let (path, query) = rest.split_once('?')?;
     if path != "auth/callback" {
         return None;
@@ -401,6 +568,10 @@ fn emit_changed(app: &AppHandle, user: Option<UserView>) {
 }
 
 fn adopt_session(store: &AuthStore, result: AuthResultBody) -> UserView {
+    let persisted = PersistedSession {
+        refresh_token: result.refresh_token.clone(),
+        user: result.user.clone(),
+    };
     let session = Session {
         access_token: result.access_token,
         refresh_token: result.refresh_token,
@@ -408,6 +579,7 @@ fn adopt_session(store: &AuthStore, result: AuthResultBody) -> UserView {
         user: result.user.clone(),
     };
     store.inner.lock().expect("auth").session = Some(session);
+    store.vault.save(&persisted);
     result.user
 }
 
@@ -491,17 +663,10 @@ pub fn auth_status(app: AppHandle, state: State<'_, AppState>) -> Result<Option<
     }
 }
 
-/// Cierra la sesión (avisa al relay sin bloquear) y emite `auth-changed` sin usuario.
+/// Cierra la sesión (avisa al relay sin bloquear), limpia el llavero y emite `auth-changed` sin usuario.
 #[tauri::command(async)]
 pub fn auth_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let refresh_token = state
-        .auth
-        .inner
-        .lock()
-        .expect("auth")
-        .session
-        .take()
-        .map(|session| session.refresh_token);
+    let refresh_token = state.auth.clear_session();
     if let Some(refresh_token) = refresh_token {
         let body = format!("{{\"refreshToken\":\"{}\"}}", json_escape(&refresh_token));
         let _ = post_json(&state.auth, "/auth/logout", &body);
@@ -528,6 +693,8 @@ mod tests {
         let store = AuthStore {
             api_addr: "127.0.0.1:8787".to_string(),
             web_origin: "https://app.example.com".to_string(),
+            client: "desktop",
+            vault: Arc::new(NoopVault),
             inner: Mutex::new(Inner {
                 verifier: None,
                 session: None,
@@ -538,6 +705,14 @@ mod tests {
             store.login_url(&"a".repeat(43)),
             format!(
                 "https://app.example.com/login?client=desktop&code_challenge={}",
+                "a".repeat(43)
+            )
+        );
+        let dev_store = store.with_dev_client(true);
+        assert_eq!(
+            dev_store.login_url(&"a".repeat(43)),
+            format!(
+                "https://app.example.com/login?client=desktop-dev&code_challenge={}",
                 "a".repeat(43)
             )
         );
@@ -558,6 +733,10 @@ mod tests {
         assert_eq!(
             parse_callback_code("opencollab://auth/callback?code=abc123"),
             Some("abc123".to_string())
+        );
+        assert_eq!(
+            parse_callback_code("opencollab-dev://auth/callback?code=dev123"),
+            Some("dev123".to_string())
         );
         // Parámetros extra no molestan; el primero que vale es el code.
         assert_eq!(
@@ -637,6 +816,8 @@ mod tests {
         AuthStore {
             api_addr: "127.0.0.1:1".to_string(),
             web_origin: DEFAULT_WEB_ORIGIN.to_string(),
+            client: "desktop",
+            vault: Arc::new(NoopVault),
             inner: Mutex::new(Inner {
                 verifier: None,
                 session: Some(Session {
@@ -672,6 +853,8 @@ mod tests {
         let store = AuthStore {
             api_addr: "127.0.0.1:1".to_string(),
             web_origin: DEFAULT_WEB_ORIGIN.to_string(),
+            client: "desktop",
+            vault: Arc::new(NoopVault),
             inner: Mutex::new(Inner {
                 verifier: None,
                 session: None,
@@ -733,6 +916,8 @@ mod tests {
         let store = Arc::new(AuthStore {
             api_addr: addr,
             web_origin: DEFAULT_WEB_ORIGIN.to_string(),
+            client: "desktop",
+            vault: Arc::new(NoopVault),
             inner: Mutex::new(Inner {
                 verifier: None,
                 session: Some(Session {
@@ -768,6 +953,179 @@ mod tests {
             hits.load(Ordering::SeqCst),
             1,
             "un solo refresh para dos 401"
+        );
+    }
+
+    #[derive(Default)]
+    struct MemoryVault {
+        stored: Mutex<Option<PersistedSession>>,
+    }
+
+    impl MemoryVault {
+        fn with(session: PersistedSession) -> Arc<Self> {
+            Arc::new(Self {
+                stored: Mutex::new(Some(session)),
+            })
+        }
+    }
+
+    impl SessionVault for MemoryVault {
+        fn load(&self) -> Option<PersistedSession> {
+            self.stored.lock().expect("vault").clone()
+        }
+        fn save(&self, session: &PersistedSession) {
+            *self.stored.lock().expect("vault") = Some(session.clone());
+        }
+        fn clear(&self) {
+            *self.stored.lock().expect("vault") = None;
+        }
+    }
+
+    fn sample_user() -> UserView {
+        UserView {
+            id: "u1".to_string(),
+            username: "ana".to_string(),
+            email: Some("ana@example.com".to_string()),
+            display_name: "Ana".to_string(),
+        }
+    }
+
+    fn serve_once(status_line: &'static str, response_body: &'static str) -> String {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let addr = listener.local_addr().expect("addr").to_string();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{response_body}",
+                    response_body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        addr
+    }
+
+    #[test]
+    fn servicio_del_llavero_aisla_produccion_y_desarrollo() {
+        let prod = AuthStore::new("127.0.0.1:8787".to_string());
+        assert_eq!(prod.keyring_service(), "opencollab");
+        let dev = AuthStore::new("127.0.0.1:8787".to_string()).with_dev_client(true);
+        assert_eq!(dev.keyring_service(), "opencollab-dev");
+    }
+
+    #[test]
+    fn adopt_session_guarda_refresh_y_usuario_en_el_llavero_y_logout_lo_limpia() {
+        let vault = Arc::new(MemoryVault::default());
+        let store = AuthStore::new("127.0.0.1:1".to_string()).with_vault(vault.clone());
+        let user = sample_user();
+
+        let returned = adopt_session(
+            &store,
+            AuthResultBody {
+                access_token: "access-secreto".to_string(),
+                refresh_token: "refresh-1".to_string(),
+                expires_in: 900,
+                user: user.clone(),
+            },
+        );
+        assert_eq!(returned, user);
+        assert_eq!(
+            vault.load(),
+            Some(PersistedSession {
+                refresh_token: "refresh-1".to_string(),
+                user,
+            })
+        );
+
+        let cleared = store.clear_session();
+        assert_eq!(cleared.as_deref(), Some("refresh-1"));
+        assert!(!store.has_session());
+        assert_eq!(vault.load(), None);
+    }
+
+    #[test]
+    fn restaura_la_sesion_del_llavero_y_renueva_el_access_en_el_primer_pedido() {
+        let addr = serve_once(
+            "200 OK",
+            r#"{"accessToken":"access-nuevo","refreshToken":"refresh-rotado","expiresIn":600}"#,
+        );
+        let vault = MemoryVault::with(PersistedSession {
+            refresh_token: "refresh-guardado".to_string(),
+            user: sample_user(),
+        });
+        let store = AuthStore::new(addr).with_vault(vault.clone());
+        assert!(
+            store.has_session(),
+            "debe hidratar la sesión del llavero al iniciar"
+        );
+
+        let token = store
+            .access_token_for_request()
+            .expect("refresh al iniciar");
+        assert_eq!(token, "access-nuevo");
+        assert_eq!(
+            vault.load().map(|s| s.refresh_token),
+            Some("refresh-rotado".to_string()),
+            "el refresh rotado debe persistirse en el llavero"
+        );
+    }
+
+    #[test]
+    fn fallo_de_red_o_5xx_preserva_la_sesion_en_memoria_y_en_el_llavero() {
+        let vault = MemoryVault::with(PersistedSession {
+            refresh_token: "refresh-vivo".to_string(),
+            user: sample_user(),
+        });
+        // 1. Relay caído (puerto cerrado)
+        let store_down = AuthStore::new("127.0.0.1:1".to_string()).with_vault(vault.clone());
+        assert!(store_down.access_token_for_request().is_err());
+        assert!(
+            store_down.has_session(),
+            "un fallo de conexión no debe cerrar la sesión local"
+        );
+        assert_eq!(
+            vault.load().map(|s| s.refresh_token),
+            Some("refresh-vivo".to_string()),
+            "un fallo de conexión no debe borrar el llavero"
+        );
+
+        // 2. Relay responde 503 Service Unavailable
+        let addr_503 = serve_once("503 Service Unavailable", r#"{"message":"starting"}"#);
+        let store_503 = AuthStore::new(addr_503).with_vault(vault.clone());
+        assert!(store_503.access_token_for_request().is_err());
+        assert!(
+            store_503.has_session(),
+            "un 5xx del relay no debe cerrar la sesión local"
+        );
+        assert_eq!(
+            vault.load().map(|s| s.refresh_token),
+            Some("refresh-vivo".to_string()),
+            "un 5xx del relay no debe borrar el llavero"
+        );
+    }
+
+    #[test]
+    fn rechazo_401_del_relay_borra_la_sesion_de_memoria_y_del_llavero() {
+        let addr_401 = serve_once("401 Unauthorized", r#"{"message":"Invalid refresh token"}"#);
+        let vault = MemoryVault::with(PersistedSession {
+            refresh_token: "refresh-revocado".to_string(),
+            user: sample_user(),
+        });
+        let store = AuthStore::new(addr_401).with_vault(vault.clone());
+        assert_eq!(
+            store.access_token_for_request(),
+            Err("no hay sesión iniciada".to_string())
+        );
+        assert!(!store.has_session());
+        assert_eq!(
+            vault.load(),
+            None,
+            "un 401 explícito del relay debe limpiar el llavero"
         );
     }
 }

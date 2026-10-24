@@ -45,7 +45,7 @@ pub struct AppState {
     pub adapters: Arc<AgentAdapters>,
     pub check_relay: CheckRelay,
     pub session_collaborators: SessionCollaborators,
-    /// Sesión del desktop (tokens solo en memoria) + verifier PKCE pendiente.
+    /// Sesión del desktop (`access_token` y verifier PKCE en memoria; `refresh_token` en el llavero del SO).
     pub auth: Arc<AuthStore>,
     /// Persistencia de la estructura del escritorio (snapshot de workspaces,
     /// sesiones y perfiles de arranque). Se reemplaza al cambiar de modo.
@@ -70,7 +70,9 @@ fn agent_adapters() -> Vec<Arc<dyn AgentAdapter>> {
 impl AppState {
     /// `data_dir` es el directorio de datos de la app (appdata resuelto por
     /// Tauri en el setup); el port lo implanta en un archivo, no lo crea.
-    pub fn bootstrap(data_dir: std::path::PathBuf) -> Result<Self, AppError> {
+    /// Cuando `is_dev_app` es `true`, el login usa `client=desktop-dev` para
+    /// regresar por el esquema aislado `opencollab-dev://`.
+    pub fn bootstrap(data_dir: std::path::PathBuf, is_dev_app: bool) -> Result<Self, AppError> {
         crate::env::load_dot_env();
         let repo: Arc<dyn SessionRepository> = Arc::new(InMemorySessionRepository::new());
         let pty: Arc<dyn PtyPort> = Arc::new(PortablePtyAdapter::new());
@@ -86,7 +88,11 @@ impl AppState {
         let session_id = session.id();
         repo.save_session(session)?;
 
-        let auth = Arc::new(AuthStore::new(relay_addr.clone()));
+        let auth = Arc::new(
+            AuthStore::new(relay_addr.clone())
+                .with_dev_client(is_dev_app)
+                .with_os_keyring(),
+        );
         let default_api_base_url = format!("http://{relay_addr}");
         let config = StorageConfig::load(&data_dir, &default_api_base_url);
         let snapshot_store = build_snapshot_store(&config, &data_dir, auth.clone());

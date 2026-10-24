@@ -39,7 +39,15 @@ fn main() {
                 .path()
                 .app_data_dir()
                 .map_err(|e| format!("no se pudo resolver el directorio de datos: {e}"))?;
-            app.manage(state::AppState::bootstrap(data_dir)?);
+            let is_dev_app = app.config().identifier.ends_with(".dev");
+            #[cfg(any(windows, target_os = "linux"))]
+            if is_dev_app {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register("opencollab-dev") {
+                    eprintln!("no se pudo registrar el esquema opencollab-dev://: {e}");
+                }
+            }
+            app.manage(state::AppState::bootstrap(data_dir, is_dev_app)?);
             agent_watcher::spawn(app.handle().clone());
             collab_status::spawn(app.handle().clone());
             Ok(())
