@@ -9,14 +9,17 @@ import {
   Maximize,
   Minus,
   Panel,
+  PopoverMenu,
   TerminalIcon,
   agentInfo,
   applyActivity,
   applyFocus,
   cdCommand,
+  clampMenuPosition,
   initialActivity,
   isWatching,
   localUser,
+  modKey,
   parseOsc7,
   statusLabel,
   type ActivityState,
@@ -36,6 +39,11 @@ import {
   resizeTerminal,
   writeTerminal,
 } from "../services/terminalApi";
+import {
+  copyTerminalSelection,
+  createTerminalKeyEventHandler,
+  pasteFromClipboard,
+} from "../services/terminalClipboard";
 
 type Props = {
   paneId: string;
@@ -102,6 +110,11 @@ export function TerminalPane(props: Props) {
   const branch = useGitBranch(cwd, activityState.activity === "idle");
   const [status, setStatus] = useState<PaneStatus>("starting");
   const [error, setError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    left: number;
+    top: number;
+    hasSelection: boolean;
+  } | null>(null);
 
   useEffect(() => onStatus(paneId, status), [paneId, status, onStatus]);
   useEffect(
@@ -144,6 +157,24 @@ export function TerminalPane(props: Props) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
+    term.attachCustomKeyEventHandler(createTerminalKeyEventHandler(term));
+
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      props.onFocus();
+      const { left, top } = clampMenuPosition(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      setContextMenu({
+        left,
+        top,
+        hasSelection: term.hasSelection(),
+      });
+    };
+    container.addEventListener("contextmenu", onContextMenu);
 
     // fit() con el contenedor oculto (0x0) deja la terminal en 1 columna.
     const fitIfVisible = () => {
@@ -213,6 +244,7 @@ export function TerminalPane(props: Props) {
 
     return () => {
       disposed = true;
+      container.removeEventListener("contextmenu", onContextMenu);
       osc7.dispose();
       observer.disconnect();
       input.dispose();
@@ -303,16 +335,87 @@ export function TerminalPane(props: Props) {
   );
 
   return (
-    <Panel
-      ref={(el) => props.registerEl(paneId, el)}
-      className={classes}
-      hidden={props.hidden}
-      style={{ order: props.order }}
-      // pointerdown y no mousedown: el arrastre cancela los eventos de mouse del header.
-      onPointerDown={props.onFocus}
-      header={header}
-      bodyRef={containerRef}
-      bodyClassName="pane-body"
-    />
+    <>
+      <Panel
+        ref={(el) => props.registerEl(paneId, el)}
+        className={classes}
+        hidden={props.hidden}
+        style={{ order: props.order }}
+        // pointerdown y no mousedown: el arrastre cancela los eventos de mouse del header.
+        onPointerDown={props.onFocus}
+        header={header}
+        bodyRef={containerRef}
+        bodyClassName="pane-body"
+      />
+      <PopoverMenu
+        open={contextMenu !== null}
+        onClose={() => setContextMenu(null)}
+        position={contextMenu ? { left: contextMenu.left, top: contextMenu.top } : null}
+        className="term-context-menu"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="cwd-item"
+          disabled={!contextMenu?.hasSelection}
+          onClick={() => {
+            const term = termRef.current;
+            if (term) copyTerminalSelection(term);
+            setContextMenu(null);
+            term?.focus();
+          }}
+        >
+          <span className="cwd-item-path">Copy</span>
+          <kbd>{`${modKey}C`}</kbd>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="cwd-item"
+          onClick={() => {
+            const term = termRef.current;
+            setContextMenu(null);
+            if (term) {
+              void pasteFromClipboard(term);
+              term.focus();
+            }
+          }}
+        >
+          <span className="cwd-item-path">Paste</span>
+          <kbd>{`${modKey}V`}</kbd>
+        </button>
+        <div className="ws-menu-sep" />
+        <button
+          type="button"
+          role="menuitem"
+          className="cwd-item"
+          onClick={() => {
+            const term = termRef.current;
+            setContextMenu(null);
+            if (term) {
+              term.selectAll();
+              term.focus();
+            }
+          }}
+        >
+          <span className="cwd-item-path">Select All</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="cwd-item"
+          onClick={() => {
+            const term = termRef.current;
+            setContextMenu(null);
+            if (term) {
+              term.clear();
+              term.focus();
+            }
+          }}
+        >
+          <span className="cwd-item-path">Clear Buffer</span>
+        </button>
+      </PopoverMenu>
+    </>
   );
 }
