@@ -854,6 +854,41 @@ kbd {
   flex: 1;
   min-width: 0;
   display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cwd-copy-btn {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+.cwd-copy-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.cwd-copy-btn--copied {
+  color: var(--green);
+}
+
+.term-context-menu {
+  min-width: 200px;
+}
+
+.term-context-menu .cwd-item {
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.term-context-menu .cwd-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.term-context-menu .cwd-item:disabled:hover {
+  background: transparent;
 }
 
 /* Ruta clickeable: mismo ⇅ que la tarjeta de usuario del sidebar. */
