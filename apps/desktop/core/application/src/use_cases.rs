@@ -442,6 +442,7 @@ mod tests {
             name: "claude.exe".into(),
             args: vec![],
             started_at: Some(1_700_000_000),
+            cwd: None,
         }]));
 
         let detected = DetectTerminalAgents::new(w.repo.clone(), w.pty.clone(), inspector)
@@ -457,6 +458,7 @@ mod tests {
                         primary: Some(KnownAgent::ClaudeCode),
                         primary_started_at: Some(1_700_000_000),
                         nested: vec![],
+                        active_cwd: None,
                     }
                 ),
                 (second, AgentTree::default()),
@@ -475,6 +477,7 @@ mod tests {
                 name: "claude.exe".into(),
                 args: vec![],
                 started_at: None,
+                cwd: None,
             },
             crate::agent_detection::ProcessInfo {
                 pid: 2001,
@@ -482,6 +485,7 @@ mod tests {
                 name: "codex.exe".into(),
                 args: vec![],
                 started_at: None,
+                cwd: None,
             },
         ]));
 
@@ -497,6 +501,7 @@ mod tests {
                     primary: Some(KnownAgent::ClaudeCode),
                     primary_started_at: None,
                     nested: vec![KnownAgent::Codex],
+                    active_cwd: None,
                 }
             )]
         );
@@ -511,6 +516,7 @@ mod tests {
             name: name.into(),
             args: vec![],
             started_at: None,
+            cwd: None,
         };
         let inspector = Arc::new(FakeInspector(vec![
             p(2000, 1000, "claude.exe"),

@@ -92,6 +92,9 @@ export function TerminalPane(props: Props) {
   const agent = agents[0] ?? null;
   /// Directorio actual, según lo reporta la shell con OSC 7 en cada prompt.
   const [cwd, setCwd] = useState<string | null>(null);
+  /// Directorio de trabajo real del proceso del agente o subagente activo (p. ej. un git worktree).
+  const [agentCwd, setAgentCwd] = useState<string | null>(null);
+  const effectiveCwd = agentCwd ?? cwd;
   const [activityState, setActivityState] = useState<ActivityState>(initialActivity);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
   const windowFocused = useWindowFocus();
@@ -106,8 +109,8 @@ export function TerminalPane(props: Props) {
   /// El handler de actividad se registra una vez: lee si se está mirando desde acá.
   const focusedRef = useRef(watching);
   focusedRef.current = watching;
-  // Se vuelve a leer al quedar inactivo: un agente pudo cambiar de rama.
-  const branch = useGitBranch(cwd, activityState.activity === "idle");
+  // Se vuelve a leer al cambiar el directorio efectivo (shell o worktree del agente) o al quedar inactivo.
+  const branch = useGitBranch(effectiveCwd, activityState.activity === "idle");
   const [status, setStatus] = useState<PaneStatus>("starting");
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -122,14 +125,14 @@ export function TerminalPane(props: Props) {
       onMeta(paneId, {
         shellName: info?.name ?? null,
         agents,
-        cwd,
+        cwd: effectiveCwd,
         startedAt,
         branch,
         agentState,
         activity: activityState.activity,
         attention: activityState.attention,
       }),
-    [paneId, info?.name, agents, cwd, startedAt, branch, agentState, activityState, onMeta],
+    [paneId, info?.name, agents, effectiveCwd, startedAt, branch, agentState, activityState, onMeta],
   );
   // Mirar el panel (enfocarlo, volver a la ventana, a su sesión o restaurarlo): lo que
   // pedía atención ya se vio.
@@ -211,13 +214,19 @@ export function TerminalPane(props: Props) {
             setStatus("done");
             setAgents([]);
             setStartedAt(null);
+            setAgentCwd(null);
             setActivityState(initialActivity);
             setAgentState(null);
             void closeRef.current();
           },
-          onAgent: (newAgents, newStartedAt) => {
+          onAgent: (newAgents, newStartedAt, newAgentCwd) => {
             setAgents(newAgents);
             setStartedAt(newStartedAt);
+            setAgentCwd(newAgentCwd);
+            if (newAgents.length === 0) {
+              setActivityState(initialActivity);
+              setAgentState(null);
+            }
           },
           onAgentState: (next) => {
             setAgentState(next);
@@ -313,9 +322,9 @@ export function TerminalPane(props: Props) {
         <span className="pane-name" title={detected ? `${name} · en ${shellName}` : undefined}>
           {name}
         </span>
-        {cwd && (
+        {effectiveCwd && (
           <span className="pane-cwd">
-            <CwdSwitcher cwd={cwd} disabledReason={cwdDisabledReason} onNavigate={navigate} />
+            <CwdSwitcher cwd={effectiveCwd} disabledReason={cwdDisabledReason} onNavigate={navigate} />
           </span>
         )}
         <span className={`pane-status pane-status--${status}`} title={error ?? undefined}>
@@ -326,7 +335,7 @@ export function TerminalPane(props: Props) {
           {localUser.initials}
         </span>
         <span className="pane-controls">
-          <NewTerminalMenu cwd={cwd} onOpen={props.onNewTerminal} />
+          <NewTerminalMenu cwd={effectiveCwd} onOpen={props.onNewTerminal} />
           <IconButton icon={<Minus />} title="Minimize" onClick={props.onToggleMinimize} />
           <IconButton icon={<Maximize />} title="Maximize" onClick={props.onToggleMaximize} />
           <IconButton icon={<Close />} title="Close" onClick={() => void close()} />

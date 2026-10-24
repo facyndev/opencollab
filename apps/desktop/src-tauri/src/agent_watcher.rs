@@ -26,13 +26,23 @@ struct TerminalAgentPayload {
     /// Arranque del proceso del agente principal (segundos desde la época Unix);
     /// `null` si no corre ninguno.
     started_at: Option<u64>,
+    /// Directorio de trabajo actual del agente o subagente activo (`null` si no
+    /// corre ningún agente o el SO no lo expone).
+    cwd: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct AgentObservation {
+    agents: Vec<&'static str>,
+    started_at: Option<u64>,
+    cwd: Option<String>,
 }
 
 pub fn spawn(app: AppHandle) {
     thread::spawn(move || {
         let events =
             TauriAgentEvents::new(app.clone(), app.state::<AppState>().agent_states.clone());
-        let mut last: HashMap<TerminalId, (Vec<&'static str>, Option<u64>)> = HashMap::new();
+        let mut last: HashMap<TerminalId, AgentObservation> = HashMap::new();
         loop {
             thread::sleep(INTERVAL);
             let state = app.state::<AppState>();
@@ -52,24 +62,33 @@ pub fn spawn(app: AppHandle) {
             for (terminal, tree) in detected {
                 // El principal primero, después los que ese agente tiene anidados.
                 let started_at = tree.primary.and(tree.primary_started_at);
+                let cwd = tree
+                    .primary
+                    .and(tree.active_cwd)
+                    .map(|p| p.to_string_lossy().into_owned());
                 let agents: Vec<&'static str> = tree
                     .primary
                     .into_iter()
                     .chain(tree.nested)
                     .map(|a| a.id())
                     .collect();
-                let value = (agents, started_at);
-                if last.get(&terminal) != Some(&value) {
+                let observation = AgentObservation {
+                    agents,
+                    started_at,
+                    cwd,
+                };
+                if last.get(&terminal) != Some(&observation) {
                     let _ = app.emit(
                         TERMINAL_AGENT_EVENT,
                         TerminalAgentPayload {
                             terminal_id: terminal.to_string(),
-                            agents: value.0.clone(),
-                            started_at,
+                            agents: observation.agents.clone(),
+                            started_at: observation.started_at,
+                            cwd: observation.cwd.clone(),
                         },
                     );
                 }
-                current.insert(terminal, value);
+                current.insert(terminal, observation);
             }
             // Las terminales cerradas desaparecen solas del mapa.
             last = current;

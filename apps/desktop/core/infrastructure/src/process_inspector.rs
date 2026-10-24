@@ -30,11 +30,13 @@ impl ProcessInspector for SysinfoProcessInspector {
             .system
             .lock()
             .map_err(|e| PortError::new(e.to_string()))?;
-        // Solo lo que la detección usa: sin CPU, memoria ni disco.
+        // Solo lo que la detección usa: comando, CWD actual y arranque (sin CPU, memoria ni disco).
         system.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
-            ProcessRefreshKind::nothing().with_cmd(UpdateKind::OnlyIfNotSet),
+            ProcessRefreshKind::nothing()
+                .with_cmd(UpdateKind::OnlyIfNotSet)
+                .with_cwd(UpdateKind::Always),
         );
         Ok(system
             .processes()
@@ -50,6 +52,7 @@ impl ProcessInspector for SysinfoProcessInspector {
                     .collect(),
                 // sysinfo informa 0 cuando no pudo leerlo.
                 started_at: Some(p.start_time()).filter(|&t| t > 0),
+                cwd: p.cwd().map(|path| path.to_path_buf()),
             })
             .collect())
     }
@@ -67,6 +70,7 @@ mod tests {
             .find(|p| p.pid == std::process::id())
             .expect("el proceso del test debería aparecer");
         assert!(me.parent.is_some());
+        assert_eq!(me.cwd, std::env::current_dir().ok());
         // El proceso del test arrancó hace poco, pero ya.
         let started = me.started_at.expect("sysinfo debería informar el arranque");
         let now = std::time::SystemTime::now()
