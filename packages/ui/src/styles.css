@@ -532,7 +532,7 @@ kbd {
 }
 
 .thread-item--has-uptime {
-  padding-right: 44px;
+  padding-right: 38px;
 }
 
 .thread-item:hover {
@@ -975,7 +975,8 @@ button.cwd-item:hover {
   color: var(--text-muted);
 }
 
-.cwd-item-path {
+.cwd-item-path,
+.cwd-item-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;

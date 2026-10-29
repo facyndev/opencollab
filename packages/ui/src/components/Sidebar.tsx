@@ -202,7 +202,7 @@ export function Sidebar(props: Props) {
                           className={`thread-item ${focused ? "thread-item--focused" : ""} ${
                             hasUptime ? "thread-item--has-uptime" : ""
                           }`}
-                          title={label}
+                          title={stateLabel ? `${label} · ${stateLabel}` : label}
                           onClick={select}
                         >
                           <TerminalIcon agent={agent} shellName={m?.shellName ?? ""} size={14} />
