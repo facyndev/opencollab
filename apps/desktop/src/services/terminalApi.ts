@@ -9,16 +9,22 @@ type OutputPayload = { terminalId: string; data: number[] };
 type ExitPayload = { terminalId: string };
 /// El primero es el agente principal de la terminal; los siguientes son los que
 /// ese agente tiene anidados. `startedAt`: arranque del principal, en segundos
-/// desde la época Unix (`null` si no corre ninguno).
-type AgentPayload = { terminalId: string; agents: AgentId[]; startedAt: number | null };
+/// desde la época Unix (`null` si no corre ninguno). `cwd`: directorio activo del
+/// agente o subagente (`null` si no corre ninguno).
+type AgentPayload = {
+  terminalId: string;
+  agents: AgentId[];
+  startedAt: number | null;
+  cwd?: string | null;
+};
 /// Estado reducido del agente (ver `agentState.ts`); el núcleo solo lo emite cuando cambia.
 type AgentStatePayload = { terminalId: string; state: AgentState };
 
 export type TerminalHandlers = {
   onOutput: (data: Uint8Array) => void;
   onExit: () => void;
-  /// Agentes conocidos que corren en la terminal (lista vacía = ninguno).
-  onAgent: (agents: AgentId[], startedAt: number | null) => void;
+  /// Agentes conocidos que corren en la terminal (lista vacía = ninguno) y su directorio activo.
+  onAgent: (agents: AgentId[], startedAt: number | null, cwd: string | null) => void;
   /// Estado del agente reducido por el núcleo a partir de los `AgentEvent`s de la terminal.
   onAgentState?: (state: AgentState) => void;
 };
@@ -28,7 +34,10 @@ const handlers = new Map<string, TerminalHandlers>();
 // (el PTY arranca dentro de open_shell), así que se guarda hasta entonces.
 const pending = new Map<string, Uint8Array[]>();
 const exitedEarly = new Set<string>();
-const agentEarly = new Map<string, { agents: AgentId[]; startedAt: number | null }>();
+const agentEarly = new Map<
+  string,
+  { agents: AgentId[]; startedAt: number | null; cwd: string | null }
+>();
 const agentStateEarly = new Map<string, AgentState>();
 
 let listening: Promise<void> | null = null;
@@ -49,8 +58,9 @@ function ensureListening(): Promise<void> {
     listen<AgentPayload>("terminal-agent", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
       const startedAt = payload.startedAt ?? null;
-      if (handler) handler.onAgent(payload.agents, startedAt);
-      else agentEarly.set(payload.terminalId, { agents: payload.agents, startedAt });
+      const cwd = payload.cwd ?? null;
+      if (handler) handler.onAgent(payload.agents, startedAt, cwd);
+      else agentEarly.set(payload.terminalId, { agents: payload.agents, startedAt, cwd });
     }),
     listen<AgentStatePayload>("terminal-agent-state", ({ payload }) => {
       const handler = handlers.get(payload.terminalId);
@@ -115,7 +125,7 @@ export function attachTerminal(terminalId: string, h: TerminalHandlers): () => v
   for (const chunk of pending.get(terminalId) ?? []) h.onOutput(chunk);
   pending.delete(terminalId);
   const agentInfo = agentEarly.get(terminalId);
-  if (agentInfo) h.onAgent(agentInfo.agents, agentInfo.startedAt);
+  if (agentInfo) h.onAgent(agentInfo.agents, agentInfo.startedAt, agentInfo.cwd);
   agentEarly.delete(terminalId);
   const agentState = agentStateEarly.get(terminalId);
   if (agentState) h.onAgentState?.(agentState);

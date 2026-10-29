@@ -115,7 +115,7 @@ export function CwdSwitcher({ cwd, disabledReason, onNavigate }: Props) {
           onClick={() => void copyPath()}
         >
           {copied ? <Check /> : <VscCopy />}
-          <span className="cwd-item-path">{copied ? "Copied!" : "Copy path"}</span>
+          <span className="cwd-item-label">{copied ? "Copied!" : "Copy path"}</span>
         </button>
 
         {/* Hacia adelante: subcarpetas del directorio actual. */}

@@ -24,23 +24,30 @@
   flex: 1;
   align-items: center;
   min-width: 0;
+  gap: 2px;
 }
 
 .thread-heading .thread-label {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .thread-state {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex: 0 100 auto;
+  flex: 0 0 auto;
+  max-width: calc(100% - 32px);
   min-width: 0;
-  color: var(--text-faint);
+  font-size: 11px;
 }
 
 .thread-state-sep {
   white-space: pre;
+  color: var(--text-faint);
 }
 
 .thread-state-label {
@@ -53,8 +60,19 @@
   flex: none;
 }
 
-.thread-state--working {
+/* Estado Idle: visible y distinguible con texto muted e icono gray */
+.thread-state--idle {
   color: var(--text-muted);
+}
+
+.thread-state--idle svg {
+  color: var(--gray);
+}
+
+/* Estado Working: destacado con texto claro y pulso activo de acento */
+.thread-state--working {
+  color: var(--text);
+  font-weight: 500;
 }
 
 .thread-state--working svg {
@@ -62,16 +80,32 @@
   animation: thread-meta-pulse 1.4s ease-in-out infinite;
 }
 
-/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento. */
-.thread-state--attention,
+/* Pide que se mire la terminal o que se apruebe algo: resalta con el acento / advertencia. */
+.thread-state--attention {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.thread-state--attention svg {
+  color: var(--amber);
+}
+
 .thread-state--approval {
   color: var(--accent-soft);
   font-weight: 600;
 }
 
+.thread-state--approval svg {
+  color: var(--accent-soft);
+}
+
 .thread-state--error {
   color: var(--red);
   font-weight: 600;
+}
+
+.thread-state--error svg {
+  color: var(--red);
 }
 
 /* Herramienta en curso (`Bash: echo hi`) o detalle del error: una línea, recortada. */

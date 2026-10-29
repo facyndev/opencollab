@@ -3,6 +3,7 @@
 //! catálogo de agentes conocidos es solo un detalle de presentación.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Agentes que la app sabe reconocer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,6 +80,8 @@ pub struct ProcessInfo {
     pub args: Vec<String>,
     /// Instante de arranque, en segundos desde la época Unix (`None` si no se conoce).
     pub started_at: Option<u64>,
+    /// Directorio de trabajo actual del proceso (`None` si el SO no lo expone).
+    pub cwd: Option<PathBuf>,
 }
 
 const SCRIPT_RUNTIMES: [&str; 3] = ["node", "bun", "deno"];
@@ -129,6 +132,9 @@ pub struct AgentTree {
     /// Agentes conocidos por debajo del principal, del más cercano al shell al
     /// más profundo, sin repetir.
     pub nested: Vec<KnownAgent>,
+    /// Directorio de trabajo activo del agente o de su subproceso/subagente más
+    /// profundo (p. ej. cuando trabaja dentro de un git worktree).
+    pub active_cwd: Option<PathBuf>,
 }
 
 /// Busca los agentes conocidos entre los descendientes de `root` (la shell de la
@@ -157,6 +163,8 @@ pub fn detect_agents_within(processes: &[ProcessInfo], root: u32, stop_at: &[Str
     // Acumula en orden de anchura (menor profundidad primero) y sin repetir.
     let mut found: Vec<KnownAgent> = Vec::new();
     let mut primary_started_at = None;
+    let mut primary_cwd: Option<PathBuf> = None;
+    let mut active_cwd: Option<PathBuf> = None;
     let mut level = vec![root];
     let mut visited = std::collections::HashSet::from([root]);
     while !level.is_empty() {
@@ -171,8 +179,17 @@ pub fn detect_agents_within(processes: &[ProcessInfo], root: u32, stop_at: &[Str
                     if !found.contains(&agent) {
                         if found.is_empty() {
                             primary_started_at = child.started_at;
+                            primary_cwd = child.cwd.clone();
+                            active_cwd = child.cwd.clone();
                         }
                         found.push(agent);
+                    }
+                }
+                if !found.is_empty() {
+                    if let Some(cwd) = &child.cwd {
+                        if primary_cwd.as_ref() != Some(cwd) || active_cwd.is_none() {
+                            active_cwd = Some(cwd.clone());
+                        }
                     }
                 }
                 // Aunque sea un agente, sigue bajando: puede tener otros debajo.
@@ -189,6 +206,7 @@ pub fn detect_agents_within(processes: &[ProcessInfo], root: u32, stop_at: &[Str
         primary: found.next(),
         primary_started_at,
         nested: found.collect(),
+        active_cwd,
     }
 }
 
@@ -220,7 +238,13 @@ mod tests {
             name: name.into(),
             args: args.iter().map(|a| a.to_string()).collect(),
             started_at: None,
+            cwd: None,
         }
+    }
+
+    fn with_cwd(mut process: ProcessInfo, path: &str) -> ProcessInfo {
+        process.cwd = Some(PathBuf::from(path));
+        process
     }
 
     fn started(mut process: ProcessInfo, at: u64) -> ProcessInfo {
@@ -328,6 +352,7 @@ mod tests {
                 primary: Some(KnownAgent::ClaudeCode),
                 primary_started_at: None,
                 nested: vec![KnownAgent::Codex],
+                active_cwd: None,
             }
         );
     }
@@ -353,6 +378,7 @@ mod tests {
                     KnownAgent::OpenCode,
                     KnownAgent::AntigravityCli,
                 ],
+                active_cwd: None,
             }
         );
     }
@@ -372,6 +398,7 @@ mod tests {
                 primary: Some(KnownAgent::ClaudeCode),
                 primary_started_at: None,
                 nested: vec![KnownAgent::Codex],
+                active_cwd: None,
             }
         );
     }
@@ -480,5 +507,33 @@ mod tests {
             detect_agents(&list, SHELL)
         );
         assert_eq!(detect_agents(&list, SHELL).nested, vec![KnownAgent::Codex]);
+    }
+
+    #[test]
+    fn reports_active_cwd_of_primary_agent_and_prefers_subagent_worktree_cwd() {
+        let primary_only = vec![
+            with_cwd(proc(SHELL, 1, "powershell.exe", &[]), "/repo"),
+            with_cwd(proc(200, SHELL, "claude.exe", &[]), "/repo"),
+        ];
+        assert_eq!(
+            detect_agents(&primary_only, SHELL).active_cwd,
+            Some(PathBuf::from("/repo"))
+        );
+
+        // Cuando un subagente o proceso hijo trabaja en un git worktree, su CWD
+        // prevalece sobre el CWD raíz del agente principal o de otros helpers.
+        let with_worktree = vec![
+            with_cwd(proc(SHELL, 1, "powershell.exe", &[]), "/repo"),
+            with_cwd(proc(200, SHELL, "claude.exe", &[]), "/repo"),
+            with_cwd(
+                proc(300, 200, "codex.exe", &[]),
+                "/repo-worktrees/feature-a",
+            ),
+            with_cwd(proc(301, 200, "node.exe", &["mcp-server.js"]), "/repo"),
+        ];
+        assert_eq!(
+            detect_agents(&with_worktree, SHELL).active_cwd,
+            Some(PathBuf::from("/repo-worktrees/feature-a"))
+        );
     }
 }
